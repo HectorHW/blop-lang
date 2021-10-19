@@ -1,14 +1,13 @@
 use crate::parsing::ast::{Expr, Op, Stmt};
 use crate::parsing::lexer::TokenKind;
 
-
 pub fn print_as_sexp(s: &Stmt) -> String {
     visit_stmt(s)
 }
 
 fn visit_stmt(s: &Stmt) -> String {
     match s {
-        Stmt::PrintStmt(e) => {
+        Stmt::Print(e) => {
             format!("(print {})", visit_expr(e))
         }
         Stmt::VarDeclaration(name, expr) => {
@@ -19,6 +18,9 @@ fn visit_stmt(s: &Stmt) -> String {
                     .map(|e| { visit_expr(e) })
                     .unwrap_or_else(|| "nil".to_string())
             )
+        }
+        Stmt::Assignment(target, expr) => {
+            format!("(= {} {})", target.get_string().unwrap(), visit_expr(expr))
         }
     }
 }

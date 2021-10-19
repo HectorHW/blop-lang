@@ -1,4 +1,4 @@
 var a = 2
 var b = a*8
-var c = 16
-print b+c
+a = 16
+print a+b
