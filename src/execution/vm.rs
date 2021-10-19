@@ -111,6 +111,19 @@ impl VM {
                     self.stack.push(value);
                     ip += 1;
                 }
+                Opcode::Store(idx) => {
+                    let value = self.stack.pop().ok_or(InterpretError {
+                        opcode_index: ip,
+                        kind: InterpretErrorKind::StackUnderflow,
+                    })?;
+
+                    let addr = self.stack.get_mut(idx as usize).ok_or(InterpretError {
+                        opcode_index: ip,
+                        kind: InterpretErrorKind::OperandIndexing,
+                    })?;
+                    *addr = value;
+                    ip += 1;
+                }
             }
         }
 

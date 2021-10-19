@@ -24,7 +24,7 @@ impl Compiler {
 
     fn visit_stmt(&mut self, current_chunk: &mut Chunk, stmt: &Stmt) -> Result<(), String> {
         match stmt {
-            Stmt::PrintStmt(e) => {
+            Stmt::Print(e) => {
                 self.visit_expr(current_chunk, e)?;
                 *current_chunk += Opcode::Print;
             }
@@ -44,6 +44,16 @@ impl Compiler {
                 } else {
                     self.visit_expr(current_chunk, e.as_ref().unwrap())?;
                 }
+            }
+            Stmt::Assignment(target, expr) => {
+                let varname = target.get_string().unwrap();
+                let var_idx = *self.names.get(varname).ok_or(format!(
+                    "assignment to undefined variable {} at {}",
+                    varname, target.position
+                ))?;
+                self.visit_expr(current_chunk, expr)?;
+
+                *current_chunk += Opcode::Store(var_idx as u16); //TODO extension
             }
         }
         Ok(())
@@ -71,9 +81,10 @@ impl Compiler {
                     Op::Sub => Opcode::Sub,
                 }
             }
+
             Expr::Name(n) => match self.names.get(n.get_string().unwrap()) {
                 Some(var_idx) => *current_chunk += Opcode::Load(*var_idx as u16), //TODO extension
-                None => Err(format!("undeclared variable {}", n.get_string().unwrap()))?,
+                None => return Err(format!("undeclared variable {}", n.get_string().unwrap())),
             },
         }
         Ok(())

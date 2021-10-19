@@ -54,10 +54,24 @@ LocatedToken<T>: Token = {
 }
 
 Stmt: Stmt = {
-    Print <Expr> => Stmt::PrintStmt(<>),
+    PrintStmt,
+    VarDeclarationStmt,
+    AssignmentStmt
+
+}
+
+AssignmentStmt: Stmt = {
+    <n:LocatedToken<Name>> "=" <e:Expr> => Stmt::Assignment(n, e)
+}
+
+VarDeclarationStmt: Stmt = {
     Var <n:LocatedToken<Name>> <e:("=" <Expr>)?> => {
         Stmt::VarDeclaration(n, e)
- }
+    }
+}
+
+PrintStmt: Stmt = {
+    Print <Expr> => Stmt::Print(<>)
 }
 
 Tier<Op,NextTier>: Box<Expr> = {
