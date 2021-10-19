@@ -42,6 +42,15 @@ impl VM {
             }};
         }
 
+        macro_rules! runtime_error {
+            ($e:expr) => {
+                InterpretError {
+                    opcode_index: ip,
+                    kind: $e,
+                }
+            };
+        }
+
         while ip < program.code.len() {
             match program.code[ip] {
                 Opcode::Print => {
@@ -55,10 +64,7 @@ impl VM {
                     let value = *program
                         .constants
                         .get(arg_1_register)
-                        .ok_or(InterpretError {
-                            opcode_index: ip,
-                            kind: OperandIndexing,
-                        })?;
+                        .ok_or(runtime_error!(OperandIndexing))?;
                     self.stack.push(value);
                     ip += 1;
                 }
@@ -92,35 +98,28 @@ impl VM {
                     let second_operand = checked_stack_pop!()? as i64;
                     let first_operand = checked_stack_pop!()? as i64;
 
-                    let value =
-                        first_operand
-                            .checked_div(second_operand)
-                            .ok_or(InterpretError {
-                                opcode_index: ip,
-                                kind: ZeroDivision,
-                            })?;
+                    let value = first_operand
+                        .checked_div(second_operand)
+                        .ok_or(runtime_error!(ZeroDivision))?;
                     self.stack.push(value);
                     ip += 1;
                 }
                 Opcode::Load(idx) => {
-                    let value = *self.stack.get(idx as usize).ok_or(InterpretError {
-                        opcode_index: ip,
-                        kind: InterpretErrorKind::OperandIndexing,
-                    })?;
+                    let value = *self
+                        .stack
+                        .get(idx as usize)
+                        .ok_or(runtime_error!(OperandIndexing))?;
 
                     self.stack.push(value);
                     ip += 1;
                 }
                 Opcode::Store(idx) => {
-                    let value = self.stack.pop().ok_or(InterpretError {
-                        opcode_index: ip,
-                        kind: InterpretErrorKind::StackUnderflow,
-                    })?;
+                    let value = self.stack.pop().ok_or(runtime_error!(StackUnderflow))?;
 
-                    let addr = self.stack.get_mut(idx as usize).ok_or(InterpretError {
-                        opcode_index: ip,
-                        kind: InterpretErrorKind::OperandIndexing,
-                    })?;
+                    let addr = self
+                        .stack
+                        .get_mut(idx as usize)
+                        .ok_or(runtime_error!(OperandIndexing))?;
                     *addr = value;
                     ip += 1;
                 }
