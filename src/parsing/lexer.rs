@@ -97,7 +97,7 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
 
     while let Some((character_idx, character)) = input_iterator.peek() {
         let character = *character;
-        let character_idx = *character_idx;
+        let mut character_idx = *character_idx;
         if is_reading_indentation {
             current_indentation = 0;
 
@@ -113,7 +113,10 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                         current_indentation = 0;
                         input_iterator.next();
                     }
-                    _ => break,
+                    _ => {
+                        character_idx = *idx;
+                        break;
+                    }
                 }
             }
 
