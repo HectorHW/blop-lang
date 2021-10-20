@@ -79,16 +79,17 @@ impl Compiler {
             .last_mut()
             .unwrap()
             .insert(variable_name.to_string(), var_index);
-        return Some(var_index);
+        Some(var_index)
     }
 
     fn new_scope(&mut self) {
         self.names.push(HashMap::new());
-        self.names
-            .last_mut()
-            .unwrap()
-            .insert("_".to_string(), self.total_variables);
-        self.total_variables += 1;
+        /*self.names
+        .last_mut()
+        .unwrap()
+        .insert("_".to_string(), self.total_variables);*/
+        self.new_variable_slot("_");
+        //self.total_variables += 1;
     }
 
     fn pop_scope(&mut self) -> usize {
@@ -96,7 +97,7 @@ impl Compiler {
         let items_in_scope = scope.len();
         drop(scope);
         self.total_variables -= items_in_scope;
-        return items_in_scope;
+        items_in_scope
     }
 
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<Vec<Opcode>, String> {
@@ -115,11 +116,6 @@ impl Compiler {
             }
 
             Stmt::VarDeclaration(n, e) => {
-                let varname = n.get_string().unwrap();
-                let _ = self
-                    .new_variable_slot(varname)
-                    .ok_or(format!("redefinition of variable {}", varname))?;
-
                 if e.is_none() {
                     result.push(Opcode::LoadImmediateInt(0));
                 } else {
@@ -127,6 +123,11 @@ impl Compiler {
                     let mut assignment_body = self.visit_expr(e.as_ref().unwrap())?;
                     self.pop_requirement();
                     result.append(&mut assignment_body);
+
+                    let varname = n.get_string().unwrap();
+                    let _ = self
+                        .new_variable_slot(varname)
+                        .ok_or(format!("redefinition of variable {}", varname))?;
                 }
 
                 if self.needs_value() {
