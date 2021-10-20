@@ -13,7 +13,7 @@ pub enum Expr {
     Number(i64),
     Name(Token),
     Binary(Op, Box<Expr>, Box<Expr>),
-    IfExpr(Box<Expr>, Vec<Stmt>),
+    IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Block(Vec<Stmt>),
 }
 

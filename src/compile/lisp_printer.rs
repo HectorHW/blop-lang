@@ -71,7 +71,17 @@ fn visit_expr(e: &Expr) -> String {
             TokenKind::Name(n) => n.clone(),
             _ => panic!(),
         },
-        Expr::IfExpr(cond, body) => format!("(if {} {} 0)", visit_expr(cond), visit_block(body)),
+        Expr::IfExpr(cond, then_body, else_body) => {
+            format!(
+                "(if {} {} {})",
+                visit_expr(cond),
+                visit_expr(then_body),
+                else_body
+                    .as_ref()
+                    .map(|x| visit_expr(x.as_ref()))
+                    .unwrap_or("0".to_string())
+            )
+        }
         Expr::Block(b) => visit_block(b),
     }
 }

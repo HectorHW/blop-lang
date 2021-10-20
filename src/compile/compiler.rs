@@ -208,18 +208,23 @@ impl Compiler {
                 None => return Err(format!("undeclared variable {}", n.get_string().unwrap())),
             },
 
-            Expr::IfExpr(cond, body) => {
+            Expr::IfExpr(cond, then_body, else_body) => {
                 self.require_value();
                 let mut condition = self.visit_expr(cond)?;
                 self.pop_requirement();
 
-                let mut then_body = self.visit_block(body)?;
+                let mut then_body = self.visit_expr(then_body)?;
 
-                let mut else_body = if self.needs_value() {
-                    vec![Opcode::LoadImmediateInt(0)]
-                } else {
-                    vec![Opcode::Nop]
-                };
+                let mut else_body = else_body
+                    .as_ref()
+                    .map(|x| self.visit_expr(x.as_ref()))
+                    .unwrap_or_else(|| {
+                        Ok(if self.needs_value() {
+                            vec![Opcode::LoadImmediateInt(0)]
+                        } else {
+                            vec![Opcode::Nop]
+                        })
+                    })?;
 
                 result.append(&mut condition);
 

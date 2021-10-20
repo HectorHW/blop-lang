@@ -41,6 +41,7 @@ pub enum TokenKind {
     Print,
     Var,
     If,
+    Else,
 }
 
 impl Display for TokenKind {
@@ -65,6 +66,9 @@ impl Display for TokenKind {
                 TokenKind::Equals => "(=)".to_string(),
                 TokenKind::TestEquals => "(?=)".to_string(),
                 TokenKind::If => "(if)".to_string(),
+                TokenKind::Else => {
+                    "(else)".to_string()
+                }
             }
         )
     }
@@ -79,7 +83,7 @@ impl Token {
     }
 }
 
-pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
+pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     use TokenKind::*;
     let mut result = Vec::new();
     let mut indentation = vec![0];
@@ -252,6 +256,7 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                     "print" => token!(Print),
                     "var" => token!(Var),
                     "if" => token!(If),
+                    "else" => token!(Else),
 
                     _ => token!(Name(name)),
                 })
@@ -312,14 +317,7 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
         indentation.pop();
     }
 
-    Ok(result
-        .into_iter()
-        .map(|x| {
-            let position = x.position;
-            let kind = x.kind;
-            (position, kind, position)
-        })
-        .collect())
+    Ok(result)
 }
 
 fn get_index(current_pos: usize, line_number: usize, line_start: usize) -> Index {
