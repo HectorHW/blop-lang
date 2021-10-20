@@ -44,14 +44,8 @@ fn main() {
 
     let program = chunks.first().unwrap();
 
-    for opcode in &program.code {
-        println!("{}", opcode);
-    }
+    println!("{}", program);
 
-    println!("constants:");
-    for constant in &program.constants {
-        println!("constant {}", constant);
-    }
     println!("running");
     let mut vm = VM::new();
     vm.run(&program).unwrap_or_else(|error| {
