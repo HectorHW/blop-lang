@@ -27,8 +27,9 @@ extern {
         Num => TokenKind::Number(..),
         Name => TokenKind::Name(..),
 
-        Print => TokenKind::Print,
-        Var => TokenKind::Var,
+        "print" => TokenKind::Print,
+        "var" => TokenKind::Var,
+        "if" => TokenKind::If,
     }
 }
 
@@ -58,22 +59,32 @@ LocatedToken<T>: Token = {
 Stmt: Stmt = {
     PrintStmt,
     VarDeclarationStmt,
-    AssignmentStmt
+    AssignmentStmt,
+    ExprStmt,
 
 }
 
 AssignmentStmt: Stmt = {
-    <n:LocatedToken<Name>> "=" <e:Expr> => Stmt::Assignment(n, e)
+    <n:LocatedToken<Name>> "=" <e:Expr> => Stmt::Assignment(n, e),
+    <n:LocatedToken<Name>> "=" EOL <b:BlockExpr> => Stmt::Assignment(n, b)
 }
 
 VarDeclarationStmt: Stmt = {
-    Var <n:LocatedToken<Name>> <e:("=" <Expr>)?> => {
+    "var" <n:LocatedToken<Name>> <e:("=" <Expr>)?> => {
         Stmt::VarDeclaration(n, e)
     }
 }
 
 PrintStmt: Stmt = {
-    Print <Expr> => Stmt::Print(<>)
+    "print" <Expr> => Stmt::Print(<>)
+}
+
+ExprStmt: Stmt = {
+    <Expr> => Stmt::Expression(<>)
+}
+
+BlockExpr: Box<Expr> = {
+    <b:Block> => Box::new(Expr::Block(b))
 }
 
 Tier<Op,NextTier>: Box<Expr> = {
@@ -83,7 +94,12 @@ Tier<Op,NextTier>: Box<Expr> = {
 
 
 Expr: Box<Expr> = {
-    Equality
+    Equality,
+    IfExpr
+}
+
+IfExpr: Box<Expr> = {
+    "if" <cond:Equality> EOL <then:Block> => Box::new(Expr::IfExpr(cond, then))
 }
 
 Equality = Tier<EqualityOp, Addition>;

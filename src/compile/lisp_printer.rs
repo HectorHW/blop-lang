@@ -22,7 +22,18 @@ fn visit_stmt(s: &Stmt) -> String {
         Stmt::Assignment(target, expr) => {
             format!("(= {} {})", target.get_string().unwrap(), visit_expr(expr))
         }
+        Stmt::Expression(e) => {
+            format!("({}, pop)", visit_expr(e))
+        }
     }
+}
+
+fn visit_block(block: &[Stmt]) -> String {
+    let mut res = String::new();
+    for item in block {
+        res.push_str(&visit_stmt(item));
+    }
+    res
 }
 
 fn visit_expr(e: &Expr) -> String {
@@ -60,5 +71,7 @@ fn visit_expr(e: &Expr) -> String {
             TokenKind::Name(n) => n.clone(),
             _ => panic!(),
         },
+        Expr::IfExpr(cond, body) => format!("(if {} {} 0)", visit_expr(cond), visit_block(body)),
+        Expr::Block(b) => visit_block(b),
     }
 }

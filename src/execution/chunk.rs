@@ -21,9 +21,15 @@ pub enum Opcode {
     Mul,
 
     TestEquals,
-    //SwapStack(u8, u8),
-    //ExtendArg1(u16),
-    //ExtendDouble(u8, u8)
+
+    JumpIfFalse(u16),
+    Jump(u16),
+
+    Pop(u16),
+
+    Nop, //SwapStack(u8, u8),
+         //ExtendArg1(u16),
+         //ExtendDouble(u8, u8)
 }
 
 impl Display for Opcode {
@@ -45,6 +51,10 @@ impl Display for Opcode {
                 //Opcode::ExtendArg1(e) => format!("Extend[{}]", e),
                 //Opcode::ExtendDouble(a, b) => format!("Extend[{}, {}]", a, b)
                 TestEquals => "TestEquals".to_string(),
+                JumpIfFalse(delta) => format!("JumpIfFalse[{}]", delta),
+                Jump(delta) => format!("Jump[{}]", delta),
+                Pop(n) => format!("Pop[{}]", n),
+                Nop => "Nop".to_string(),
             }
         )
     }
@@ -56,6 +66,11 @@ impl Chunk {
             constants: Vec::new(),
             code: Vec::new(),
         }
+    }
+
+    pub fn append(&mut self, values: Vec<Opcode>) {
+        let mut values = values;
+        self.code.append(&mut values)
     }
 }
 
