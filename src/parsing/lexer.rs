@@ -102,11 +102,13 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                 match symbol {
                     ' ' => {
                         current_identation += 1;
+                        input_iterator.next();
                     }
                     '\n' => {
                         line_start = idx + 1;
                         line_number += 1;
                         current_identation = 0;
+                        input_iterator.next();
                     }
                     _ => break,
                 }
