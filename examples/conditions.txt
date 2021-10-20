@@ -1,6 +1,12 @@
-var a = 2
-a =
-    if 2?=3
-        3
-    else 4
-print a
+if 2?= 4
+    var a = 2
+    a =
+        if 2?=3
+            3
+        else 4
+    print a
+else
+    var b = 5
+    print b
+
+

@@ -120,11 +120,13 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                         input_iterator.next();
                     }
                     _ => {
-                        character_idx = *idx;
                         break;
                     }
                 }
             }
+
+            character_idx = input_iterator.peek().unwrap_or(&(input.len(), '\0')).0;
+
             let previous_indentation_level = *indentation.last().unwrap_or(&0);
             match previous_indentation_level.cmp(&current_indentation) {
                 Ordering::Less => {
