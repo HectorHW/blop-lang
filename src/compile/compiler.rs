@@ -103,7 +103,9 @@ impl Compiler {
         let mut result = vec![];
         match stmt {
             Stmt::Print(e) => {
+                self.require_value();
                 let mut compiled_expression = self.visit_expr(e)?;
+                self.pop_requirement();
                 result.append(&mut compiled_expression);
                 result.push(Opcode::Print);
 
