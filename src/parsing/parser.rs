@@ -1,5 +1,5 @@
 use crate::parsing::ast::{Expr, Op, Stmt};
-use crate::parsing::lexer::{self, Index, Token, TokenKind};
+use crate::parsing::lexer::{Token, TokenKind};
 
 macro_rules! t {
     ($e:pat) => {
@@ -14,7 +14,7 @@ peg::parser! {
             = block()
 
         rule block() -> Vec<Stmt> =
-            [t!(BeginBlock)] s:stmt() ** [t!(LineEnd)] [t!(EndBlock)] {s}
+            [t!(BeginBlock)] s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [t!(EndBlock)] {s}
 
 
         rule stmt() -> Stmt =

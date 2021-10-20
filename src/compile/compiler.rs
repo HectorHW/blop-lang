@@ -66,7 +66,7 @@ impl Compiler {
                 return Some(*scope.get(name).unwrap());
             }
         }
-        return None;
+        None
     }
 
     fn new_variable_slot(&mut self, variable_name: &str) -> Option<usize> {

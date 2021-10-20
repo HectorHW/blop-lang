@@ -39,30 +39,8 @@ fn main() {
             println!("{:?}", tokens[location]);
             return;
         }
-        any_other => {
-            println!("{:?}", any_other);
-            return;
-        }
     };
 
-    /*match parse_res {
-        Ok(tree) => {
-            println!("{:?}", tree);
-        }
-        Err(ParseError { location: x, .. }) => {
-            println!("{:?}", parse_res);
-            println!("{:?}", indexed_tokens[x]);
-        }
-        any_other => {
-            println!("{:?}", any_other)
-        }
-    }*/
-
-    /*
-    let parser = parsing::parser::ProgramParser::new();
-
-    let statements = parser.parse(indexed_tokens).unwrap();
-    */
     for stmt in &statements {
         println!("{}", compile::lisp_printer::print_as_sexp(stmt));
     }

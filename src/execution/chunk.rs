@@ -105,7 +105,7 @@ mod chunk_pretty_printer {
         let mut res = vec![];
         for (i, opcode) in chunk.code.iter().enumerate() {
             let mut s = String::new();
-            write!(
+            let _ = write!(
                 s,
                 "{:<5} {}",
                 i,
