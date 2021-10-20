@@ -123,6 +123,17 @@ impl VM {
                     *addr = value;
                     ip += 1;
                 }
+                Opcode::TestEquals => {
+                    let second_operand = checked_stack_pop!()? as i64;
+                    let first_operand = checked_stack_pop!()? as i64;
+                    let value = if second_operand == first_operand {
+                        1
+                    } else {
+                        0
+                    };
+                    self.stack.push(value);
+                    ip += 1;
+                }
             }
         }
 

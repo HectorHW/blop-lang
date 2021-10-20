@@ -18,9 +18,12 @@ pub enum Opcode {
     Add,
     Sub,
     Div,
-    Mul, //SwapStack(u8, u8),
-         //ExtendArg1(u16),
-         //ExtendDouble(u8, u8)
+    Mul,
+
+    TestEquals,
+    //SwapStack(u8, u8),
+    //ExtendArg1(u16),
+    //ExtendDouble(u8, u8)
 }
 
 impl Display for Opcode {
@@ -39,8 +42,9 @@ impl Display for Opcode {
                 Sub => "Sub".to_string(),
                 Div => "Div".to_string(),
                 Mul => "Mul".to_string(), //Opcode::SwapStack(a, b) => format!("SwapStack[{}, {}]", a, b),
-                                          //Opcode::ExtendArg1(e) => format!("Extend[{}]", e),
-                                          //Opcode::ExtendDouble(a, b) => format!("Extend[{}, {}]", a, b)
+                //Opcode::ExtendArg1(e) => format!("Extend[{}]", e),
+                //Opcode::ExtendDouble(a, b) => format!("Extend[{}, {}]", a, b)
+                TestEquals => "TestEquals".to_string(),
             }
         )
     }

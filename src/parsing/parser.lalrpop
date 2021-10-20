@@ -20,6 +20,8 @@ extern {
         "*" => TokenKind::Star,
         "/" => TokenKind::Slash,
 
+        "?=" => TokenKind::TestEquals,
+
         "=" => TokenKind::Equals,
 
         Num => TokenKind::Number(..),
@@ -81,11 +83,17 @@ Tier<Op,NextTier>: Box<Expr> = {
 
 
 Expr: Box<Expr> = {
-    Addition
+    Equality
 }
+
+Equality = Tier<EqualityOp, Addition>;
 
 Addition = Tier<AdditionOp, Factor>;
 Factor = Tier<FactorOp, Term>;
+
+EqualityOp: Op = {
+    "?=" => Op::TestEquals
+}
 
 AdditionOp: Op = {
     "+" => Op::Add,
