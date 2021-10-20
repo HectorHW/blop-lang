@@ -40,6 +40,7 @@ pub enum TokenKind {
 
     Print,
     Var,
+    If,
 }
 
 impl Display for TokenKind {
@@ -63,6 +64,7 @@ impl Display for TokenKind {
                 TokenKind::Var => "(VAR)".to_string(),
                 TokenKind::Equals => "(=)".to_string(),
                 TokenKind::TestEquals => "(?=)".to_string(),
+                TokenKind::If => "(if)".to_string(),
             }
         )
     }
@@ -119,7 +121,6 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                     }
                 }
             }
-
             let previous_indentation_level = *indentation.last().unwrap_or(&0);
             match previous_indentation_level.cmp(&current_indentation) {
                 Ordering::Less => {
@@ -146,11 +147,26 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                                 break;
                             }
                             Ordering::Greater => {
+                                //panic here
                                 indentation.pop();
-                                result.push(Token {
-                                    position: get_index(character_idx, line_number, line_start),
-                                    kind: EndBlock,
-                                });
+
+                                let last = result.pop().unwrap();
+                                if mem::discriminant(&last.kind)
+                                    == mem::discriminant(&TokenKind::LineEnd)
+                                {
+                                    //never put block end on top of newline
+                                    result.push(Token {
+                                        position: get_index(character_idx, line_number, line_start),
+                                        kind: EndBlock,
+                                    });
+                                    result.push(last);
+                                } else {
+                                    result.push(last);
+                                    result.push(Token {
+                                        position: get_index(character_idx, line_number, line_start),
+                                        kind: EndBlock,
+                                    });
+                                }
                             }
                         }
                     }
@@ -235,6 +251,8 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                 result.push(match name.as_str() {
                     "print" => token!(Print),
                     "var" => token!(Var),
+                    "if" => token!(If),
+
                     _ => token!(Name(name)),
                 })
             }

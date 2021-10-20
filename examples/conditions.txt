@@ -1,0 +1,6 @@
+var a = 2
+a =
+    if 2?=2
+        3
+
+print a

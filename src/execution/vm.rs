@@ -10,8 +10,8 @@ type Result<T> = std::result::Result<T, InterpretError>;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct InterpretError {
-    opcode_index: usize,
-    pub(crate) kind: InterpretErrorKind,
+    pub opcode_index: usize,
+    pub kind: InterpretErrorKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,7 +51,10 @@ impl VM {
             };
         }
 
-        while ip < program.code.len() {
+        let code_bounds = program.code.len();
+
+        while ip < code_bounds {
+            print!("{} => ", program.code[ip]);
             match program.code[ip] {
                 Opcode::Print => {
                     let result = checked_stack_pop!()?;
@@ -134,7 +137,38 @@ impl VM {
                     self.stack.push(value);
                     ip += 1;
                 }
+                Opcode::JumpIfFalse(delta) => {
+                    let value_to_test = checked_stack_pop!()? as i64;
+                    if value_to_test == 0 {
+                        let new_ip = ip + delta as usize;
+                        if new_ip >= code_bounds {
+                            return Err(runtime_error!(JumpBounds));
+                        }
+                        ip = new_ip;
+                    } else {
+                        ip += 1;
+                    }
+                }
+                Opcode::Jump(delta) => {
+                    let new_ip = ip + delta as usize;
+                    if new_ip >= code_bounds {
+                        return Err(runtime_error!(JumpBounds));
+                    }
+                    ip = new_ip;
+                }
+                Opcode::Pop(n) => {
+                    if self.stack.len() < n as usize {
+                        return Err(runtime_error!(StackUnderflow));
+                    }
+                    let new_stack_size = self.stack.len() - n as usize;
+                    self.stack.truncate(new_stack_size);
+                    ip += 1;
+                }
+                Opcode::Nop => {
+                    ip += 1;
+                }
             }
+            println!("{:?}", self.stack);
         }
 
         Ok(())

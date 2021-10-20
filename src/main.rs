@@ -40,8 +40,9 @@ fn main() {
         println!("{}", compile::lisp_printer::print_as_sexp(stmt));
     }
 
-    let mut compiler = Compiler::new();
-    let program = compiler.compile(&statements).unwrap();
+    let chunks = Compiler::compile(&statements).unwrap();
+
+    let program = chunks.first().unwrap();
 
     for opcode in &program.code {
         println!("{}", opcode);
@@ -55,5 +56,6 @@ fn main() {
     let mut vm = VM::new();
     vm.run(&program).unwrap_or_else(|error| {
         println!("{:?}", error);
+        println!("{}", program.code[error.opcode_index])
     });
 }
