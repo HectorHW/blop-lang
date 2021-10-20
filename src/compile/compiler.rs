@@ -223,14 +223,13 @@ impl Compiler {
 
                 result.append(&mut condition);
 
-                let than_body_size = then_body.len();
-
-                result.push(Opcode::JumpIfFalse((than_body_size + 1) as u16));
-
-                result.append(&mut then_body);
-
+                let then_body_size = then_body.len();
                 let else_body_size = else_body.len();
 
+                result.push(Opcode::JumpIfFalse((then_body_size + 1 + 1) as u16));
+                //instruction AFTER then_body and jump
+
+                result.append(&mut then_body);
                 result.push(Opcode::Jump((else_body_size + 1) as u16));
 
                 result.append(&mut else_body);
