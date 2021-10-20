@@ -30,11 +30,20 @@ fn main() {
         print!("{}", token.kind);
     }
     println!();
-
-    let indexed_tokens = tokens;
     use parsing::parser::program_parser;
 
-    let statements = parsing::parser::program_parser::program(&indexed_tokens).unwrap();
+    let statements = match program_parser::program(&tokens) {
+        Ok(s) => s,
+        Err(ParseError { location, expected }) => {
+            println!("{:?}", ParseError { location, expected });
+            println!("{:?}", tokens[location]);
+            return;
+        }
+        any_other => {
+            println!("{:?}", any_other);
+            return;
+        }
+    };
 
     /*match parse_res {
         Ok(tree) => {
@@ -66,7 +75,7 @@ fn main() {
 
     println!("running");
     let mut vm = VM::new();
-    vm.run(&program).unwrap_or_else(|error| {
+    vm.run(program).unwrap_or_else(|error| {
         println!("{:?}", error);
         println!("{}", program.code[error.opcode_index])
     }); /**/
