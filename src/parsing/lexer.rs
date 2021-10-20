@@ -80,7 +80,7 @@ impl Token {
 pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
     use TokenKind::*;
     let mut result = Vec::new();
-    let mut identation = vec![0];
+    let mut indentation = vec![0];
 
     result.push(Token {
         position: get_index(0, 0, 0),
@@ -89,7 +89,7 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
 
     let mut input_iterator = input.char_indices().peekable();
 
-    let mut current_identation;
+    let mut current_indentation;
     let mut is_reading_indentation = true;
 
     let mut line_number = 0;
@@ -99,28 +99,28 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
         let character = *character;
         let character_idx = *character_idx;
         if is_reading_indentation {
-            current_identation = 0;
+            current_indentation = 0;
 
             while let Some((idx, symbol)) = input_iterator.peek() {
                 match symbol {
                     ' ' => {
-                        current_identation += 1;
+                        current_indentation += 1;
                         input_iterator.next();
                     }
                     '\n' => {
                         line_start = idx + 1;
                         line_number += 1;
-                        current_identation = 0;
+                        current_indentation = 0;
                         input_iterator.next();
                     }
                     _ => break,
                 }
             }
 
-            let previous_identation_level = *identation.last().unwrap_or(&0);
-            match previous_identation_level.cmp(&current_identation) {
+            let previous_indentation_level = *indentation.last().unwrap_or(&0);
+            match previous_indentation_level.cmp(&current_indentation) {
                 Ordering::Less => {
-                    identation.push(current_identation);
+                    indentation.push(current_indentation);
                     result.push(Token {
                         position: get_index(character_idx, line_number, line_start),
                         kind: BeginBlock,
@@ -131,11 +131,11 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                     //do nothing, continue parsing current block
                 }
                 Ordering::Greater => {
-                    while let Some(identation_level) = identation.last() {
-                        match identation_level.cmp(&current_identation) {
+                    while let Some(indentation_level) = indentation.last() {
+                        match indentation_level.cmp(&current_indentation) {
                             Ordering::Less => {
                                 return Err(format!(
-                                    "unconsistent identation level on line {}",
+                                    "unconsistent indentation level on line {}",
                                     line_number + 1
                                 ))
                             }
@@ -143,7 +143,7 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
                                 break;
                             }
                             Ordering::Greater => {
-                                identation.pop();
+                                indentation.pop();
                                 result.push(Token {
                                     position: get_index(character_idx, line_number, line_start),
                                     kind: EndBlock,
@@ -168,7 +168,7 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
 
         match character {
             ' ' => {
-                //this is not identation, skip space
+                //this is not indentation, skip space
                 input_iterator.next();
             }
             '\n' => {
@@ -283,12 +283,12 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
             }
         }
     }
-    while identation.last().is_some() {
+    while indentation.last().is_some() {
         result.push(Token {
             position: get_index(input.len(), line_number, line_start),
             kind: EndBlock,
         });
-        identation.pop();
+        indentation.pop();
     }
 
     Ok(result
