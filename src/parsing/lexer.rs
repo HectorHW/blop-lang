@@ -31,6 +31,8 @@ pub enum TokenKind {
     Star,
     Slash,
 
+    TestEquals,
+
     Equals,
 
     Number(i64),
@@ -60,6 +62,7 @@ impl Display for TokenKind {
                 TokenKind::RParen => "<)>".to_string(),
                 TokenKind::Var => "(VAR)".to_string(),
                 TokenKind::Equals => "(=)".to_string(),
+                TokenKind::TestEquals => "(?=)".to_string(),
             }
         )
     }
@@ -245,6 +248,30 @@ pub fn tokenize(input: &str) -> Result<Vec<(Index, TokenKind, Index)>, String> {
             '=' => {
                 result.push(token!(Equals));
                 input_iterator.next();
+            }
+
+            '?' => {
+                input_iterator.next(); //skip ?
+                match input_iterator.peek() {
+                    Some((_, '=')) => {
+                        result.push(token!(TestEquals));
+                        input_iterator.next();
+                    }
+                    Some((p, c)) => {
+                        return Err(format!(
+                            "unexpected character {} at {}",
+                            c,
+                            get_index(*p, line_number, line_start)
+                        ));
+                    }
+
+                    None => {
+                        return Err(format!(
+                            "unexpected end at {}",
+                            get_index(character_idx, line_number, line_start)
+                        ));
+                    }
+                }
             }
 
             any_other => {

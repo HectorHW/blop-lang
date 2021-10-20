@@ -48,6 +48,9 @@ fn visit_expr(e: &Expr) -> String {
                     Op::Sub => {
                         "-"
                     }
+                    Op::TestEquals => {
+                        "?="
+                    }
                 },
                 s1,
                 s2

@@ -79,6 +79,7 @@ impl Compiler {
                     Op::Div => Opcode::Div,
                     Op::Add => Opcode::Add,
                     Op::Sub => Opcode::Sub,
+                    Op::TestEquals => Opcode::TestEquals,
                 }
             }
 

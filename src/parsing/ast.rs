@@ -20,6 +20,8 @@ pub enum Op {
     Div,
     Add,
     Sub,
+
+    TestEquals,
 }
 
 pub type Program = Vec<Stmt>;
