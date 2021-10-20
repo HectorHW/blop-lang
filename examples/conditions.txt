@@ -1,6 +1,6 @@
 var a = 2
 a =
-    if 2?=2
+    if 2?=3
         3
-
+    else 4
 print a
