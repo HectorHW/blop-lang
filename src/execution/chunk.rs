@@ -79,3 +79,48 @@ impl AddAssign<Opcode> for Chunk {
         self.code.push(rhs)
     }
 }
+
+impl Display for Chunk {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for (i, opcode) in self.code.iter().enumerate() {
+            writeln!(
+                f,
+                "{:<5} {}",
+                i,
+                match opcode {
+                    Opcode::LoadConst(idx) => {
+                        format!(
+                            "{:<21} (value {})",
+                            format!("{}", Opcode::LoadConst(*idx)),
+                            (self.constants[(*idx) as usize])
+                        )
+                    }
+
+                    Opcode::LoadImmediateInt(n) => {
+                        format!("{:<21} (value {})", "LoadImmediateInt", n)
+                    }
+
+                    Opcode::JumpIfFalse(delta) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", Opcode::JumpIfFalse(*delta)),
+                            i + *delta as usize
+                        )
+                    }
+                    Opcode::Jump(delta) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", Opcode::Jump(*delta)),
+                            i + *delta as usize
+                        )
+                    }
+
+                    any_other => {
+                        format!("{}", any_other)
+                    }
+                }
+            )?
+        }
+        Ok(())
+    }
+}
