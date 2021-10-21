@@ -146,7 +146,7 @@ mod chunk_pretty_printer {
             );
             res.push(s);
         }
-        return res;
+        res
     }
 
     fn extend_canvas(lines: &mut Vec<String>) {
@@ -165,11 +165,8 @@ mod chunk_pretty_printer {
             .enumerate()
             .filter_map(|(pos, opcode)| match opcode {
                 Opcode::JumpIfFalse(delta) | Opcode::Jump(delta) => {
-                    let mut start = pos;
-                    let mut end = start + *delta as usize;
-                    if start > end {
-                        std::mem::swap(&mut start, &mut end);
-                    }
+                    let start = pos;
+                    let end = start + *delta as usize;
                     Some((start, end))
                 }
                 _ => None,
@@ -183,21 +180,32 @@ mod chunk_pretty_printer {
 
             //draw exit
 
+            let (mut arrow_start, mut arrow_end) = (arrow_start, arrow_end);
+
             draw_at_char(&mut lines[arrow_start], 0, b'*');
+            draw_at_char(&mut lines[arrow_end], 0, b'>');
+
+            if arrow_start > arrow_end {
+                std::mem::swap(&mut arrow_start, &mut arrow_end);
+            }
             for i in arrow_start + 1..arrow_end {
                 draw_at_char(&mut lines[i], 0, b'|');
             }
-            draw_at_char(&mut lines[arrow_end], 0, b'>');
         }
     }
 
-    fn check_canvas_range(lines: &Vec<String>, range: (usize, usize)) -> bool {
-        for i in range.0..=range.1 {
-            if !lines[i].starts_with(' ') {
+    fn check_canvas_range(lines: &[String], range: (usize, usize)) -> bool {
+        let mut range = range;
+        if range.0 > range.1 {
+            std::mem::swap(&mut range.0, &mut range.1);
+        }
+
+        for line in &lines[range.0..=range.1] {
+            if !line.starts_with(' ') {
                 return false;
             }
         }
-        return true;
+        true
     }
 
     fn draw_at_char(s: &mut String, idx: usize, c: u8) {
