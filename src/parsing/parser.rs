@@ -14,7 +14,7 @@ peg::parser! {
             = block()
 
         rule block() -> Vec<Stmt> =
-            [t!(BeginBlock)] s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [t!(EndBlock)] {s}
+            [t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [t!(EndBlock)] {s}
 
 
         rule stmt() -> Stmt =
@@ -26,10 +26,10 @@ peg::parser! {
 
 
         rule var_decl_stmt() -> Stmt =
-            [t!(Var)] n:name() e:assignment_left_side()?
+            [t!(Var)] n:name() e:assignment_right_side()?
                 {Stmt::VarDeclaration(n, e)}
 
-        rule assignment_left_side() -> Box<Expr> =
+        rule assignment_right_side() -> Box<Expr> =
             [t!(Equals)] e:expr() {e}
 
         rule print_stmt() -> Stmt =
@@ -46,11 +46,11 @@ peg::parser! {
                 {Box::new(Expr::IfExpr(cond, then, None))}
 
         rule if_then_else() -> Box<Expr> =
-            [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)] [t!(Else)] else_body:expr()
+            [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)]? [t!(Else)] else_body:expr()
                 {Box::new(Expr::IfExpr(cond, then, Some(else_body)))}
 
         rule expr() -> Box<Expr> =
-            [t!(LineEnd)] b:block() {Box::new(Expr::Block(b))} /
+            b:block() {Box::new(Expr::Block(b))} /
             if_expr() /
             simple_expr()
 

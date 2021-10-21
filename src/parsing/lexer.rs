@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
+use std::iter::Peekable;
 use std::mem;
+use std::str::CharIndices;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Index(usize, usize);
@@ -84,244 +86,288 @@ impl Token {
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
-    use TokenKind::*;
-    let mut result = Vec::new();
-    let mut indentation = vec![0];
+    let mut lexer = Lexer::new(input);
+    lexer.tokenize()
+}
 
-    result.push(Token {
-        position: get_index(0, 0, 0),
-        kind: BeginBlock,
-    });
+struct Lexer<'input> {
+    input_string: &'input str,
+    input_iterator: Peekable<CharIndices<'input>>,
+    line_number: usize,
+    line_start: usize,
+    indentation: Vec<usize>,
+}
 
-    let mut input_iterator = input.char_indices().peekable();
+impl<'input> Lexer<'input> {
+    fn new(input_string: &str) -> Lexer {
+        Lexer {
+            input_string,
+            input_iterator: input_string.char_indices().peekable(),
+            line_number: 0,
+            line_start: 0,
+            indentation: vec![],
+        }
+    }
 
-    let mut current_indentation;
-    let mut is_reading_indentation = true;
+    fn get_index(&mut self) -> Index {
+        let current_pos = self.get_input_shift();
+        Index(self.line_number + 1, current_pos - self.line_start + 1)
+    }
 
-    let mut line_number = 0;
-    let mut line_start = 0;
+    fn get_input_shift(&mut self) -> usize {
+        self.input_iterator
+            .peek()
+            .unwrap_or(&(self.input_string.len(), '\0'))
+            .0
+    }
 
-    while let Some((character_idx, character)) = input_iterator.peek() {
-        let character = *character;
-        let mut character_idx = *character_idx;
-        if is_reading_indentation {
-            current_indentation = 0;
+    pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
+        use TokenKind::*;
+        let mut result = vec![Token {
+            position: self.get_index(),
+            kind: BeginBlock,
+        }];
 
-            while let Some((idx, symbol)) = input_iterator.peek() {
-                match symbol {
-                    ' ' => {
-                        current_indentation += 1;
-                        input_iterator.next();
-                    }
-                    '\n' => {
-                        line_start = idx + 1;
-                        line_number += 1;
-                        current_indentation = 0;
-                        input_iterator.next();
-                    }
-                    _ => {
-                        break;
-                    }
+        self.indentation.push(0);
+
+        let mut is_reading_indentation = true;
+
+        while let Some((_, character)) = self.input_iterator.peek() {
+            let character = *character;
+            if is_reading_indentation {
+                let mut produced_tokens = self.read_identation()?;
+
+                let last = result.pop().unwrap();
+                if mem::discriminant(&last.kind) == mem::discriminant(&LineEnd) {
+                    //never put block end on top of newline
+                    result.append(&mut produced_tokens);
+                    result.push(last);
+                } else {
+                    result.push(last);
+                    result.append(&mut produced_tokens);
                 }
+                is_reading_indentation = false;
+                continue;
             }
 
-            character_idx = input_iterator.peek().unwrap_or(&(input.len(), '\0')).0;
+            macro_rules! token {
+                ($kind:expr) => {{
+                    Token {
+                        position: self.get_index(),
+                        kind: $kind,
+                    }
+                }};
+                ($position:expr, $kind:expr) => {
+                    Token {
+                        position: $position,
+                        kind: $kind,
+                    }
+                };
+            }
 
-            let previous_indentation_level = *indentation.last().unwrap_or(&0);
-            match previous_indentation_level.cmp(&current_indentation) {
-                Ordering::Less => {
-                    indentation.push(current_indentation);
-                    result.push(Token {
-                        position: get_index(character_idx, line_number, line_start),
-                        kind: BeginBlock,
-                    });
+            match character {
+                ' ' => {
+                    //this is not indentation, skip space
+                    self.input_iterator.next();
                 }
-                Ordering::Equal => {
-
-                    //do nothing, continue parsing current block
+                '\n' => {
+                    match result.last() {
+                        Some(x) if mem::discriminant(&x.kind) == mem::discriminant(&LineEnd) => {}
+                        _ => {
+                            result.push(token!(LineEnd));
+                        }
+                    }
+                    self.input_iterator.next(); //skip newline
+                    self.line_number += 1;
+                    self.line_start = self
+                        .input_iterator
+                        .peek()
+                        .unwrap_or(&(self.input_string.len(), '\0'))
+                        .0;
+                    is_reading_indentation = true;
                 }
-                Ordering::Greater => {
-                    while let Some(indentation_level) = indentation.last() {
-                        match indentation_level.cmp(&current_indentation) {
-                            Ordering::Less => {
-                                return Err(format!(
-                                    "unconsistent indentation level on line {}",
-                                    line_number + 1
-                                ))
-                            }
-                            Ordering::Equal => {
-                                break;
-                            }
-                            Ordering::Greater => {
-                                //panic here
-                                indentation.pop();
 
-                                let last = result.pop().unwrap();
-                                if mem::discriminant(&last.kind)
-                                    == mem::discriminant(&TokenKind::LineEnd)
-                                {
-                                    //never put block end on top of newline
-                                    result.push(Token {
-                                        position: get_index(character_idx, line_number, line_start),
-                                        kind: EndBlock,
-                                    });
-                                    result.push(last);
-                                } else {
-                                    result.push(last);
-                                    result.push(Token {
-                                        position: get_index(character_idx, line_number, line_start),
-                                        kind: EndBlock,
-                                    });
-                                }
-                            }
+                '+' => {
+                    result.push(token!(Plus));
+                    self.input_iterator.next();
+                }
+                '-' => {
+                    result.push(token!(Minus));
+                    self.input_iterator.next();
+                }
+                '*' => {
+                    result.push(token!(Star));
+                    self.input_iterator.next();
+                }
+                '/' => {
+                    result.push(token!(Slash));
+                    self.input_iterator.next();
+                }
+
+                x if x.is_numeric() => {
+                    let start_idx = self.get_input_shift();
+                    let token_index = self.get_index();
+
+                    self.read_while(&|c| c.is_numeric());
+
+                    let end_idx = self.get_input_shift();
+                    let number: i64 = self.input_string[start_idx..end_idx].parse().unwrap();
+                    result.push(token!(token_index, Number(number)));
+                }
+
+                x if x.is_alphabetic() => {
+                    let start_idx = self.get_input_shift();
+                    let token_index = self.get_index();
+
+                    self.read_while(&|c| c.is_alphanumeric());
+
+                    let end_idx = self.get_input_shift();
+                    let name = self.input_string[start_idx..end_idx].to_string();
+
+                    result.push(token!(
+                        token_index,
+                        match name.as_str() {
+                            "print" => Print,
+                            "var" => Var,
+                            "if" => If,
+                            "else" => Else,
+
+                            _ => Name(name),
+                        }
+                    ))
+                }
+
+                '(' => {
+                    result.push(token!(LParen));
+                    self.input_iterator.next();
+                }
+                ')' => {
+                    result.push(token!(RParen));
+                    self.input_iterator.next();
+                }
+
+                '=' => {
+                    result.push(token!(Equals));
+                    self.input_iterator.next();
+                }
+
+                '?' => {
+                    let possible_token_index = self.get_index();
+                    self.input_iterator.next(); //skip ?
+                    let next_pair = self.input_iterator.peek().copied();
+                    match next_pair {
+                        Some((_, '=')) => {
+                            result.push(token!(possible_token_index, TestEquals));
+                            self.input_iterator.next();
+                        }
+                        Some((_, c)) => {
+                            return Err(format!(
+                                "unexpected character {} at {}",
+                                c,
+                                self.get_index()
+                            ));
+                        }
+
+                        None => {
+                            return Err(format!("unexpected end at {}", self.get_index()));
+                        }
+                    }
+                }
+
+                any_other => {
+                    return Err(format!(
+                        "unexpected character {} at {}",
+                        any_other,
+                        self.get_index()
+                    ))
+                }
+            }
+        }
+
+        while !self.indentation.is_empty() {
+            result.push(Token {
+                position: self.get_index(),
+                kind: EndBlock,
+            });
+            self.indentation.pop();
+        }
+
+        Ok(result)
+    }
+
+    fn read_while<F: (Fn(char) -> bool)>(&mut self, predicate: &F) {
+        while let Some((_, character)) = self.input_iterator.peek() {
+            let character = *character;
+            if predicate(character) {
+                self.input_iterator.next();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn read_identation(&mut self) -> Result<Vec<Token>, String> {
+        use TokenKind::{BeginBlock, EndBlock, LineEnd};
+        let mut result = vec![];
+        let mut current_indentation = 0;
+
+        while let Some((idx, symbol)) = self.input_iterator.peek() {
+            match symbol {
+                ' ' => {
+                    current_indentation += 1;
+                    self.input_iterator.next();
+                }
+                '\n' => {
+                    self.line_start = idx + 1;
+                    self.line_number += 1;
+                    current_indentation = 0;
+                    self.input_iterator.next();
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+
+        let previous_indentation_level = *self.indentation.last().unwrap_or(&0);
+        match previous_indentation_level.cmp(&current_indentation) {
+            Ordering::Less => {
+                self.indentation.push(current_indentation);
+                result.push(Token {
+                    position: self.get_index(),
+                    kind: BeginBlock,
+                });
+            }
+
+            Ordering::Equal => {
+                //do nothing, continue parsing current block
+            }
+
+            Ordering::Greater => {
+                while let Some(indentation_level) = self.indentation.last() {
+                    match indentation_level.cmp(&current_indentation) {
+                        Ordering::Less => {
+                            return Err(format!(
+                                "unconsistent indentation level on line {}",
+                                self.line_number + 1
+                            ))
+                        }
+
+                        Ordering::Equal => {
+                            break;
+                        }
+
+                        Ordering::Greater => {
+                            self.indentation.pop();
+                            result.push(Token {
+                                position: self.get_index(),
+                                kind: EndBlock,
+                            });
                         }
                     }
                 }
             }
-            is_reading_indentation = false;
-            continue;
         }
-
-        macro_rules! token {
-            ($kind:expr) => {{
-                Token {
-                    position: get_index(character_idx, line_number, line_start),
-                    kind: $kind,
-                }
-            }};
-        }
-
-        match character {
-            ' ' => {
-                //this is not indentation, skip space
-                input_iterator.next();
-            }
-            '\n' => {
-                match result.last() {
-                    Some(x) if mem::discriminant(&x.kind) == mem::discriminant(&LineEnd) => {}
-                    _ => {
-                        result.push(token!(LineEnd));
-                    }
-                }
-                input_iterator.next();
-                line_number += 1;
-                line_start = character_idx + 1;
-                is_reading_indentation = true;
-            }
-
-            '+' => {
-                result.push(token!(Plus));
-                input_iterator.next();
-            }
-            '-' => {
-                result.push(token!(Minus));
-                input_iterator.next();
-            }
-            '*' => {
-                result.push(token!(Star));
-                input_iterator.next();
-            }
-            '/' => {
-                result.push(token!(Slash));
-                input_iterator.next();
-            }
-
-            x if x.is_numeric() => {
-                let start_idx = character_idx;
-
-                while let Some((_, character)) = input_iterator.peek() {
-                    if character.is_numeric() {
-                        input_iterator.next();
-                    } else {
-                        break;
-                    }
-                }
-                let end_idx = input_iterator.peek().unwrap_or(&(input.len(), '\0')).0;
-                let number: i64 = input[start_idx..end_idx].parse().unwrap();
-                result.push(token!(Number(number)));
-            }
-
-            x if x.is_alphabetic() => {
-                let start_idx = character_idx;
-
-                while let Some((_, character)) = input_iterator.peek() {
-                    if character.is_alphanumeric() || character == &'_' {
-                        input_iterator.next();
-                    } else {
-                        break;
-                    }
-                }
-                let end_idx = input_iterator.peek().unwrap_or(&(input.len(), '\0')).0;
-                let name = input[start_idx..end_idx].to_string();
-
-                result.push(match name.as_str() {
-                    "print" => token!(Print),
-                    "var" => token!(Var),
-                    "if" => token!(If),
-                    "else" => token!(Else),
-
-                    _ => token!(Name(name)),
-                })
-            }
-
-            '(' => {
-                result.push(token!(LParen));
-                input_iterator.next();
-            }
-            ')' => {
-                result.push(token!(RParen));
-                input_iterator.next();
-            }
-
-            '=' => {
-                result.push(token!(Equals));
-                input_iterator.next();
-            }
-
-            '?' => {
-                input_iterator.next(); //skip ?
-                match input_iterator.peek() {
-                    Some((_, '=')) => {
-                        result.push(token!(TestEquals));
-                        input_iterator.next();
-                    }
-                    Some((p, c)) => {
-                        return Err(format!(
-                            "unexpected character {} at {}",
-                            c,
-                            get_index(*p, line_number, line_start)
-                        ));
-                    }
-
-                    None => {
-                        return Err(format!(
-                            "unexpected end at {}",
-                            get_index(character_idx, line_number, line_start)
-                        ));
-                    }
-                }
-            }
-
-            any_other => {
-                return Err(format!(
-                    "unexpected character {} at {}",
-                    any_other,
-                    get_index(character_idx, line_number, line_start)
-                ))
-            }
-        }
+        Ok(result)
     }
-    while indentation.last().is_some() {
-        result.push(Token {
-            position: get_index(input.len(), line_number, line_start),
-            kind: EndBlock,
-        });
-        indentation.pop();
-    }
-
-    Ok(result)
-}
-
-fn get_index(current_pos: usize, line_number: usize, line_start: usize) -> Index {
-    Index(line_number + 1, current_pos - line_start + 1)
 }
