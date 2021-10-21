@@ -42,7 +42,7 @@ fn main() {
     };
 
     for stmt in &statements {
-        println!("{}", compile::lisp_printer::print_as_sexp(stmt));
+        println!("{:?}", stmt);
     }
 
     let chunks = Compiler::compile(&statements).unwrap();

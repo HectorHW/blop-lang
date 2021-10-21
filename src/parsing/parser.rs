@@ -22,6 +22,7 @@ peg::parser! {
              var_decl_stmt()
             / print_stmt()
             / assignment_stmt()
+            / assert_stmt()
             / e:expr() {Stmt::Expression(e)}
 
 
@@ -37,6 +38,9 @@ peg::parser! {
 
         rule assignment_stmt() -> Stmt =
             n:name() [t!(Equals)] e:expr() {Stmt::Assignment(n, e)}
+
+        rule assert_stmt() -> Stmt =
+            [a@t!(Assert)] e:expr() {Stmt::Assert(a, e)}
 
         rule if_expr() -> Box<Expr> =
             if_then_else() / if_then()

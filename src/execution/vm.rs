@@ -21,6 +21,7 @@ pub enum InterpretErrorKind {
     ZeroDivision,
     OperandIndexing,
     JumpBounds,
+    AssertionFailure,
 }
 
 impl VM {
@@ -165,6 +166,13 @@ impl VM {
                     ip += 1;
                 }
                 Opcode::Nop => {
+                    ip += 1;
+                }
+                Opcode::Assert => {
+                    let value = checked_stack_pop!()? as i64;
+                    if value == 0 {
+                        return Err(runtime_error!(AssertionFailure));
+                    }
                     ip += 1;
                 }
             }
