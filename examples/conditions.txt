@@ -1,9 +1,10 @@
-if 2?= 4
+if 2?= 2
     var a = 2
     a =
         if 2?=3
             3
         else 4
+    assert a?=4
     print a
 else
     var b = 5
