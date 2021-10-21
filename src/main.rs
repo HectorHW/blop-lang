@@ -49,15 +49,17 @@ fn main() {
 
     let chunks = Compiler::compile(&statements).unwrap();
 
-    let program = chunks.first().unwrap();
+    //println!("{}", chunks[0]);
 
-    println!("{}", program);
+    for chunk in &chunks {
+        println!("{}", chunk);
+    }
 
     println!("running");
     let mut vm = VM::new();
-    vm.run(program).unwrap_or_else(|error| {
+    vm.run(&chunks).unwrap_or_else(|error| {
         println!("{:?}", error);
-        println!("{}", program.code[error.opcode_index])
+        println!("{}", chunks[error.chunk_index].code[error.opcode_index])
     }); /**/
 }
 
@@ -75,11 +77,13 @@ pub fn run_file(filename: &str) -> Result<(), String> {
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
 
     let chunks = Compiler::compile(&statements)?;
-
-    let program = chunks.first().unwrap();
     let mut vm = VM::new();
-    vm.run(program)
-        .map_err(|error| format!("{:?}\n{}", error, program.code[error.opcode_index]))?;
+    vm.run(&chunks).map_err(|error| {
+        format!(
+            "{:?}\n{}",
+            error, chunks[error.chunk_index].code[error.opcode_index]
+        )
+    })?;
 
     Ok(())
 }

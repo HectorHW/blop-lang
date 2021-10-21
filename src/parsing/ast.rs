@@ -7,6 +7,11 @@ pub enum Stmt {
     Assignment(Token, Box<Expr>),
     Expression(Box<Expr>),
     Assert(Token, Box<Expr>),
+    FunctionDeclaration {
+        name: Token,
+        args: Vec<Token>,
+        body: Box<Expr>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -16,6 +21,7 @@ pub enum Expr {
     Binary(Op, Box<Expr>, Box<Expr>),
     IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Block(Vec<Stmt>),
+    Call(Box<Expr>, Vec<Box<Expr>>),
 }
 
 #[derive(Copy, Clone, Debug)]
