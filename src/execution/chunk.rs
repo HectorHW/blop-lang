@@ -6,14 +6,16 @@ use std::ops::AddAssign;
 pub struct Chunk {
     pub constants: Vec<Value>,
     pub code: Vec<Opcode>,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Opcode {
     Print,
     LoadConst(u16),
-    Load(u16),
-    Store(u16),
+    LoadGlobal(u16),
+    LoadLocal(u16),
+    StoreLocal(u16),
     LoadImmediateInt(i16),
     Add,
     Sub,
@@ -26,6 +28,9 @@ pub enum Opcode {
     Jump(u16),
 
     Pop(u16),
+
+    Call(u16),
+    Return,
 
     Nop,
     Assert, //SwapStack(u8, u8),
@@ -43,8 +48,8 @@ impl Display for Opcode {
                 Print => "Print".to_string(),
                 LoadConst(a) => format!("LoadConst[{}]", a),
                 LoadImmediateInt(i) => format!("LoadImmediateInt[{}]", i),
-                Load(a) => format!("LoadStack[{}]", a),
-                Store(a) => format!("StoreStack[{}]", a),
+                LoadGlobal(a) => format!("LoadGlobal[{}]", a),
+                StoreLocal(a) => format!("StoreLocal[{}]", a),
                 Add => "Add".to_string(),
                 Sub => "Sub".to_string(),
                 Div => "Div".to_string(),
@@ -57,16 +62,20 @@ impl Display for Opcode {
                 Pop(n) => format!("Pop[{}]", n),
                 Nop => "Nop".to_string(),
                 Assert => "Assert".to_string(),
+                Call(arity) => format!("Call[{}]", arity),
+                Return => "Return".to_string(),
+                LoadLocal(idx) => format!("LoadLocal[{}]", idx),
             }
         )
     }
 }
 
 impl Chunk {
-    pub fn new() -> Chunk {
+    pub fn new(name: String) -> Chunk {
         Chunk {
             constants: Vec::new(),
             code: Vec::new(),
+            name,
         }
     }
 
@@ -84,6 +93,7 @@ impl AddAssign<Opcode> for Chunk {
 
 impl Display for Chunk {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{:-^40}", format!("chunk {}", self.name))?;
         let strings = chunk_pretty_printer::draw_chunk(self);
         for s in &strings {
             writeln!(f, "{}", s)?

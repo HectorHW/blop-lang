@@ -34,6 +34,8 @@ pub enum TokenKind {
     Star,
     Slash,
 
+    Comma,
+
     TestEquals,
 
     Equals,
@@ -46,6 +48,7 @@ pub enum TokenKind {
     Var,
     If,
     Else,
+    Def,
 }
 
 impl Display for TokenKind {
@@ -72,6 +75,8 @@ impl Display for TokenKind {
                 TokenKind::If => "(if)".to_string(),
                 TokenKind::Else => "(else)".to_string(),
                 TokenKind::Assert => "(assert)".to_string(),
+                TokenKind::Def => "(def)".to_string(),
+                TokenKind::Comma => "<,>".to_string(),
             }
         )
     }
@@ -109,6 +114,7 @@ impl<'input> Lexer<'input> {
             ("var", Var),
             ("if", If),
             ("else", Else),
+            ("def", Def),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -223,6 +229,11 @@ impl<'input> Lexer<'input> {
                 }
                 '/' => {
                     result.push(token!(Slash));
+                    self.input_iterator.next();
+                }
+
+                ',' => {
+                    result.push(token!(Comma));
                     self.input_iterator.next();
                 }
 

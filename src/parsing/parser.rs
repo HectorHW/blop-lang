@@ -20,6 +20,7 @@ peg::parser! {
         rule stmt() -> Stmt =
 
              var_decl_stmt()
+            / function_decl_stmt()
             / print_stmt()
             / assignment_stmt()
             / assert_stmt()
@@ -32,6 +33,17 @@ peg::parser! {
 
         rule assignment_right_side() -> Box<Expr> =
             [t!(Equals)] e:expr() {e}
+
+        rule function_decl_stmt() -> Stmt =
+            [t!(Def)] n:name() args:maybe_arguments_and_equals() body:expr() {
+                Stmt::FunctionDeclaration{name:n, args, body}
+            }
+
+        rule maybe_arguments_and_equals() -> Vec<Token> =
+            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] [t!(Equals)] {
+                n
+            }
+            / [t!(Equals)] {Vec::new()}
 
         rule print_stmt() -> Stmt =
             [t!(Print)] e:expr() {Stmt::Print(e)}
@@ -75,8 +87,21 @@ peg::parser! {
             x: (@) [t!(Slash)] y:@
                 {Box::new(Expr::Binary(Op::Div, x, y))}
             --
-            n:term() {n}
+            n:call() {n}
         }
+
+        rule call() -> Box<Expr> =
+            target:term() calls:call_parens()* {
+                let mut res = target;
+                for parens in calls {
+                res = Box::new(Expr::Call(res, parens))
+            }
+                res
+            }
+            / term()
+
+        rule call_parens() -> Vec<Box<Expr>> =
+            [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {args}
 
         rule term() -> Box<Expr>
             = [t!(Number(x))] { Box::new(Expr::Number(x))}
@@ -87,6 +112,6 @@ peg::parser! {
 
 
         rule name() -> Token
-            = [Token{kind:TokenKind::Name(s), position:pos}] {Token{kind:TokenKind::Name(s), position:pos}}
+            = [t@Token{kind:TokenKind::Name(..), position:pos}] {t}
     }
 }
