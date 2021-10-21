@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::iter::Peekable;
 use std::mem;
@@ -41,6 +42,7 @@ pub enum TokenKind {
     Name(String),
 
     Print,
+    Assert,
     Var,
     If,
     Else,
@@ -68,9 +70,8 @@ impl Display for TokenKind {
                 TokenKind::Equals => "(=)".to_string(),
                 TokenKind::TestEquals => "(?=)".to_string(),
                 TokenKind::If => "(if)".to_string(),
-                TokenKind::Else => {
-                    "(else)".to_string()
-                }
+                TokenKind::Else => "(else)".to_string(),
+                TokenKind::Assert => "(assert)".to_string(),
             }
         )
     }
@@ -96,35 +97,56 @@ struct Lexer<'input> {
     line_number: usize,
     line_start: usize,
     indentation: Vec<usize>,
+    keywords: HashMap<String, TokenKind>,
 }
 
 impl<'input> Lexer<'input> {
     fn new(input_string: &str) -> Lexer {
+        use self::TokenKind::*;
+        let keywords = vec![
+            ("assert", Assert),
+            ("print", Print),
+            ("var", Var),
+            ("if", If),
+            ("else", Else),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect::<HashMap<String, TokenKind>>();
+
         Lexer {
             input_string,
             input_iterator: input_string.char_indices().peekable(),
             line_number: 0,
             line_start: 0,
             indentation: vec![],
+            keywords,
         }
     }
 
-    fn get_index(&mut self) -> Index {
-        let current_pos = self.get_input_shift();
+    fn compute_index(&mut self) -> Index {
+        let current_pos = self.compute_input_shift();
         Index(self.line_number + 1, current_pos - self.line_start + 1)
     }
 
-    fn get_input_shift(&mut self) -> usize {
+    fn compute_input_shift(&mut self) -> usize {
         self.input_iterator
             .peek()
             .unwrap_or(&(self.input_string.len(), '\0'))
             .0
     }
 
+    fn keyword_or_name(&self, s: &str) -> TokenKind {
+        self.keywords
+            .get(s)
+            .cloned()
+            .unwrap_or_else(|| TokenKind::Name(s.to_string()))
+    }
+
     pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
         use TokenKind::*;
         let mut result = vec![Token {
-            position: self.get_index(),
+            position: self.compute_index(),
             kind: BeginBlock,
         }];
 
@@ -153,7 +175,7 @@ impl<'input> Lexer<'input> {
             macro_rules! token {
                 ($kind:expr) => {{
                     Token {
-                        position: self.get_index(),
+                        position: self.compute_index(),
                         kind: $kind,
                     }
                 }};
@@ -205,36 +227,26 @@ impl<'input> Lexer<'input> {
                 }
 
                 x if x.is_numeric() => {
-                    let start_idx = self.get_input_shift();
-                    let token_index = self.get_index();
+                    let start_idx = self.compute_input_shift();
+                    let token_index = self.compute_index();
 
                     self.read_while(&|c| c.is_numeric());
 
-                    let end_idx = self.get_input_shift();
+                    let end_idx = self.compute_input_shift();
                     let number: i64 = self.input_string[start_idx..end_idx].parse().unwrap();
                     result.push(token!(token_index, Number(number)));
                 }
 
                 x if x.is_alphabetic() => {
-                    let start_idx = self.get_input_shift();
-                    let token_index = self.get_index();
+                    let start_idx = self.compute_input_shift();
+                    let token_index = self.compute_index();
 
                     self.read_while(&|c| c.is_alphanumeric());
 
-                    let end_idx = self.get_input_shift();
-                    let name = self.input_string[start_idx..end_idx].to_string();
-
-                    result.push(token!(
-                        token_index,
-                        match name.as_str() {
-                            "print" => Print,
-                            "var" => Var,
-                            "if" => If,
-                            "else" => Else,
-
-                            _ => Name(name),
-                        }
-                    ))
+                    let end_idx = self.compute_input_shift();
+                    let name = &self.input_string[start_idx..end_idx];
+                    //keywords
+                    result.push(token!(token_index, self.keyword_or_name(name)))
                 }
 
                 '(' => {
@@ -252,7 +264,7 @@ impl<'input> Lexer<'input> {
                 }
 
                 '?' => {
-                    let possible_token_index = self.get_index();
+                    let possible_token_index = self.compute_index();
                     self.input_iterator.next(); //skip ?
                     let next_pair = self.input_iterator.peek().copied();
                     match next_pair {
@@ -264,12 +276,12 @@ impl<'input> Lexer<'input> {
                             return Err(format!(
                                 "unexpected character {} at {}",
                                 c,
-                                self.get_index()
+                                self.compute_index()
                             ));
                         }
 
                         None => {
-                            return Err(format!("unexpected end at {}", self.get_index()));
+                            return Err(format!("unexpected end at {}", self.compute_index()));
                         }
                     }
                 }
@@ -278,7 +290,7 @@ impl<'input> Lexer<'input> {
                     return Err(format!(
                         "unexpected character {} at {}",
                         any_other,
-                        self.get_index()
+                        self.compute_index()
                     ))
                 }
             }
@@ -286,7 +298,7 @@ impl<'input> Lexer<'input> {
 
         while !self.indentation.is_empty() {
             result.push(Token {
-                position: self.get_index(),
+                position: self.compute_index(),
                 kind: EndBlock,
             });
             self.indentation.pop();
@@ -307,7 +319,7 @@ impl<'input> Lexer<'input> {
     }
 
     fn read_identation(&mut self) -> Result<Vec<Token>, String> {
-        use TokenKind::{BeginBlock, EndBlock, LineEnd};
+        use TokenKind::{BeginBlock, EndBlock};
         let mut result = vec![];
         let mut current_indentation = 0;
 
@@ -334,7 +346,7 @@ impl<'input> Lexer<'input> {
             Ordering::Less => {
                 self.indentation.push(current_indentation);
                 result.push(Token {
-                    position: self.get_index(),
+                    position: self.compute_index(),
                     kind: BeginBlock,
                 });
             }
@@ -360,7 +372,7 @@ impl<'input> Lexer<'input> {
                         Ordering::Greater => {
                             self.indentation.pop();
                             result.push(Token {
-                                position: self.get_index(),
+                                position: self.compute_index(),
                                 kind: EndBlock,
                             });
                         }

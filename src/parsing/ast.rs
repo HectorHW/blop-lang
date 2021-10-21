@@ -6,6 +6,7 @@ pub enum Stmt {
     VarDeclaration(Token, Option<Box<Expr>>),
     Assignment(Token, Box<Expr>),
     Expression(Box<Expr>),
+    Assert(Token, Box<Expr>),
 }
 
 #[derive(Clone, Debug)]

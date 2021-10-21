@@ -159,6 +159,13 @@ impl Compiler {
                 let mut body = self.visit_expr(e)?;
                 result.append(&mut body);
             }
+            Stmt::Assert(_token, expr) => {
+                self.require_value();
+                let mut body = self.visit_expr(expr)?;
+                self.pop_requirement();
+                result.append(&mut body);
+                result.push(Opcode::Assert);
+            }
         }
         Ok(result)
     }

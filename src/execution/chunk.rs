@@ -27,9 +27,10 @@ pub enum Opcode {
 
     Pop(u16),
 
-    Nop, //SwapStack(u8, u8),
-         //ExtendArg1(u16),
-         //ExtendDouble(u8, u8)
+    Nop,
+    Assert, //SwapStack(u8, u8),
+            //ExtendArg1(u16),
+            //ExtendDouble(u8, u8)
 }
 
 impl Display for Opcode {
@@ -55,6 +56,7 @@ impl Display for Opcode {
                 Jump(delta) => format!("Jump[{}]", delta),
                 Pop(n) => format!("Pop[{}]", n),
                 Nop => "Nop".to_string(),
+                Assert => "Assert".to_string(),
             }
         )
     }
