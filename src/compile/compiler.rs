@@ -326,8 +326,11 @@ impl Compiler {
                 }
 
                 self.pop_requirement();
-
                 result.push(Opcode::Call(args.len() as u16));
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1));
+                }
             }
         }
         Ok(result)
@@ -349,12 +352,29 @@ impl Compiler {
             stmt(return=true)
             _ = pop(1)
             pop(n)
-            push(_)
          */
 
-        let mut result = vec![];
+        /*
+        block with single statement
+            stmt(return=return)
+        */
 
         self.new_scope();
+
+        if block.len() == 1 {
+            //maybe turn block into expression
+
+            let code = self.visit_stmt(&block[0])?;
+            let locals = self.pop_scope();
+            if locals == 0 {
+                return Ok(code);
+            } else {
+                //cannot optimize block. recover scope and continue
+                self.new_scope();
+            }
+        }
+        let mut result = vec![];
+
         if self.needs_value() {
             self.new_variable_slot("_").unwrap();
             result.push(Opcode::LoadImmediateInt(0)); // _ variable
