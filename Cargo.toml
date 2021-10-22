@@ -7,3 +7,10 @@ edition = "2018"
 
 [dependencies]
 peg = "0.7.0"
+
+[features]
+default = ["print-chunk"]
+print-chunk = []
+print-tokens = []
+print-ast = []
+print-execution = []
