@@ -118,6 +118,9 @@ impl Compiler {
 
         self.new_scope();
 
+        self.new_variable_slot(name.get_string().unwrap()).unwrap();
+        //define function inside itself
+
         for arg_name in args {
             match self.new_variable_slot(arg_name.get_string().unwrap()) {
                 Some(_) => {}
@@ -316,12 +319,13 @@ impl Compiler {
             }
             Expr::Call(target, args) => {
                 self.require_value();
+                let mut target = self.visit_expr(target)?;
+                result.append(&mut target);
                 for arg in args {
                     result.append(&mut self.visit_expr(arg)?);
                 }
-                let mut target = self.visit_expr(target)?;
+
                 self.pop_requirement();
-                result.append(&mut target);
 
                 result.push(Opcode::Call(args.len() as u16));
             }

@@ -88,6 +88,7 @@ impl VM {
         }
 
         while ip < current_chunk.code.len() {
+            #[cfg(debug_assertions)]
             print!("{} => ", current_chunk.code[ip]);
             match current_chunk.code[ip] {
                 Opcode::Print => {
@@ -230,7 +231,7 @@ impl VM {
                         return Err(runtime_error!(StackUnderflow));
                     }
 
-                    let object = checked_stack_pop!()?;
+                    let object = *self.stack.get(self.stack.len() - 1 - arity).unwrap();
                     let chunk_id = match object {
                         Value::Function { chunk_id } => Ok(chunk_id),
                         _ => Err(runtime_error!(TypeError {
@@ -245,7 +246,7 @@ impl VM {
                         return_locals_offset: self.locals_offset,
                     });
 
-                    self.locals_offset = self.stack.len() - arity;
+                    self.locals_offset = self.stack.len() - 1 - arity;
 
                     current_chunk_id = chunk_id;
                     ip = 0;
@@ -267,12 +268,13 @@ impl VM {
                     let new_stack_size = self
                         .stack
                         .len()
-                        .checked_sub(return_info.function_arguments)
+                        .checked_sub(1 + return_info.function_arguments)
                         .ok_or(runtime_error!(StackUnderflow))?;
                     self.stack.truncate(new_stack_size);
                     self.stack.push(ret_value);
                 }
             }
+            #[cfg(debug_assertions)]
             println!("{:?}", self.stack);
         }
 
