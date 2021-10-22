@@ -1,4 +1,7 @@
 var a =
     def a =
         2
-print a
+    a
+var value = a()
+assert value ?= 2
+print value

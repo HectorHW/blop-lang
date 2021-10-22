@@ -9,7 +9,7 @@ def fib(n) =
 
 var fibvalue = fib(10)
 assert fibvalue?=89
-print fib(10)
+print fibvalue
 
 def fact(n) =
     def fact1(n, a) =

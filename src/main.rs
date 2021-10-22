@@ -8,6 +8,7 @@ mod compile;
 mod data;
 mod execution;
 mod parsing;
+#[cfg(test)]
 mod test;
 
 fn main() {
@@ -47,6 +48,13 @@ fn main() {
         println!("{:?}", stmt);
     }
 
+    compile::syntax_level_check::check(&statements).unwrap();
+    let statements = compile::syntax_level_opt::optimize(statements);
+
+    for stmt in &statements {
+        println!("{:?}", stmt);
+    }
+
     let chunks = Compiler::compile(&statements).unwrap();
 
     //println!("{}", chunks[0]);
@@ -75,6 +83,9 @@ pub fn run_file(filename: &str) -> Result<(), String> {
 
     let statements: Vec<Stmt> = program_parser::program(&tokens)
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
+
+    compile::syntax_level_check::check(&statements).unwrap();
+    let statements = compile::syntax_level_opt::optimize(statements);
 
     let chunks = Compiler::compile(&statements)?;
     let mut vm = VM::new();

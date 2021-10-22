@@ -1,0 +1,196 @@
+use crate::parsing::ast::{Expr, Op, Program, Stmt};
+use crate::parsing::lexer::Token;
+use std::collections::HashSet;
+
+struct Optimizer {
+    names: Vec<HashSet<String>>,
+    total_variables: usize,
+}
+
+pub fn optimize(program: Program) -> Program {
+    let mut optimizer = Optimizer::new();
+    optimizer.new_scope();
+    program
+        .into_iter()
+        .map(|x| optimizer.visit_stmt(x))
+        .collect()
+}
+
+impl Optimizer {
+    fn new() -> Optimizer {
+        Optimizer {
+            names: vec![],
+            total_variables: 0,
+        }
+    }
+
+    fn lookup_local(&mut self, _name: &Token) {}
+
+    fn new_variable_slot(&mut self, variable_name: &Token) {
+        self.total_variables += 1;
+        self.names
+            .last_mut()
+            .unwrap()
+            .insert(variable_name.get_string().unwrap().clone());
+    }
+
+    fn new_scope(&mut self) {
+        self.names.push(HashSet::new());
+    }
+
+    fn pop_scope(&mut self) {
+        let scope = self.names.pop().unwrap();
+        let items_in_scope = scope.len();
+        drop(scope);
+        self.total_variables -= items_in_scope;
+    }
+
+    fn visit_stmt(&mut self, stmt: Stmt) -> Stmt {
+        match stmt {
+            Stmt::Print(e) => {
+                let containing = self.visit_expr(e);
+                Stmt::Print(containing)
+            }
+
+            Stmt::VarDeclaration(name, body) => {
+                let body = body.map(|e| self.visit_expr(e));
+                self.new_variable_slot(&name);
+                Stmt::VarDeclaration(name, body)
+            }
+
+            Stmt::Assignment(target, expr) => {
+                let body = self.visit_expr(expr);
+                Stmt::Assignment(target, body)
+            }
+            Stmt::Expression(e) => match *e {
+                Expr::SingleStatement(s) => self.visit_stmt(s),
+                _any_other => Stmt::Expression(self.visit_expr(Box::new(_any_other))),
+            },
+            A @ Stmt::Assert(..) => A, //never optimize assert expression
+            Stmt::FunctionDeclaration { name, args, body } => {
+                let function = self.check_function(name.clone(), args, body);
+                self.new_variable_slot(&name);
+                function
+            }
+        }
+    }
+
+    fn visit_expr(&mut self, expr: Box<Expr>) -> Box<Expr> {
+        let expr = *expr;
+
+        let expr: Expr = match expr {
+            n @ Expr::Number(..) => n,
+
+            na @ Expr::Name(..) => na,
+
+            Expr::Binary(op, a, b) => {
+                let a = self.visit_expr(a);
+                let b = self.visit_expr(b);
+                match (a.as_ref(), b.as_ref()) {
+                    (Expr::Number(na), Expr::Number(nb)) => match op {
+                        Op::Mul => Expr::Number(na * nb),
+                        Op::Div => Expr::Number(na / nb),
+                        Op::Add => Expr::Number(na + nb),
+                        Op::Sub => Expr::Number(na - nb),
+                        _ => Expr::Binary(op, a, b),
+                    },
+                    _other_cases => Expr::Binary(op, a, b),
+                }
+            }
+
+            Expr::IfExpr(cond, then_body, else_body) => {
+                let cond = self.visit_expr(cond);
+                let then_body = self.visit_expr(then_body);
+                let else_body = else_body.map(|x| self.visit_expr(x));
+                Expr::IfExpr(cond, then_body, else_body)
+            }
+
+            Expr::Block(mut statements) => {
+                if statements.len() == 1 {
+                    let statement = statements.remove(0);
+                    let e = Box::new(Expr::SingleStatement(statement));
+                    *self.visit_expr(e)
+                } else {
+                    let statements = statements.into_iter().map(|s| self.visit_stmt(s)).collect();
+                    Expr::Block(statements)
+                }
+            }
+            Expr::Call(target, args) => {
+                let target = self.visit_expr(target);
+                let args = args.into_iter().map(|a| self.visit_expr(a)).collect();
+                Expr::Call(target, args)
+            }
+
+            Expr::SingleStatement(s) => match s {
+                //singleStatement is artificial node representing block wit single statement
+                Stmt::Print(p) => Expr::SingleStatement(Stmt::Print(p)),
+
+                Stmt::VarDeclaration(_name, maybe_body) => {
+                    /*
+                    thing like
+
+                    if ...
+                        var a = 2
+                    ...
+
+                    variable is not used anywhere else, can be substituted with expr
+                    */
+                    maybe_body.map(|e| *e).unwrap_or(Expr::Number(0))
+                }
+
+                a @ Stmt::Assignment(..) => Expr::SingleStatement(a),
+
+                Stmt::Expression(e) => *e,
+
+                a @ Stmt::Assert(..) => Expr::SingleStatement(a),
+
+                Stmt::FunctionDeclaration { .. } => {
+                    /*
+                    thing like
+                    if ...
+                        def ... =
+                            ...
+                    ...
+
+                    as def value is not used, it can be exluded from resulting program
+                    */
+                    Expr::Number(0)
+                    //Expr::SingleStatement(a)
+                }
+            },
+        };
+        Box::new(expr)
+    }
+
+    fn check_function(&mut self, name: Token, args: Vec<Token>, body: Box<Expr>) -> Stmt {
+        let mut scope_stack = vec![];
+        std::mem::swap(&mut self.names, &mut scope_stack);
+        let previous_total_variables = self.total_variables;
+        self.total_variables = 0;
+
+        self.new_scope();
+
+        self.new_variable_slot(&name); //define function inside itself
+        for arg_name in &args {
+            self.new_variable_slot(arg_name);
+        }
+        let body = self.visit_expr(body);
+
+        std::mem::swap(&mut self.names, &mut scope_stack);
+        self.total_variables = previous_total_variables;
+
+        Stmt::FunctionDeclaration { name, args, body }
+    }
+
+    fn visit_block(&mut self, block: Vec<Stmt>) -> Vec<Stmt> {
+        self.new_scope();
+
+        let mut res = vec![];
+
+        for item in block {
+            res.push(self.visit_stmt(item));
+        }
+        self.pop_scope();
+        res
+    }
+}
