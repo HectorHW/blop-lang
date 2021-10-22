@@ -44,16 +44,16 @@ fn main() {
         }
     };
 
-    for stmt in &statements {
-        println!("{:?}", stmt);
-    }
+    //for stmt in &statements {
+    //    println!("{:?}", stmt);
+    //}
 
     compile::syntax_level_check::check(&statements).unwrap();
     let statements = compile::syntax_level_opt::optimize(statements);
 
-    for stmt in &statements {
-        println!("{:?}", stmt);
-    }
+    //for stmt in &statements {
+    //    println!("{:?}", stmt);
+    //}
 
     let chunks = Compiler::compile(&statements).unwrap();
 

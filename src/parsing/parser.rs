@@ -1,4 +1,4 @@
-use crate::parsing::ast::{Expr, Op, Stmt};
+use crate::parsing::ast::{Expr, Stmt};
 use crate::parsing::lexer::{Token, TokenKind};
 
 macro_rules! t {
@@ -74,18 +74,18 @@ peg::parser! {
             arithmetic()
 
         rule arithmetic() -> Box<Expr> = precedence! {
-            x: (@) [t!(TestEquals)] y:@
-                {Box::new(Expr::Binary(Op::TestEquals, x, y))}
+            x: (@) [op@t!(TestEquals)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
             --
-            x: (@) [t!(Plus)] y:@
-                {Box::new(Expr::Binary(Op::Add, x, y))}
-            x: (@) [t!(Minus)] y:@
-                {Box::new(Expr::Binary(Op::Sub, x, y))}
+            x: (@) [op@t!(Plus)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(Minus)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
             --
-            x: (@) [t!(Star)] y:@
-                {Box::new(Expr::Binary(Op::Mul, x, y))}
-            x: (@) [t!(Slash)] y:@
-                {Box::new(Expr::Binary(Op::Div, x, y))}
+            x: (@) [op@t!(Star)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(Slash)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
             --
             n:call() {n}
         }

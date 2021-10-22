@@ -1,7 +1,7 @@
 use crate::data::values::Value;
 use crate::execution::chunk::{Chunk, Opcode};
-use crate::parsing::ast::{Expr, Op, Program, Stmt};
-use crate::parsing::lexer::Token;
+use crate::parsing::ast::{Expr, Program, Stmt};
+use crate::parsing::lexer::{Token, TokenKind};
 use std::collections::HashMap;
 
 pub struct Compiler {
@@ -265,12 +265,13 @@ impl Compiler {
                 result.append(&mut a);
                 result.append(&mut b);
 
-                result.push(match op {
-                    Op::Mul => Opcode::Mul,
-                    Op::Div => Opcode::Div,
-                    Op::Add => Opcode::Add,
-                    Op::Sub => Opcode::Sub,
-                    Op::TestEquals => Opcode::TestEquals,
+                result.push(match &op.kind {
+                    TokenKind::Star => Opcode::Mul,
+                    TokenKind::Slash => Opcode::Div,
+                    TokenKind::Plus => Opcode::Add,
+                    TokenKind::Minus => Opcode::Sub,
+                    TokenKind::TestEquals => Opcode::TestEquals,
+                    other => panic!("unimplemented binary operator {} [{}]", other, op.position),
                 });
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1));
