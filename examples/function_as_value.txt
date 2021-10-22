@@ -1,0 +1,8 @@
+def a() =
+    def b(x) =
+        x+1
+    b
+
+var value = a()(4)
+assert value?=5
+print value

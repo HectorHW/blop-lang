@@ -15,3 +15,13 @@ fn test_simple_assertions() {
 fn test_conditions() {
     test_file!("./examples/conditions.txt")
 }
+
+#[test]
+fn test_function_as_value() {
+    test_file!("./examples/function_as_value.txt")
+}
+
+#[test]
+fn fib_fact() {
+    test_file!("./examples/fib_fact.txt")
+}
