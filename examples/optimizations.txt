@@ -1,0 +1,4 @@
+var a =
+    def a =
+        2
+print a

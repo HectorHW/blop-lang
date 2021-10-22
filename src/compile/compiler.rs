@@ -213,6 +213,9 @@ impl Compiler {
                 self.pop_requirement();
                 result.append(&mut body);
                 result.push(Opcode::Assert);
+                if self.needs_value() {
+                    result.push(Opcode::LoadImmediateInt(0));
+                }
             }
             Stmt::FunctionDeclaration { name, args, body } => {
                 let new_chunk_idx = self.compile_function(name, args, body)?;
@@ -227,7 +230,10 @@ impl Compiler {
                     chunk_id: new_chunk_idx,
                 });
 
-                result.push(Opcode::LoadConst(const_idx as u16));
+                result.push(Opcode::LoadConst(const_idx as u16)); //define name
+                if self.needs_value() {
+                    result.push(Opcode::LoadImmediateInt(0));
+                }
             }
         }
         Ok(result)
@@ -314,8 +320,8 @@ impl Compiler {
                 result.push(Opcode::Nop);
             }
             Expr::Block(b) => {
-                let mut body = self.visit_block(b)?;
-                result.append(&mut body);
+                let body = self.visit_block(b)?;
+                result = body;
             }
             Expr::Call(target, args) => {
                 self.require_value();
@@ -331,6 +337,13 @@ impl Compiler {
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1));
                 }
+            }
+            Expr::SingleStatement(s) => {
+                self.require_value();
+                let body = self.visit_stmt(s)?;
+
+                self.pop_requirement();
+                result = body;
             }
         }
         Ok(result)
@@ -361,18 +374,6 @@ impl Compiler {
 
         self.new_scope();
 
-        if block.len() == 1 {
-            //maybe turn block into expression
-
-            let code = self.visit_stmt(&block[0])?;
-            let locals = self.pop_scope();
-            if locals == 0 {
-                return Ok(code);
-            } else {
-                //cannot optimize block. recover scope and continue
-                self.new_scope();
-            }
-        }
         let mut result = vec![];
 
         if self.needs_value() {
