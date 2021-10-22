@@ -18,21 +18,11 @@ pub enum Stmt {
 pub enum Expr {
     Number(i64),
     Name(Token),
-    Binary(Op, Box<Expr>, Box<Expr>),
+    Binary(Token, Box<Expr>, Box<Expr>),
     IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Block(Vec<Stmt>),
     SingleStatement(Stmt),
     Call(Box<Expr>, Vec<Box<Expr>>),
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum Op {
-    Mul,
-    Div,
-    Add,
-    Sub,
-
-    TestEquals,
 }
 
 pub type Program = Vec<Stmt>;

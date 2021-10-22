@@ -1,6 +1,8 @@
 var a =
     def a =
         2
+    def b =
+        2/0
     a
 var value = a()
 assert value ?= 2

@@ -1,5 +1,5 @@
-use crate::parsing::ast::{Expr, Op, Program, Stmt};
-use crate::parsing::lexer::Token;
+use crate::parsing::ast::{Expr, Program, Stmt};
+use crate::parsing::lexer::{Token, TokenKind};
 use std::collections::HashSet;
 
 struct Optimizer {
@@ -66,7 +66,7 @@ impl Optimizer {
                 Expr::SingleStatement(s) => self.visit_stmt(s),
                 _any_other => Stmt::Expression(self.visit_expr(Box::new(_any_other))),
             },
-            A @ Stmt::Assert(..) => A, //never optimize assert expression
+            a @ Stmt::Assert(..) => a, //never optimize assert expression
             Stmt::FunctionDeclaration { name, args, body } => {
                 let function = self.check_function(name.clone(), args, body);
                 self.new_variable_slot(&name);
@@ -87,12 +87,19 @@ impl Optimizer {
                 let a = self.visit_expr(a);
                 let b = self.visit_expr(b);
                 match (a.as_ref(), b.as_ref()) {
-                    (Expr::Number(na), Expr::Number(nb)) => match op {
-                        Op::Mul => Expr::Number(na * nb),
-                        Op::Div => Expr::Number(na / nb),
-                        Op::Add => Expr::Number(na + nb),
-                        Op::Sub => Expr::Number(na - nb),
-                        _ => Expr::Binary(op, a, b),
+                    (Expr::Number(na), Expr::Number(nb)) => match op.kind {
+                        TokenKind::Star => Expr::Number(na * nb),
+                        TokenKind::Slash => match na.checked_div(*nb) {
+                            Some(result) => Expr::Number(result),
+                            None => {
+                                eprintln!("encountered zero division while folding constants, assuming it is intended [{}]", op.position);
+                                Expr::Binary(op, a, b)
+                            }
+                        },
+                        TokenKind::Plus => Expr::Number(na + nb),
+                        TokenKind::Minus => Expr::Number(na - nb),
+                        TokenKind::TestEquals => Expr::Number(if na == nb { 1 } else { 0 }),
+                        _any_other => panic!("unexpected binary operator {}", _any_other),
                     },
                     _other_cases => Expr::Binary(op, a, b),
                 }
@@ -140,7 +147,7 @@ impl Optimizer {
 
                 a @ Stmt::Assignment(..) => Expr::SingleStatement(a),
 
-                Stmt::Expression(e) => *e,
+                Stmt::Expression(e) => *self.visit_expr(e),
 
                 a @ Stmt::Assert(..) => Expr::SingleStatement(a),
 

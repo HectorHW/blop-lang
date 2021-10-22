@@ -1,4 +1,4 @@
-use crate::parsing::ast::{Expr, Op, Program, Stmt};
+use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::Token;
 use std::collections::HashSet;
 
@@ -101,8 +101,9 @@ impl Checker {
             Expr::Binary(op, a, b) => {
                 self.visit_expr(a)?;
                 self.visit_expr(b)?;
-                match op {
-                    Op::Mul | Op::Div | Op::Add | Op::Sub | Op::TestEquals => Ok(()),
+                use crate::parsing::lexer::TokenKind::*;
+                match &op.kind {
+                    Plus | Minus | Star | Slash | TestEquals => Ok(()),
                     _ => Err(format!("cannot compile operator {:?}", op)),
                 }
             }
