@@ -14,7 +14,7 @@ mod test;
 fn main() {
     let args = env::args().collect::<Vec<_>>();
     if args.len() != 2 {
-        println!("please provide file to run as argument.");
+        eprintln!("please provide file to run as argument.");
         return;
     }
     let filename = args.get(1).unwrap();
@@ -29,10 +29,15 @@ fn main() {
             return;
         }
     };
-    for token in &tokens {
-        print!("{}", token.kind);
+
+    #[cfg(feature = "print-tokens")]
+    {
+        for token in &tokens {
+            print!("{}", token.kind);
+        }
+        println!();
     }
-    println!();
+
     use parsing::parser::program_parser;
 
     let statements = match program_parser::program(&tokens) {
@@ -44,21 +49,22 @@ fn main() {
         }
     };
 
-    //for stmt in &statements {
-    //    println!("{:?}", stmt);
-    //}
+    #[cfg(feature = "print-ast")]
+    for stmt in &statements {
+        println!("{:?}", stmt);
+    }
 
     compile::syntax_level_check::check(&statements).unwrap();
     let statements = compile::syntax_level_opt::optimize(statements);
 
-    //for stmt in &statements {
-    //    println!("{:?}", stmt);
-    //}
+    #[cfg(feature = "print-ast")]
+    for stmt in &statements {
+        println!("{:?}", stmt);
+    }
 
     let chunks = Compiler::compile(&statements).unwrap();
 
-    //println!("{}", chunks[0]);
-
+    #[cfg(feature = "print-chunk")]
     for chunk in &chunks {
         println!("{}", chunk);
     }

@@ -87,7 +87,7 @@ impl VM {
         }
 
         while ip < current_chunk.code.len() {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "print-execution")]
             print!("{} => ", current_chunk.code[ip]);
             match current_chunk.code[ip] {
                 Opcode::Print => {
@@ -272,7 +272,7 @@ impl VM {
                     self.stack.push(ret_value);
                 }
             }
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "print-execution")]
             println!("{:?}", self.stack);
         }
 
