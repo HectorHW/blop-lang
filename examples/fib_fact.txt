@@ -12,10 +12,14 @@ assert fibvalue?=89
 print fib(10)
 
 def fact(n) =
-    if n?=1
-        1
-    else
-        n*fact(n-1)
+    def fact1(n, a) =
+        if n?=1
+            a
+        else
+            fact1(n-1, a*n)
+
+    fact1(n, 1)
+
 var factvalue = fact(5)
 assert factvalue?=120
 print factvalue

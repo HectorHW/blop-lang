@@ -94,6 +94,7 @@ impl AddAssign<Opcode> for Chunk {
 impl Display for Chunk {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{:-^40}", format!("chunk {}", self.name))?;
+        writeln!(f, "constants: {:?}", self.constants)?;
         let strings = chunk_pretty_printer::draw_chunk(self);
         for s in &strings {
             writeln!(f, "{}", s)?

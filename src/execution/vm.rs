@@ -49,7 +49,6 @@ impl VM {
         let mut ip = 0;
         let mut current_chunk_id = 0;
         let mut current_chunk = program.get(current_chunk_id).unwrap();
-        let mut arg_1_register = 0;
 
         macro_rules! checked_stack_pop {
             () => {{
@@ -97,11 +96,10 @@ impl VM {
                     ip += 1;
                 }
                 Opcode::LoadConst(idx) => {
-                    arg_1_register <<= 16;
-                    arg_1_register += idx as usize;
+                    let idx = idx as usize;
                     let value = *current_chunk
                         .constants
-                        .get(arg_1_register)
+                        .get(idx)
                         .ok_or(runtime_error!(OperandIndexing))?;
                     self.stack.push(value);
                     ip += 1;
