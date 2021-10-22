@@ -21,6 +21,7 @@ pub enum Expr {
     Binary(Op, Box<Expr>, Box<Expr>),
     IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Block(Vec<Stmt>),
+    SingleStatement(Stmt),
     Call(Box<Expr>, Vec<Box<Expr>>),
 }
 
