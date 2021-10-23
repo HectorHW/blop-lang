@@ -255,10 +255,12 @@ impl GC {
                 chunk_id: *chunk_id,
             }, //no cloning necessary for function as it itself carries no data that can change during runtime
 
-            StackObject::MutableString(..)
-            | StackObject::ConstantString(..)
-            | StackObject::Vector(..)
-            | StackObject::Map(..) => {
+            StackObject::ConstantString(ptr1, ptr2) => {
+                StackObject::ConstantString(*ptr1, *ptr2)
+                //constant string are *cough cough* counstant, no need to add new object, just reuse old one
+            }
+
+            StackObject::MutableString(..) | StackObject::Vector(..) | StackObject::Map(..) => {
                 let owned_ref = obj.unwrap_traceable().expect("null ptr in clone");
                 let new_obj = owned_ref.clone();
                 let obj_boxed = Box::new(new_obj);
@@ -275,7 +277,7 @@ impl GC {
         self.objects.len()
     }
 
-    pub fn clear(&mut self) {
+    pub unsafe fn clear(&mut self) {
         self.objects.clear()
     }
 
