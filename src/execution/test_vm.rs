@@ -3,7 +3,7 @@ use crate::execution::chunk::Opcode::*;
 use crate::execution::vm::InterpretErrorKind::{StackUnderflow, ZeroDivision};
 use crate::execution::vm::VM;
 
-use crate::data::values::Value;
+use crate::data::objects::Value;
 
 #[test]
 fn single_push_should_create_value_on_stack() {

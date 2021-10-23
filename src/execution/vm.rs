@@ -1,10 +1,12 @@
-use crate::data::values::Value;
+use crate::data::gc::GC;
+use crate::data::objects::Value;
 use crate::execution::chunk::{Chunk, Opcode};
 
 pub struct VM {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
     locals_offset: usize,
+    pub gc: GC,
 }
 
 pub struct CallStackValue {
@@ -41,6 +43,7 @@ impl VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
             locals_offset: 0,
+            gc: GC::new(16000),
         }
     }
 
@@ -110,7 +113,7 @@ impl VM {
                 }
 
                 Opcode::Add => {
-                    //let second_operand = checked_stack_pop!();
+                    //let second_operand = checked_stack_pop!()
                     let second_operand = as_int!(checked_stack_pop!()?)?;
 
                     let first_operand = as_int!(checked_stack_pop!()?)?;
@@ -274,6 +277,10 @@ impl VM {
             }
             #[cfg(feature = "print-execution")]
             println!("{:?}", self.stack);
+
+            unsafe {
+                self.gc.mark_and_sweep(self.stack.iter(), program);
+            }
         }
 
         Ok(())
