@@ -1,4 +1,4 @@
-use crate::data::values::Value;
+use crate::data::objects::Value;
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Token, TokenKind};
