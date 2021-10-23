@@ -2,9 +2,10 @@
 
 use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
 use crate::execution::chunk::Chunk;
+use std::pin::Pin;
 
 pub struct GC {
-    objects: Vec<Box<OwnedObject>>,
+    objects: Vec<Pin<Box<OwnedObject>>>,
     new_allocations: usize,
     pub new_allocations_threshold: usize,
 }
@@ -17,7 +18,9 @@ impl StackObject {
             }
 
             _ => {
-                self.unwrap_traceable().map(|obj| obj.mark(value));
+                if let Some(obj) = self.unwrap_traceable() {
+                    obj.mark(value)
+                }
             }
         }
     }
@@ -195,7 +198,7 @@ impl GC {
             self.new_allocations += 1;
             let obj = T::store(item);
             let boxed = Box::new(obj);
-            self.objects.push(boxed);
+            self.objects.push(Pin::new(boxed));
 
             let box_ref = self.objects.last_mut().unwrap(); //obj is not null
 
@@ -264,7 +267,7 @@ impl GC {
                 let owned_ref = obj.unwrap_traceable().expect("null ptr in clone");
                 let new_obj = owned_ref.clone();
                 let obj_boxed = Box::new(new_obj);
-                self.objects.push(obj_boxed);
+                self.objects.push(Pin::new(obj_boxed));
 
                 let mut_ref = self.objects.last_mut().unwrap();
 
