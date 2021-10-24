@@ -389,6 +389,12 @@ impl VM {
                     self.stack.push(value);
                     ip += 1;
                 }
+                Opcode::Duplicate => {
+                    let value = checked_stack_pop!()?;
+                    self.stack.push(value);
+                    self.stack.push(value);
+                    ip += 1;
+                }
             }
             #[cfg(feature = "print-execution")]
             {

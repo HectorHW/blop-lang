@@ -1,0 +1,9 @@
+def add(n) =
+    def add(x) =
+        x+n
+    add
+
+var add2 = add(2)
+
+assert add2(3)?=5
+print add2(3)

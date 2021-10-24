@@ -180,7 +180,7 @@ impl Compiler {
                 Some(_) => {}
                 None => {
                     return Err(format!(
-                        "arguement {} repeats in function {}",
+                        "argument {} repeats in function {}",
                         arg_name.get_string().unwrap(),
                         name.get_string().unwrap()
                     ));
@@ -188,10 +188,49 @@ impl Compiler {
             }
         }
 
+        self.new_scope(name);
+
+        let mut closed_arguments = 0;
+
+        for arg in args {
+            if let VariableType::Boxed = self
+                .variable_types
+                .get(name)
+                .unwrap()
+                .get(arg.get_string().unwrap())
+                .unwrap()
+            {
+                if closed_arguments == 0 {
+                    self.define_local("_", VariableType::Normal);
+                    *self.current_chunk() += Opcode::LoadImmediateInt(0);
+                }
+
+                let (_, real_idx) = self.lookup_local(arg.get_string().unwrap()).unwrap();
+                *self.current_chunk() += Opcode::NewBox;
+                *self.current_chunk() += Opcode::Duplicate;
+                *self.current_chunk() += Opcode::LoadLocal(real_idx as u16);
+                *self.current_chunk() += Opcode::StoreBox;
+                self.define_local(arg.get_string().unwrap(), VariableType::Boxed);
+                closed_arguments += 1;
+            }
+        }
+
+        if closed_arguments == 0 {
+            self.pop_scope();
+        }
+
         self.require_value();
         let code = self.visit_expr(body)?;
         self.pop_requirement();
         self.current_chunk().append(code);
+
+        if closed_arguments > 0 {
+            //pop arguments
+            let (_, fictional_slot) = self.lookup_local("_").unwrap();
+            *self.current_chunk() += Opcode::StoreLocal(fictional_slot as u16);
+            *self.current_chunk() += Opcode::Pop(closed_arguments as u16);
+        }
+
         *self.current_chunk() += Opcode::Return;
 
         //load current compiler
