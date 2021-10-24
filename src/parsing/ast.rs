@@ -20,9 +20,9 @@ pub enum Expr {
     Name(Token),
     Binary(Token, Box<Expr>, Box<Expr>),
     IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
-    Block(Vec<Stmt>),
+    Block(Token, Vec<Stmt>),
     SingleStatement(Stmt),
     Call(Box<Expr>, Vec<Box<Expr>>),
 }
 
-pub type Program = Vec<Stmt>;
+pub type Program = Box<Expr>;

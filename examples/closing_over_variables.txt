@@ -1,0 +1,7 @@
+var a = 1
+def x =
+    a
+
+var value = x()
+assert value?=1
+print value

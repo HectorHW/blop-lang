@@ -1,39 +1,60 @@
+use crate::compile::syntax_level_check::{BlockNameMap, ClosedNamesMap, VariableType};
 use crate::data::objects::Value;
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
-use crate::parsing::lexer::{Token, TokenKind};
+use crate::parsing::lexer::TokenKind::BeginBlock;
+use crate::parsing::lexer::{Index, Token, TokenKind};
 use std::collections::HashMap;
 
 pub struct Compiler {
-    names: Vec<HashMap<String, usize>>,
+    names: Vec<HashMap<String, (VariableType, usize)>>,
     _needs_value: Vec<bool>,
     chunks: Vec<Chunk>,
     total_variables: usize,
-    current_chunk_idx: usize,
+    total_closed_variables: usize,
+    current_chunk_idx: Vec<usize>,
+    current_block: Vec<Token>,
+    current_function: Vec<Token>,
+    variable_types: BlockNameMap,
+    closed_names: ClosedNamesMap,
 }
 
 impl Compiler {
-    pub fn new() -> Compiler {
+    pub fn new(variable_types: BlockNameMap, closed_names: ClosedNamesMap) -> Compiler {
         Compiler {
             names: vec![],
             _needs_value: vec![],
             chunks: vec![],
             total_variables: 0,
-            current_chunk_idx: 0,
+            total_closed_variables: 0,
+            current_chunk_idx: vec![0],
+            current_block: vec![],
+            current_function: vec![],
+            variable_types,
+            closed_names,
         }
     }
 
-    pub fn compile(program: &Program) -> Result<Vec<Chunk>, String> {
-        let mut compiler = Compiler::new();
+    pub fn compile(
+        program: &Program,
+        variable_types: BlockNameMap,
+        closed_names: ClosedNamesMap,
+    ) -> Result<Vec<Chunk>, String> {
+        let mut compiler = Compiler::new(variable_types, closed_names);
 
         compiler.chunks = vec![Chunk::new("<script>".to_string())];
-        compiler.new_scope();
+        let block_identifier = match program.as_ref() {
+            Expr::Block(bt, _) => bt,
+            _ => &Token {
+                kind: BeginBlock,
+                position: Index(0, 0),
+            }, //wont be used as we are not inside block
+        };
+        compiler.new_scope(block_identifier);
 
         compiler.require_nothing();
-        for stmt in program {
-            let code = compiler.visit_stmt(stmt)?;
-            compiler.current_chunk().append(code);
-        }
+        let code = compiler.visit_expr(program)?;
+        compiler.current_chunk().append(code);
         compiler.pop_requirement();
         *compiler.current_chunk() += Opcode::Return;
         Ok(compiler.chunks)
@@ -56,10 +77,12 @@ impl Compiler {
     }
 
     fn current_chunk(&mut self) -> &mut Chunk {
-        self.chunks.get_mut(self.current_chunk_idx).unwrap()
+        self.chunks
+            .get_mut(*self.current_chunk_idx.last().unwrap())
+            .unwrap()
     }
 
-    fn lookup_local(&mut self, name: &str) -> Option<usize> {
+    fn lookup_local(&self, name: &str) -> Option<(VariableType, usize)> {
         for scope in self.names.iter().rev() {
             if scope.contains_key(name) {
                 return Some(*scope.get(name).unwrap());
@@ -68,25 +91,45 @@ impl Compiler {
         None
     }
 
-    fn new_variable_slot(&mut self, variable_name: &str) -> Option<usize> {
+    fn lookup_block(&self, name: &str) -> Option<(VariableType, usize)> {
+        self.names.last().unwrap().get(name).cloned()
+    }
+
+    fn define_local(
+        &mut self,
+        variable_name: &str,
+        var_type: VariableType,
+    ) -> Option<(VariableType, usize)> {
         if self.names.last().unwrap().contains_key(variable_name) {
             return None;
         }
+
         let var_index = self.total_variables;
         self.total_variables += 1;
         self.names
             .last_mut()
             .unwrap()
-            .insert(variable_name.to_string(), var_index);
-        Some(var_index)
+            .insert(variable_name.to_string(), (var_type, var_index));
+        Some((var_type, var_index))
     }
 
-    fn new_scope(&mut self) {
+    fn define_closed_variable(&mut self, variable_name: &str) -> Option<(VariableType, usize)> {
+        let idx = self.total_closed_variables;
+        self.total_closed_variables += 1;
+        self.names
+            .last_mut()
+            .unwrap()
+            .insert(variable_name.to_string(), (VariableType::Closed, idx))
+    }
+
+    fn new_scope(&mut self, token: &Token) {
         self.names.push(HashMap::new());
+        self.current_block.push(token.clone());
     }
 
     fn pop_scope(&mut self) -> usize {
         let scope = self.names.pop().unwrap();
+        self.current_block.pop();
         let items_in_scope = scope.len();
         drop(scope);
         self.total_variables -= items_in_scope;
@@ -110,19 +153,30 @@ impl Compiler {
             name.position
         )));
 
-        let previous_chunk_idx = self.current_chunk_idx;
+        let previous_total_closed_variables = self.total_closed_variables;
         let previous_total_variables = self.total_variables;
-        self.current_chunk_idx = new_chunk_idx;
+        self.current_chunk_idx.push(new_chunk_idx);
         self.total_variables = 0;
+        self.total_closed_variables = 0;
         //compile body
 
-        self.new_scope();
+        self.new_scope(name);
 
-        self.new_variable_slot(name.get_string().unwrap()).unwrap();
+        self.define_local(name.get_string().unwrap(), VariableType::Normal)
+            .unwrap();
         //define function inside itself
 
+        let closures = (unsafe { (self as *const Compiler).as_ref().unwrap() })
+            .closed_names
+            .get(name)
+            .unwrap();
+
+        for closed_variable in closures {
+            self.define_closed_variable(closed_variable);
+        } //define closed values
+
         for arg_name in args {
-            match self.new_variable_slot(arg_name.get_string().unwrap()) {
+            match self.define_local(arg_name.get_string().unwrap(), VariableType::Normal) {
                 Some(_) => {}
                 None => {
                     return Err(format!(
@@ -133,7 +187,7 @@ impl Compiler {
                 }
             }
         }
-        //self.new_variable_slot("_").unwrap(); // to store return value
+
         self.require_value();
         let code = self.visit_expr(body)?;
         self.pop_requirement();
@@ -142,8 +196,9 @@ impl Compiler {
 
         //load current compiler
         std::mem::swap(&mut self.names, &mut scope_stack);
-        self.current_chunk_idx = previous_chunk_idx;
+        self.current_chunk_idx.pop();
         self.total_variables = previous_total_variables;
+        self.total_closed_variables = previous_total_closed_variables;
 
         Ok(new_chunk_idx)
     }
@@ -164,18 +219,36 @@ impl Compiler {
             }
 
             Stmt::VarDeclaration(n, e) => {
-                if e.is_none() {
-                    result.push(Opcode::LoadImmediateInt(0));
-                } else {
-                    self.require_value();
-                    let mut assignment_body = self.visit_expr(e.as_ref().unwrap())?;
-                    self.pop_requirement();
-                    result.append(&mut assignment_body);
+                match self.lookup_block(n.get_string().unwrap()) {
+                    Some((VariableType::Boxed, idx)) => {
+                        result.push(Opcode::LoadLocal(idx as u16)); //load box
+                        if e.is_none() {
+                            result.push(Opcode::LoadImmediateInt(0));
+                        } else {
+                            self.require_value();
+                            let mut assignment_body = self.visit_expr(e.as_ref().unwrap())?;
+                            self.pop_requirement();
+                            result.append(&mut assignment_body);
+                        }
+                        result.push(Opcode::StoreBox);
+                    }
 
-                    let varname = n.get_string().unwrap();
-                    let _ = self
-                        .new_variable_slot(varname)
-                        .ok_or(format!("redefinition of variable {}", varname))?;
+                    None => {
+                        //variable is not forward-declared => not present on stack yet
+                        if e.is_none() {
+                            result.push(Opcode::LoadImmediateInt(0));
+                        } else {
+                            self.require_value();
+                            let mut assignment_body = self.visit_expr(e.as_ref().unwrap())?;
+                            self.pop_requirement();
+                            result.append(&mut assignment_body);
+                        }
+                        let varname = n.get_string().unwrap();
+                        let _ = self
+                            .define_local(varname, VariableType::Normal)
+                            .ok_or(format!("redefinition of variable {}", varname))?;
+                    }
+                    _a => panic!("{:?}", _a),
                 }
 
                 if self.needs_value() {
@@ -186,10 +259,14 @@ impl Compiler {
             Stmt::Assignment(target, expr) => {
                 let varname = target.get_string().unwrap();
 
-                let var_idx = self.lookup_local(varname).ok_or(format!(
-                    "assignment to undefined variable {} at {}",
+                let (var_type, var_idx) = self.lookup_local(varname).ok_or(format!(
+                    "assignment to undefined variable `{}` at {}",
                     varname, target.position
                 ))?;
+
+                if let VariableType::Boxed = var_type {
+                    result.push(Opcode::LoadLocal(var_idx as u16));
+                }
 
                 self.require_value();
                 let mut expr_body = self.visit_expr(expr)?;
@@ -197,7 +274,11 @@ impl Compiler {
 
                 result.append(&mut expr_body);
 
-                result.push(Opcode::StoreLocal(var_idx as u16)); //TODO extension
+                if let VariableType::Boxed = var_type {
+                    result.push(Opcode::StoreBox);
+                } else {
+                    result.push(Opcode::StoreLocal(var_idx as u16)); //TODO extension
+                }
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0));
@@ -220,17 +301,60 @@ impl Compiler {
             Stmt::FunctionDeclaration { name, args, body } => {
                 let new_chunk_idx = self.compile_function(name, args, body)?;
 
-                self.new_variable_slot(name.get_string().unwrap())
-                    .ok_or_else(|| {
-                        format!("redifinition of name {}", name.get_string().unwrap())
-                    })?;
-
                 let const_idx = self.current_chunk().constants.len();
                 self.current_chunk().constants.push(Value::Function {
                     chunk_id: new_chunk_idx,
                 });
 
-                result.push(Opcode::LoadConst(const_idx as u16)); //define name
+                if let Some((_, idx)) = self.lookup_block(name.get_string().unwrap()) {
+                    //load pointer
+                    result.push(Opcode::LoadLocal(idx as u16));
+                }
+
+                result.push(Opcode::LoadConst(const_idx as u16)); //code block
+
+                if !self.closed_names.get(name).unwrap().is_empty() {
+                    result.push(Opcode::NewClosure);
+                }
+
+                let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
+                    .closed_names
+                    .get(name)
+                    .unwrap();
+
+                for closed_over_value in map_iter {
+                    let name = self.lookup_local(closed_over_value).unwrap();
+
+                    match name {
+                        (VariableType::Normal, var_idx) => {
+                            result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
+                        }
+                        (VariableType::Boxed, var_idx) => {
+                            result.push(Opcode::LoadLocal(var_idx as u16));
+                        }
+                        (VariableType::Closed, idx) => {
+                            result.push(Opcode::LoadClosureValue(idx as u16));
+                        }
+                    };
+                    result.push(Opcode::AddClosedValue);
+                }
+
+                //match self.lookup_local()
+
+                match self.lookup_block(name.get_string().unwrap()) {
+                    Some((VariableType::Boxed, _)) => {
+                        //pointer is on stack
+                        result.push(Opcode::StoreBox);
+                    }
+                    None => {
+                        self.define_local(name.get_string().unwrap(), VariableType::Normal)
+                            .ok_or_else(|| {
+                                format!("redifinition of name {}", name.get_string().unwrap())
+                            })?;
+                    }
+                    _other => panic!("{:?}", _other),
+                }
+
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0));
                 }
@@ -279,12 +403,29 @@ impl Compiler {
             }
 
             Expr::Name(n) => match self.lookup_local(n.get_string().unwrap()) {
-                Some(var_idx) => {
+                Some((VariableType::Normal, var_idx)) => {
                     result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
                     if !self.needs_value() {
                         result.push(Opcode::Pop(1));
                     }
                 }
+
+                Some((VariableType::Boxed, var_idx)) => {
+                    result.push(Opcode::LoadLocal(var_idx as u16));
+                    result.push(Opcode::LoadBox);
+                    if !self.needs_value() {
+                        result.push(Opcode::Pop(1));
+                    }
+                }
+
+                Some((VariableType::Closed, idx)) => {
+                    result.push(Opcode::LoadClosureValue(idx as u16));
+                    result.push(Opcode::LoadBox);
+                    if !self.needs_value() {
+                        result.push(Opcode::Pop(1));
+                    }
+                }
+
                 None => return Err(format!("undeclared variable {}", n.get_string().unwrap())),
             },
 
@@ -320,8 +461,8 @@ impl Compiler {
                 result.append(&mut else_body);
                 result.push(Opcode::Nop);
             }
-            Expr::Block(b) => {
-                let body = self.visit_block(b)?;
+            Expr::Block(block_id, block_body) => {
+                let body = self.visit_block(block_body, block_id)?;
                 result = body;
             }
             Expr::Call(target, args) => {
@@ -350,7 +491,7 @@ impl Compiler {
         Ok(result)
     }
 
-    fn visit_block(&mut self, block: &[Stmt]) -> Result<Vec<Opcode>, String> {
+    fn visit_block(&mut self, block: &[Stmt], block_id: &Token) -> Result<Vec<Opcode>, String> {
         /*
         block that does not return value:
             stmt(return=false)
@@ -373,13 +514,25 @@ impl Compiler {
             stmt(return=return)
         */
 
-        self.new_scope();
+        self.new_scope(block_id);
 
         let mut result = vec![];
 
         if self.needs_value() {
-            self.new_variable_slot("_").unwrap();
+            self.define_local("_", VariableType::Normal).unwrap();
             result.push(Opcode::LoadImmediateInt(0)); // _ variable
+        }
+
+        let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
+            .variable_types
+            .get(block_id)
+            .unwrap();
+
+        for (name, var_type) in map_iter {
+            if let VariableType::Boxed = var_type {
+                self.define_local(name, VariableType::Boxed);
+                result.push(Opcode::NewBox);
+            }
         }
 
         let (last_statement, other_statements) = block.split_last().ok_or("got empty block")?;
@@ -394,7 +547,7 @@ impl Compiler {
         let mut last_statement = self.visit_stmt(last_statement)?;
         result.append(&mut last_statement);
         if self.needs_value() {
-            let fictional_slot = self.lookup_local("_").unwrap();
+            let (_, fictional_slot) = self.lookup_local("_").unwrap();
             result.push(Opcode::StoreLocal(fictional_slot as u16));
             let scope_variable_count = self.pop_scope();
             result.push(Opcode::Pop((scope_variable_count - 1) as u16));

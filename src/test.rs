@@ -1,27 +1,49 @@
 use super::run_file;
 
 macro_rules! test_file {
-    ($filename:expr) => {
-        run_file($filename).unwrap()
+    ($name:ident) => {
+        #[test]
+        fn $name() {
+            let mut path = String::new();
+            path.push_str("examples/");
+            path.push_str(stringify!($name));
+            path.push_str(".txt");
+            println!("{}", path);
+
+            run_file(&path).unwrap();
+        }
     };
 }
 
-#[test]
-fn test_simple_assertions() {
-    test_file!("examples/simple_assertion.txt")
+macro_rules! test_fail_file {
+    ($name:ident) => {
+        #[test]
+        fn $name() {
+            let mut path = String::new();
+            path.push_str("examples/");
+            path.push_str(stringify!($name));
+            path.push_str(".txt");
+            println!("{}", path);
+
+            run_file(&path).unwrap_err();
+        }
+    };
 }
 
-#[test]
-fn test_conditions() {
-    test_file!("./examples/conditions.txt")
-}
+test_file! {simple_assertion}
 
-#[test]
-fn test_function_as_value() {
-    test_file!("./examples/function_as_value.txt")
-}
+test_file! {conditions}
 
-#[test]
-fn fib_fact() {
-    test_file!("./examples/fib_fact.txt")
-}
+test_file! {function_as_value}
+
+test_file! {fib_fact}
+
+test_file! {closing_over_variables}
+
+test_file! {mutual_recursion}
+
+test_fail_file! {fail_undefined_variable_inside_function}
+
+test_fail_file! {fail_undefined_variable}
+
+test_file! {closing_over_reassigned}

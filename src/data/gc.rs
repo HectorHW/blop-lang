@@ -1,6 +1,7 @@
 // this module defines api for working with objects from memory side
 
 use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
+use crate::data::objects::{Closure, ValueBox};
 use crate::execution::chunk::Chunk;
 use std::pin::Pin;
 
@@ -49,6 +50,14 @@ impl OwnedObject {
                 let object_ptr = s.wrap_private();
                 StackObject::ConstantString(trace_ptr, object_ptr)
             }
+            OwnedObjectItem::Box(ptr) => {
+                let object_ptr = ptr.wrap_private();
+                StackObject::Box(trace_ptr, object_ptr)
+            }
+            OwnedObjectItem::Closure(ptr) => {
+                let object_ptr = ptr.wrap_private();
+                StackObject::Closure(trace_ptr, object_ptr)
+            }
         }
     }
 
@@ -74,6 +83,14 @@ impl OwnedObject {
                 }
             }
             OwnedObjectItem::MutableString(_) | OwnedObjectItem::ConstantString(_) => {} //has no children
+            OwnedObjectItem::Box(ptr) => {
+                ptr.0.mark(value);
+            }
+            OwnedObjectItem::Closure(Closure { closed_values, .. }) => {
+                for closed_element in closed_values {
+                    closed_element.mark(value);
+                }
+            }
         }
     }
 
@@ -179,6 +196,33 @@ impl GCAlloc for _ConstHeapString {
         }
     }
 }
+impl GCNew for ValueBox {}
+
+impl GCAlloc for ValueBox {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(_obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::Box(_obj),
+            marker: false,
+        }
+    }
+}
+
+impl GCAlloc for Closure {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(_obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::Closure(_obj),
+            marker: false,
+        }
+    }
+}
 
 impl GC {
     pub fn new(thr: usize) -> Self {
@@ -263,7 +307,11 @@ impl GC {
                 //constant string are *cough cough* counstant, no need to add new object, just reuse old one
             }
 
-            StackObject::MutableString(..) | StackObject::Vector(..) | StackObject::Map(..) => {
+            StackObject::MutableString(..)
+            | StackObject::Vector(..)
+            | StackObject::Map(..)
+            | StackObject::Closure(..)
+            | StackObject::Box(..) => {
                 let owned_ref = obj.unwrap_traceable().expect("null ptr in clone");
                 let new_obj = owned_ref.clone();
                 let obj_boxed = Box::new(new_obj);

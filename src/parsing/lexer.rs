@@ -5,8 +5,8 @@ use std::iter::Peekable;
 use std::mem;
 use std::str::CharIndices;
 
-#[derive(Copy, Clone, Debug, Default)]
-pub struct Index(usize, usize);
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Index(pub usize, pub usize);
 
 impl Display for Index {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -14,13 +14,13 @@ impl Display for Index {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Token {
     pub position: Index,
     pub kind: TokenKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum TokenKind {
     BeginBlock,
     EndBlock,

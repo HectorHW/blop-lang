@@ -1,8 +1,9 @@
 use crate::compile::compiler::Compiler;
 use crate::execution::vm::VM;
-use crate::parsing::ast::Stmt;
+use crate::parsing::ast::Expr;
 use peg::error::ParseError;
 use std::env;
+extern crate indexmap;
 
 mod compile;
 mod data;
@@ -54,7 +55,14 @@ fn main() {
         println!("{:?}", stmt);
     }
 
-    compile::syntax_level_check::check(&statements).unwrap();
+    let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
+    for (token, index_map) in &variable_types {
+        println!("{:?}", token);
+        for item in index_map.iter() {
+            println!("     {} {:?}", item.0, item.1);
+        }
+    }
+
     let statements = compile::syntax_level_opt::optimize(statements);
 
     #[cfg(feature = "print-ast")]
@@ -62,7 +70,7 @@ fn main() {
         println!("{:?}", stmt);
     }
 
-    let chunks = Compiler::compile(&statements).unwrap();
+    let chunks = Compiler::compile(&statements, variable_types, closed_names).unwrap();
 
     #[cfg(feature = "print-chunk")]
     for chunk in &chunks {
@@ -82,18 +90,18 @@ fn normalize_string(s: String) -> String {
 }
 
 pub fn run_file(filename: &str) -> Result<(), String> {
-    let file_content = std::fs::read_to_string(filename).or(Err("failed to read file"))?;
+    let file_content = std::fs::read_to_string(filename)
+        .map_err(|_e| format!("failed to read file {}", filename))?;
     let file_content = normalize_string(file_content);
     let tokens = parsing::lexer::tokenize(&file_content)?;
     use parsing::parser::program_parser;
 
-    let statements: Vec<Stmt> = program_parser::program(&tokens)
+    let statements: Box<Expr> = program_parser::program(&tokens)
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
 
-    compile::syntax_level_check::check(&statements).unwrap();
+    let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
     let statements = compile::syntax_level_opt::optimize(statements);
-
-    let chunks = Compiler::compile(&statements)?;
+    let chunks = Compiler::compile(&statements, variable_types, closed_names)?;
     let mut vm = VM::new();
     vm.run(&chunks).map_err(|error| {
         format!(

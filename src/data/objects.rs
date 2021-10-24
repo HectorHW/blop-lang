@@ -1,5 +1,4 @@
 use crate::data::objects::StackObject::Function;
-use crate::execution::chunk::Chunk;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -15,6 +14,8 @@ pub enum StackObject {
     Vector(PrivatePtr<OwnedObject>, PrivatePtr<VVec>),
     MutableString(PrivatePtr<OwnedObject>, PrivatePtr<String>),
     ConstantString(PrivatePtr<OwnedObject>, PrivatePtr<String>),
+    Box(PrivatePtr<OwnedObject>, PrivatePtr<ValueBox>),
+    Closure(PrivatePtr<OwnedObject>, PrivatePtr<Closure>),
 }
 
 #[derive(Clone, Debug)]
@@ -24,11 +25,28 @@ pub struct OwnedObject {
 }
 
 #[derive(Clone, Debug)]
+pub struct ValueBox(pub StackObject);
+
+impl Default for ValueBox {
+    fn default() -> Self {
+        ValueBox(StackObject::Int(0))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Closure {
+    pub closed_values: Vec<StackObject>,
+    pub chunk_id: usize,
+}
+
+#[derive(Clone, Debug)]
 pub enum OwnedObjectItem {
     ConstantString(String),
     MutableString(String),
     Vector(VVec),
     Map(VMap),
+    Box(ValueBox),
+    Closure(Closure),
 }
 
 pub type VVec = Vec<StackObject>;
@@ -44,10 +62,10 @@ impl<T> PrivatePtr<T> {
     pub(self) fn unwrap(&self) -> *mut T {
         self.ptr
     }
-    pub(super) fn unwrap_ref(&self) -> Option<&T> {
+    pub fn unwrap_ref(&self) -> Option<&T> {
         unsafe { self.ptr.as_ref() }
     }
-    pub(super) fn unwrap_ref_mut(&self) -> Option<&mut T> {
+    pub fn unwrap_ref_mut(&self) -> Option<&mut T> {
         unsafe { self.ptr.as_mut() }
     }
 }
@@ -79,21 +97,25 @@ impl PtrWrapper for VVec {}
 
 impl PtrWrapper for String {}
 
+impl PtrWrapper for ValueBox {}
+
+impl PtrWrapper for Closure {}
+
 impl Display for StackObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             StackObject::Int(n) => {
                 write!(f, "{}", n)
             }
-            StackObject::Function { .. } => {
-                write!(f, "{}", "function")
+            StackObject::Function { chunk_id, .. } => {
+                write!(f, "function<{}>", chunk_id)
             }
             StackObject::Map(_, ptr) => write!(
                 f,
                 "{}",
                 ptr.unwrap_ref()
                     .map(|o| format!("Map {:?}", o))
-                    .unwrap_or("null".to_string())
+                    .unwrap_or_else(|| "null".to_string())
             ),
 
             StackObject::Vector(_, ptr) => write!(
@@ -101,28 +123,45 @@ impl Display for StackObject {
                 "{}",
                 ptr.unwrap_ref()
                     .map(|o| format!("Vector {:?}", o))
-                    .unwrap_or("null".to_string()),
+                    .unwrap_or_else(|| "null".to_string()),
             ),
 
             StackObject::MutableString(_, ptr) => write!(
                 f,
                 "{}",
                 ptr.unwrap_ref()
-                    .map(|o| format!("{}", o))
-                    .unwrap_or("null".to_string()),
+                    .cloned()
+                    .unwrap_or_else(|| "null".to_string()),
             ),
 
             StackObject::ConstantString(_, ptr) => write!(
                 f,
                 "{}",
                 ptr.unwrap_ref()
-                    .map(|o| format!("{}", o))
-                    .unwrap_or("null".to_string()),
+                    .cloned()
+                    .unwrap_or_else(|| "null".to_string()),
             ),
+            StackObject::Box(_, ptr) => write!(
+                f,
+                "{}",
+                ptr.unwrap_ref()
+                    .map(|o| format!("{}", o.0))
+                    .unwrap_or_else(|| "null".to_string()),
+            ),
+            StackObject::Closure(_, ptr) => {
+                let closure = ptr.unwrap_ref().unwrap();
+                write!(
+                    f,
+                    "closure<{}, {}>",
+                    closure.closed_values.len(),
+                    closure.chunk_id
+                )
+            }
         }
     }
 }
 
+#[allow(dead_code)]
 impl StackObject {
     pub fn wrap_from_int(x: i64) -> StackObject {
         StackObject::Int(x)
@@ -132,8 +171,12 @@ impl StackObject {
         use StackObject::*;
         match self {
             Int(..) | MutableString(..) | ConstantString(..) => true,
+            Box(_gc_ptr, obj_ptr) => {
+                let object = obj_ptr.unwrap_ref().unwrap();
+                object.0.can_hash()
+            }
 
-            Map(..) | Vector(..) | Function { .. } => false,
+            Map(..) | Vector(..) | Function { .. } | Closure(..) => false,
         }
     }
 
@@ -178,6 +221,8 @@ impl StackObject {
             StackObject::MutableString(trace_ptr, _)
             | StackObject::Vector(trace_ptr, _)
             | StackObject::Map(trace_ptr, _)
+            | StackObject::Box(trace_ptr, _)
+            | StackObject::Closure(trace_ptr, _)
             | StackObject::ConstantString(trace_ptr, _) => trace_ptr.unwrap_ref_mut(),
 
             StackObject::Int(_) => None,
@@ -201,6 +246,8 @@ impl StackObject {
             StackObject::Vector(_, _) => "Vector".to_string(),
             StackObject::MutableString(_, _) => "String".to_string(),
             StackObject::ConstantString(_, _) => "ConstantString".to_string(),
+            StackObject::Box(_, _) => "Box".to_string(),
+            StackObject::Closure(_, _) => "Closure".to_string(),
         }
     }
 }
@@ -208,11 +255,8 @@ impl StackObject {
 impl PartialEq for StackObject {
     fn eq(&self, other: &Self) -> bool {
         //string equality - MutString, ShortString, (maybe ConstString)
-        match (self.unwrap_any_str(), other.unwrap_any_str()) {
-            (Some(s1), Some(s2)) => {
-                return s1 == s2;
-            }
-            _ => {}
+        if let (Some(s1), Some(s2)) = (self.unwrap_any_str(), other.unwrap_any_str()) {
+            return s1 == s2;
         };
 
         if std::mem::discriminant(self) != std::mem::discriminant(other) {
@@ -262,17 +306,19 @@ impl Hash for StackObject {
             StackObject::Vector(..) | StackObject::Map(..) | Function { .. } => {
                 panic!("hash on unhashable object")
             }
+            StackObject::Box(..) => panic!("cannot hash box"),
+            StackObject::Closure(..) => panic!("cannot hash closure"),
         }
     }
 }
 
+#[allow(dead_code)]
 impl OwnedObject {
     pub fn can_hash(&self) -> bool {
-        match &self.item {
-            OwnedObjectItem::MutableString(..) | OwnedObjectItem::ConstantString(..) => true,
-
-            _ => false,
-        }
+        matches!(
+            &self.item,
+            OwnedObjectItem::MutableString(..) | OwnedObjectItem::ConstantString(..)
+        )
     }
 
     fn unwrap_map(&mut self) -> Option<&mut VMap> {
