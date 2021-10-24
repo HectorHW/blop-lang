@@ -25,6 +25,8 @@ pub enum Opcode {
     AddClosedValue,
     LoadClosureValue(u16),
 
+    Duplicate,
+
     LoadImmediateInt(i16),
     Add,
     Sub,
@@ -80,6 +82,7 @@ impl Display for Opcode {
                 NewClosure => "NewClosure".to_string(),
                 AddClosedValue => "AddClosedValue".to_string(),
                 LoadClosureValue(idx) => format!("LoadClosureValue[{}]", idx),
+                Duplicate => "Duplicate".to_string(),
             }
         )
     }

@@ -47,3 +47,5 @@ test_fail_file! {fail_undefined_variable_inside_function}
 test_fail_file! {fail_undefined_variable}
 
 test_file! {closing_over_reassigned}
+
+test_file! {closing_over_arguments}
