@@ -10,11 +10,11 @@ macro_rules! t {
 peg::parser! {
     pub grammar program_parser() for [Token] {
         use TokenKind::*;
-        pub rule program() -> Vec<Stmt>
-            = block()
+        pub rule program() -> Box<Expr>
+            = block_expr()
 
-        rule block() -> Vec<Stmt> =
-            [t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [t!(EndBlock)] {s}
+        rule block() -> (Token, Vec<Stmt>) =
+            [bb@t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [t!(EndBlock)] {(bb, s)}
 
 
         rule stmt() -> Stmt =
@@ -66,9 +66,12 @@ peg::parser! {
                 {Box::new(Expr::IfExpr(cond, then, Some(else_body)))}
 
         rule expr() -> Box<Expr> =
-            b:block() {Box::new(Expr::Block(b))} /
+            block_expr() /
             if_expr() /
             simple_expr()
+
+        rule block_expr() -> Box<Expr> =
+            b:block() {Box::new(Expr::Block(b.0, b.1))}
 
         rule simple_expr() -> Box<Expr> =
             arithmetic()

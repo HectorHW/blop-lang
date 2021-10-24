@@ -1,5 +1,5 @@
 use crate::data::gc::GC;
-use crate::data::objects::Value;
+use crate::data::objects::{Closure, Value, ValueBox};
 use crate::execution::chunk::{Chunk, Opcode};
 
 pub struct VM {
@@ -47,7 +47,7 @@ impl VM {
         }
     }
 
-    pub fn run(&mut self, program: &Vec<Chunk>) -> Result<()> {
+    pub fn run(&mut self, program: &[Chunk]) -> Result<()> {
         use InterpretErrorKind::*;
         let mut ip = 0;
         let mut current_chunk_id = 0;
@@ -85,6 +85,17 @@ impl VM {
                             )
                         })
                     })
+                })
+            };
+        }
+
+        macro_rules! as_closure {
+            ($value:expr) => {
+                Ok($value).and_then(|closure| match &closure {
+                    Value::Closure(_gc_ptr, closure_ptr) => Ok(closure_ptr.unwrap_ref().unwrap()),
+                    other => Err(runtime_error!(TypeError {
+                        message: format!("expected {} but got {}", "function", other.type_string())
+                    })),
                 })
             };
         }
@@ -235,6 +246,7 @@ impl VM {
                     let object = *self.stack.get(self.stack.len() - 1 - arity).unwrap();
                     let chunk_id = match object {
                         Value::Function { chunk_id } => Ok(chunk_id),
+                        Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().unwrap().chunk_id),
                         _ => Err(runtime_error!(TypeError {
                             message: format!("expected function but got {}", object.type_string())
                         })),
@@ -274,9 +286,118 @@ impl VM {
                     self.stack.truncate(new_stack_size);
                     self.stack.push(ret_value);
                 }
+                Opcode::NewBox => {
+                    let box_ref = self.gc.allocate_new::<ValueBox>();
+                    self.stack.push(box_ref);
+                    ip += 1;
+                }
+                Opcode::LoadBox => {
+                    match checked_stack_pop!()? {
+                        Value::Box(_gc, _obj) => {
+                            let box_obj = _obj.unwrap_ref_mut().unwrap();
+                            self.stack.push(box_obj.0);
+                        }
+                        _any_other => {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "expected {} but got {}",
+                                    "box",
+                                    _any_other.type_string()
+                                ),
+                            }))
+                        }
+                    };
+                    ip += 1;
+                }
+
+                Opcode::StoreBox => {
+                    let value = checked_stack_pop!()?;
+                    let addr = checked_stack_pop!()?;
+
+                    match addr {
+                        Value::Box(_gc, _obj) => {
+                            let box_obj = _obj.unwrap_ref_mut().unwrap();
+                            box_obj.0 = value;
+                        }
+                        _any_other => {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "expected {} but got {}",
+                                    "box",
+                                    _any_other.type_string()
+                                ),
+                            }))
+                        }
+                    };
+                    ip += 1;
+                }
+
+                Opcode::NewClosure => {
+                    let value = checked_stack_pop!()?;
+                    let chunk_id = match value {
+                        Value::Function { chunk_id } => chunk_id,
+                        other => {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "expected {} but got {}",
+                                    "function",
+                                    other.type_string()
+                                )
+                            }))
+                        }
+                    };
+
+                    let ptr = self.gc.store(Closure {
+                        closed_values: vec![],
+                        chunk_id,
+                    });
+                    self.stack.push(ptr);
+                    ip += 1;
+                }
+
+                Opcode::AddClosedValue => {
+                    let value = checked_stack_pop!()?;
+                    let closure = checked_stack_pop!()?;
+
+                    match &closure {
+                        Value::Closure(_gc_ptr, closure_ptr) => {
+                            closure_ptr
+                                .unwrap_ref_mut()
+                                .unwrap()
+                                .closed_values
+                                .push(value);
+                        }
+                        other => {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "expected {} but got {}",
+                                    "function",
+                                    other.type_string()
+                                )
+                            }))
+                        }
+                    }
+                    self.stack.push(closure);
+                    ip += 1;
+                }
+                Opcode::LoadClosureValue(idx) => {
+                    let closure = as_closure!(self.stack.get(self.locals_offset).unwrap())?;
+                    let value = *closure
+                        .closed_values
+                        .get(idx as usize)
+                        .ok_or(runtime_error!(OperandIndexing))?;
+                    self.stack.push(value);
+                    ip += 1;
+                }
             }
             #[cfg(feature = "print-execution")]
-            println!("{:?}", self.stack);
+            {
+                print!("[");
+                for item in &self.stack {
+                    print!("{} ", item);
+                }
+                println!("]");
+            }
 
             unsafe {
                 self.gc.mark_and_sweep(self.stack.iter(), program);

@@ -16,6 +16,15 @@ pub enum Opcode {
     LoadGlobal(u16),
     LoadLocal(u16),
     StoreLocal(u16),
+
+    NewBox,
+    LoadBox,
+    StoreBox,
+
+    NewClosure,
+    AddClosedValue,
+    LoadClosureValue(u16),
+
     LoadImmediateInt(i16),
     Add,
     Sub,
@@ -65,6 +74,12 @@ impl Display for Opcode {
                 Call(arity) => format!("Call[{}]", arity),
                 Return => "Return".to_string(),
                 LoadLocal(idx) => format!("LoadLocal[{}]", idx),
+                NewBox => "NewBox".to_string(),
+                LoadBox => "LoadBox".to_string(),
+                StoreBox => "StoreBox".to_string(),
+                NewClosure => "NewClosure".to_string(),
+                AddClosedValue => "AddClosedValue".to_string(),
+                LoadClosureValue(idx) => format!("LoadClosureValue[{}]", idx),
             }
         )
     }

@@ -10,10 +10,7 @@ struct Optimizer {
 pub fn optimize(program: Program) -> Program {
     let mut optimizer = Optimizer::new();
     optimizer.new_scope();
-    program
-        .into_iter()
-        .map(|x| optimizer.visit_stmt(x))
-        .collect()
+    optimizer.visit_expr(program)
 }
 
 impl Optimizer {
@@ -112,14 +109,14 @@ impl Optimizer {
                 Expr::IfExpr(cond, then_body, else_body)
             }
 
-            Expr::Block(mut statements) => {
+            Expr::Block(bb, mut statements) => {
                 if statements.len() == 1 {
                     let statement = statements.remove(0);
                     let e = Box::new(Expr::SingleStatement(statement));
                     *self.visit_expr(e)
                 } else {
                     let statements = statements.into_iter().map(|s| self.visit_stmt(s)).collect();
-                    Expr::Block(statements)
+                    Expr::Block(bb, statements)
                 }
             }
             Expr::Call(target, args) => {
