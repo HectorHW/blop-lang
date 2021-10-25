@@ -22,6 +22,7 @@ def G(x) =
         1
     elif x?=2
         2
+    #implicit 0
 
 assert G(1)?=1
 assert G(2)?=2

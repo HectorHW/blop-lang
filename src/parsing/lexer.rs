@@ -218,6 +218,10 @@ impl<'input> Lexer<'input> {
                     is_reading_indentation = true;
                 }
 
+                '#' => {
+                    self.read_while(&|c| c != '\n');
+                }
+
                 '+' => {
                     result.push(token!(Plus));
                     self.input_iterator.next();
@@ -348,6 +352,9 @@ impl<'input> Lexer<'input> {
                     self.line_number += 1;
                     current_indentation = 0;
                     self.input_iterator.next();
+                }
+                '#' => {
+                    self.read_while(&|c| c != '\n');
                 }
                 _ => {
                     break;
