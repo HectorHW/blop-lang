@@ -105,6 +105,7 @@ struct Lexer<'input> {
     line_start: usize,
     indentation: Vec<usize>,
     keywords: HashMap<String, TokenKind>,
+    brackets: Vec<Token>,
 }
 
 impl<'input> Lexer<'input> {
@@ -130,6 +131,7 @@ impl<'input> Lexer<'input> {
             line_start: 0,
             indentation: vec![],
             keywords,
+            brackets: vec![],
         }
     }
 
@@ -152,6 +154,10 @@ impl<'input> Lexer<'input> {
             .unwrap_or_else(|| TokenKind::Name(s.to_string()))
     }
 
+    fn can_indent(&self) -> bool {
+        self.brackets.is_empty()
+    }
+
     pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
         use TokenKind::*;
         let mut result = vec![Token {
@@ -166,6 +172,11 @@ impl<'input> Lexer<'input> {
         while let Some((_, character)) = self.input_iterator.peek() {
             let character = *character;
             if is_reading_indentation {
+                if !self.can_indent() {
+                    is_reading_indentation = false;
+                    continue;
+                }
+
                 let mut produced_tokens = self.read_identation()?;
 
                 let last = result.pop().unwrap();
@@ -202,10 +213,13 @@ impl<'input> Lexer<'input> {
                     self.input_iterator.next();
                 }
                 '\n' => {
-                    match result.last() {
-                        Some(x) if mem::discriminant(&x.kind) == mem::discriminant(&LineEnd) => {}
-                        _ => {
-                            result.push(token!(LineEnd));
+                    if self.can_indent() {
+                        match result.last() {
+                            Some(x)
+                                if mem::discriminant(&x.kind) == mem::discriminant(&LineEnd) => {}
+                            _ => {
+                                result.push(token!(LineEnd));
+                            }
                         }
                     }
                     self.input_iterator.next(); //skip newline
@@ -268,12 +282,31 @@ impl<'input> Lexer<'input> {
                 }
 
                 '(' => {
-                    result.push(token!(LParen));
+                    let token = token!(LParen);
+                    result.push(token.clone());
+                    self.brackets.push(token);
                     self.input_iterator.next();
                 }
                 ')' => {
-                    result.push(token!(RParen));
-                    self.input_iterator.next();
+                    let token = token!(RParen);
+                    if let Some(TokenKind::LParen) = self.brackets.last().map(|t| t.kind.clone()) {
+                        self.brackets.pop();
+                        result.push(token);
+                        self.input_iterator.next();
+                    } else {
+                        return Err(format!(
+                            "encountered unbalanced `)` at [{}] (matched with {})",
+                            token.position,
+                            match self.brackets.last() {
+                                None => {
+                                    "nothing".to_string()
+                                }
+                                Some(t) => {
+                                    format!("{} at [{}]", t.kind, t.position)
+                                }
+                            }
+                        ));
+                    }
                 }
 
                 '=' => {
@@ -312,6 +345,16 @@ impl<'input> Lexer<'input> {
                     ))
                 }
             }
+        }
+
+        if !self.brackets.is_empty() {
+            let msg = self
+                .brackets
+                .iter()
+                .map(|item| format!("unbalanced {} at [{}]", item.kind, item.position))
+                .collect::<Vec<_>>();
+            let msg = msg.join("\n");
+            return Err(msg);
         }
 
         while !self.indentation.is_empty() {
