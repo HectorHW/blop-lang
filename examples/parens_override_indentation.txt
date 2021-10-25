@@ -1,0 +1,7 @@
+var a =
+    var b = (1+
+            2
+        )
+    b
+assert a?=3
+print a
