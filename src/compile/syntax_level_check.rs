@@ -2,7 +2,7 @@ use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use indexmap::{IndexMap, IndexSet};
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 struct Checker {
     names: Vec<(ScopeType, Token, HashMap<String, bool>)>,
@@ -22,7 +22,7 @@ enum ScopeType {
 pub enum VariableType {
     Normal,
     Boxed,
-    Closed
+    Closed,
 }
 
 pub type BlockNameMap = HashMap<Token, IndexMap<String, VariableType>>;
@@ -55,6 +55,8 @@ impl Checker {
     fn lookup_local(&mut self, name: &Token) -> Result<(), String> {
         let mut passed_function_scope = false;
 
+        let mut depending_functions = HashSet::new();
+
         for (scope_type, scope_identifier, scope_map) in self.names.iter_mut().rev() {
             if passed_function_scope {
                 if scope_map.contains_key(name.get_string().unwrap()) {
@@ -67,7 +69,20 @@ impl Checker {
                         .get_mut(self.current_function.last().unwrap())
                         .unwrap()
                         .insert(name.get_string().unwrap().clone());
+
+                    //mark all functions that are in our way to close over that name
+
+                    for function in depending_functions {
+                        self.closed_names
+                            .get_mut(&function)
+                            .unwrap()
+                            .insert(name.get_string().unwrap().clone());
+                    }
+
                     return Ok(());
+                } else if let ScopeType::Function = scope_type {
+                    //define value as closed in function
+                    depending_functions.insert(scope_identifier.clone());
                 }
             } else {
                 match scope_map.entry(name.get_string().unwrap().clone()) {

@@ -162,10 +162,6 @@ impl Compiler {
 
         self.new_scope(name);
 
-        self.define_local(name.get_string().unwrap(), VariableType::Normal)
-            .unwrap();
-        //define function inside itself
-
         let closures = (unsafe { (self as *const Compiler).as_ref().unwrap() })
             .closed_names
             .get(name)
@@ -174,6 +170,12 @@ impl Compiler {
         for closed_variable in closures {
             self.define_closed_variable(closed_variable);
         } //define closed values
+
+        self.new_scope(name);
+
+        self.define_local(name.get_string().unwrap(), VariableType::Normal)
+            .unwrap();
+        //define function inside itself
 
         for arg_name in args {
             match self.define_local(arg_name.get_string().unwrap(), VariableType::Normal) {
