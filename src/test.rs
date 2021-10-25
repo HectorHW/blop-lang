@@ -49,3 +49,5 @@ test_fail_file! {fail_undefined_variable}
 test_file! {closing_over_reassigned}
 
 test_file! {closing_over_arguments}
+
+test_file! {closing_over_multiple_functions}

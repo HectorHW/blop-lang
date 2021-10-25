@@ -47,6 +47,7 @@ pub enum TokenKind {
     Assert,
     Var,
     If,
+    Elif,
     Else,
     Def,
 }
@@ -77,6 +78,7 @@ impl Display for TokenKind {
                 TokenKind::Assert => "(assert)".to_string(),
                 TokenKind::Def => "(def)".to_string(),
                 TokenKind::Comma => "<,>".to_string(),
+                TokenKind::Elif => "(elif)".to_string(),
             }
         )
     }
@@ -113,6 +115,7 @@ impl<'input> Lexer<'input> {
             ("print", Print),
             ("var", Var),
             ("if", If),
+            ("elif", Elif),
             ("else", Else),
             ("def", Def),
         ]

@@ -55,15 +55,37 @@ peg::parser! {
             [a@t!(Assert)] e:expr() {Stmt::Assert(a, e)}
 
         rule if_expr() -> Box<Expr> =
-            if_then_else() / if_then()
+            if_elif_else()/ if_elif() / if_then()
+
+        rule if_elif() -> Box<Expr> =
+            [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)]? elif:elif_body()+
+                {
+                    let mut last_if_cond = None;
+                    for (cond, body) in elif.into_iter().rev() {
+                        last_if_cond = Some(Box::new(Expr::IfExpr(cond, body, last_if_cond)));
+                    }
+                    Box::new(Expr::IfExpr(cond, then, last_if_cond))
+                }
 
         rule if_then() -> Box<Expr> =
             [t!(If)] cond:simple_expr() then:expr()
                 {Box::new(Expr::IfExpr(cond, then, None))}
 
-        rule if_then_else() -> Box<Expr> =
-            [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)]? [t!(Else)] else_body:expr()
-                {Box::new(Expr::IfExpr(cond, then, Some(else_body)))}
+        rule if_elif_else() -> Box<Expr> =
+            [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)]? elif:elif_body()* [t!(Else)] else_body:expr()
+                {
+                    let mut last_if_cond = Some(else_body);
+                    for (cond, body) in elif.into_iter().rev() {
+                        last_if_cond = Some(Box::new(Expr::IfExpr(cond, body, last_if_cond)));
+                    }
+
+                    Box::new(Expr::IfExpr(cond, then, last_if_cond))}
+
+        rule elif_body() -> (Box<Expr>, Box<Expr>) =
+            [t!(ELif)] elif_cond:simple_expr() elif_body: expr() [t!(LineEnd)]? {
+                (elif_cond, elif_body)
+            }
+
 
         rule expr() -> Box<Expr> =
             block_expr() /

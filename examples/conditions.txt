@@ -1,13 +1,28 @@
-if 2?= 2
-    var a = 2
-    a =
-        if 2?=3
-            3
-        else 4
-    assert a?=4
-    print a
-else
-    var b = 5
-    print b
+var a = 1
+def F =
+    if a?=1
+        1
+    elif a?=2
+        2
+    elif a?=3
+        3
+    else
+        0
 
+assert F()?=1
+a = 2
+assert F()?=2
+a = 3
+assert F()?=3
+a = 5
+assert F()?=0
 
+def G(x) =
+    if x?=1
+        1
+    elif x?=2
+        2
+
+assert G(1)?=1
+assert G(2)?=2
+assert G(3)?=0
