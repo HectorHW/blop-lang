@@ -51,9 +51,7 @@ fn main() {
     };
 
     #[cfg(feature = "print-ast")]
-    for stmt in &statements {
-        println!("{:?}", stmt);
-    }
+    println!("{:?}", statements);
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
     for (token, index_map) in &variable_types {
@@ -66,9 +64,7 @@ fn main() {
     let statements = compile::syntax_level_opt::optimize(statements);
 
     #[cfg(feature = "print-ast")]
-    for stmt in &statements {
-        println!("{:?}", stmt);
-    }
+    println!("{:?}", statements);
 
     let chunks = Compiler::compile(&statements, variable_types, closed_names).unwrap();
 
