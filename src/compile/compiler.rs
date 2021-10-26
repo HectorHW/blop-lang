@@ -6,9 +6,15 @@ use crate::parsing::lexer::TokenKind::BeginBlock;
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use std::collections::HashMap;
 
+enum ValueRequirement {
+    Nothing,
+    Value,
+    ReturnValue,
+}
+
 pub struct Compiler {
     names: Vec<HashMap<String, (VariableType, usize)>>,
-    _needs_value: Vec<bool>,
+    value_requirements: Vec<ValueRequirement>,
     chunks: Vec<Chunk>,
     total_variables: usize,
     total_closed_variables: usize,
@@ -23,7 +29,7 @@ impl Compiler {
     pub fn new(variable_types: BlockNameMap, closed_names: ClosedNamesMap) -> Compiler {
         Compiler {
             names: vec![],
-            _needs_value: vec![],
+            value_requirements: vec![],
             chunks: vec![],
             total_variables: 0,
             total_closed_variables: 0,
@@ -52,7 +58,7 @@ impl Compiler {
         };
         compiler.new_scope(block_identifier);
 
-        compiler.require_nothing();
+        compiler.require_return_value();
         let code = compiler.visit_expr(program)?;
         compiler.current_chunk().append(code);
         compiler.pop_requirement();
@@ -61,19 +67,33 @@ impl Compiler {
     }
 
     fn require_value(&mut self) {
-        self._needs_value.push(true)
+        self.value_requirements.push(ValueRequirement::Value)
     }
 
     fn require_nothing(&mut self) {
-        self._needs_value.push(false)
+        self.value_requirements.push(ValueRequirement::Nothing)
+    }
+
+    fn require_return_value(&mut self) {
+        self.value_requirements.push(ValueRequirement::ReturnValue)
     }
 
     fn pop_requirement(&mut self) {
-        self._needs_value.pop();
+        self.value_requirements.pop();
     }
 
     fn needs_value(&self) -> bool {
-        *self._needs_value.last().unwrap_or(&false)
+        match self.value_requirements.last() {
+            Some(ValueRequirement::Value) | Some(ValueRequirement::ReturnValue) => true,
+            Some(ValueRequirement::Nothing) | None => false,
+        }
+    }
+
+    fn needs_return_value(&self) -> bool {
+        match self.value_requirements.last() {
+            Some(ValueRequirement::ReturnValue) => true,
+            _other => false,
+        }
     }
 
     fn current_chunk(&mut self) -> &mut Chunk {
@@ -202,11 +222,6 @@ impl Compiler {
                 .get(arg.get_string().unwrap())
                 .unwrap()
             {
-                if closed_arguments == 0 {
-                    self.define_local("_", VariableType::Normal);
-                    *self.current_chunk() += Opcode::LoadImmediateInt(0);
-                }
-
                 let (_, real_idx) = self.lookup_local(arg.get_string().unwrap()).unwrap();
                 *self.current_chunk() += Opcode::NewBox;
                 *self.current_chunk() += Opcode::Duplicate;
@@ -221,17 +236,10 @@ impl Compiler {
             self.pop_scope();
         }
 
-        self.require_value();
+        self.require_return_value();
         let code = self.visit_expr(body)?;
         self.pop_requirement();
         self.current_chunk().append(code);
-
-        if closed_arguments > 0 {
-            //pop arguments
-            let (_, fictional_slot) = self.lookup_local("_").unwrap();
-            *self.current_chunk() += Opcode::StoreLocal(fictional_slot as u16);
-            *self.current_chunk() += Opcode::Pop(closed_arguments as u16);
-        }
 
         *self.current_chunk() += Opcode::Return;
 
@@ -507,6 +515,7 @@ impl Compiler {
                 result = body;
             }
             Expr::Call(target, args) => {
+                //TODO tail call optimization
                 self.require_value();
                 let mut target = self.visit_expr(target)?;
                 result.append(&mut target);
@@ -559,7 +568,8 @@ impl Compiler {
 
         let mut result = vec![];
 
-        if self.needs_value() {
+        if self.needs_value() && !self.needs_return_value() {
+            //if we will return after that, then no tmp slot needed, value will just stay on top of stack
             self.define_local("_", VariableType::Normal).unwrap();
             result.push(Opcode::LoadImmediateInt(0)); // _ variable
         }
@@ -587,11 +597,13 @@ impl Compiler {
 
         let mut last_statement = self.visit_stmt(last_statement)?;
         result.append(&mut last_statement);
-        if self.needs_value() {
+        if self.needs_value() && !self.needs_return_value() {
             let (_, fictional_slot) = self.lookup_local("_").unwrap();
             result.push(Opcode::StoreLocal(fictional_slot as u16));
             let scope_variable_count = self.pop_scope();
             result.push(Opcode::Pop((scope_variable_count - 1) as u16));
+        } else if self.needs_return_value() {
+            //do nothing - extra slots will be pop'ed by executing return instruction
         } else {
             let scope_variable_count = self.pop_scope();
             result.push(Opcode::Pop(scope_variable_count as u16));

@@ -13,6 +13,7 @@ pub struct CallStackValue {
     return_chunk: usize,
     return_ip: usize,
     return_locals_offset: usize,
+    return_stack_size: usize,
     function_arguments: usize,
 }
 
@@ -257,6 +258,7 @@ impl VM {
                         return_ip: ip + 1,
                         function_arguments: arity,
                         return_locals_offset: self.locals_offset,
+                        return_stack_size: self.stack.len() - 1 - arity,
                     });
 
                     self.locals_offset = self.stack.len() - 1 - arity;
@@ -278,11 +280,11 @@ impl VM {
                     self.locals_offset = return_info.return_locals_offset;
 
                     let ret_value = checked_stack_pop!()?;
-                    let new_stack_size = self
-                        .stack
-                        .len()
-                        .checked_sub(1 + return_info.function_arguments)
-                        .ok_or(runtime_error!(StackUnderflow))?;
+                    if self.stack.len() < return_info.return_stack_size {
+                        return Err(runtime_error!(StackUnderflow));
+                    }
+
+                    let new_stack_size = return_info.return_stack_size;
                     self.stack.truncate(new_stack_size);
                     self.stack.push(ret_value);
                 }
