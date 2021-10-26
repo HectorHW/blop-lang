@@ -385,10 +385,19 @@ impl Compiler {
                             .unwrap() = true;
                     }
                 }
-
-                if let VariableType::Boxed = var_type {
-                    result.push(Opcode::LoadLocal(var_idx as u16));
-                    source_indices.push(target.position.0);
+                //maybe we need to load pointer
+                match var_type {
+                    VariableType::Boxed => {
+                        result.push(Opcode::LoadLocal(var_idx as u16));
+                        source_indices.push(target.position.0);
+                    }
+                    VariableType::Closed => {
+                        result.push(Opcode::LoadClosureValue(var_idx as u16));
+                        source_indices.push(target.position.0);
+                    }
+                    VariableType::Normal => {
+                        //nothing
+                    }
                 }
 
                 self.require_value();
@@ -398,12 +407,19 @@ impl Compiler {
                 result.append(&mut expr_body);
                 source_indices.append(&mut indices);
 
-                if let VariableType::Boxed = var_type {
-                    result.push(Opcode::StoreBox);
-                    source_indices.push(target.position.0);
-                } else {
-                    result.push(Opcode::StoreLocal(var_idx as u16)); //TODO extension
-                    source_indices.push(target.position.0);
+                match var_type {
+                    VariableType::Normal => {
+                        result.push(Opcode::StoreLocal(var_idx as u16)); //TODO extension
+                        source_indices.push(target.position.0);
+                    }
+                    VariableType::Boxed => {
+                        result.push(Opcode::StoreBox);
+                        source_indices.push(target.position.0);
+                    }
+                    VariableType::Closed => {
+                        result.push(Opcode::StoreBox);
+                        source_indices.push(target.position.0);
+                    }
                 }
 
                 if self.needs_value() {

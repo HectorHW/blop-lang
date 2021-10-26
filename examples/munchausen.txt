@@ -1,0 +1,43 @@
+def loop(start, stop, body) =
+    if start?=stop+1
+        0
+    else
+        body(start)
+        loop(start+1, stop, body)
+
+def while(cond, body) =
+    if cond()
+        body()
+        while(cond, body)
+    else
+        0
+
+def pow(a, b) =
+    def pow(a, b, acc) =
+        if b?=0
+            acc
+        else
+            pow(a, b-1, acc*a)
+    pow(a,b,1)
+
+def ismunchausen(n) =
+    var oldvalue = n
+    var nn = n
+    def nz =
+        1-(nn?=0)
+    var sum = 0
+    def munbody =
+        var digit = nn mod 10
+        nn = nn / 10
+        var p = pow(digit, digit)
+        sum = sum + p
+
+    while(nz, munbody)
+    sum?=oldvalue
+
+def fornumber(n) =
+    if ismunchausen(n)
+        print n
+
+#print ismunchausen(2)
+loop(1, 5000, fornumber)
