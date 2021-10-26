@@ -91,6 +91,13 @@ impl Token {
             _ => None,
         }
     }
+
+    pub fn get_number(&self) -> Option<i64> {
+        match &self.kind {
+            TokenKind::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
