@@ -433,7 +433,11 @@ impl VM {
             #[cfg(feature = "print-execution")]
             {
                 print!("[");
-                for item in &self.stack {
+                for item in &self.stack[..self.locals_offset] {
+                    print!("{} ", item);
+                }
+                print!("| ");
+                for item in &self.stack[self.locals_offset..] {
                     print!("{} ", item);
                 }
                 println!("]");
