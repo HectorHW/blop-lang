@@ -1,11 +1,15 @@
 use crate::data::gc::GC;
-use crate::data::objects::{Closure, Value, ValueBox};
+use crate::data::objects::{Closure, StackObject, Value, ValueBox};
 use crate::execution::chunk::{Chunk, Opcode};
+
+const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
+//4MB
 
 pub struct VM {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
     locals_offset: usize,
+    stack_max_size: usize,
     pub gc: GC,
 }
 
@@ -14,7 +18,6 @@ pub struct CallStackValue {
     return_ip: usize,
     return_locals_offset: usize,
     return_stack_size: usize,
-    function_arguments: usize,
 }
 
 type Result<T> = std::result::Result<T, InterpretError>;
@@ -35,6 +38,7 @@ pub enum InterpretErrorKind {
     OperandIndexing,
     JumpBounds,
     AssertionFailure,
+    StackOverflow,
     TypeError { message: String },
 }
 
@@ -45,7 +49,14 @@ impl VM {
             call_stack: Vec::new(),
             locals_offset: 0,
             gc: GC::new(16000),
+            stack_max_size: DEFAULT_MAX_STACK_SIZE,
         }
+    }
+
+    pub fn override_stack_limit(&mut self, new_limit: usize) -> usize {
+        let old_stack_size = self.stack_max_size;
+        self.stack_max_size = new_limit;
+        old_stack_size
     }
 
     pub fn run(&mut self, program: &[Chunk]) -> Result<()> {
@@ -265,7 +276,6 @@ impl VM {
                     self.call_stack.push(CallStackValue {
                         return_chunk: current_chunk_id,
                         return_ip: ip + 1,
-                        function_arguments: arity,
                         return_locals_offset: self.locals_offset,
                         return_stack_size: self.stack.len() - 1 - arity,
                     });
@@ -414,6 +424,12 @@ impl VM {
                     print!("{} ", item);
                 }
                 println!("]");
+            }
+
+            if self.stack.len() > self.stack_max_size || self.call_stack.len() > self.stack_max_size
+            {
+                return Err(runtime_error!(StackOverflow));
+                //TODO include last stack frame?
             }
 
             unsafe {

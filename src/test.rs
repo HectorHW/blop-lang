@@ -55,3 +55,30 @@ test_file! {closing_over_multiple_functions}
 test_file! {parens_override_indentation}
 
 test_file! {shadowing}
+
+#[test]
+fn test_tail_call_optimization_application() {
+    use crate::compile::compiler::Compiler;
+    use crate::execution::vm::VM;
+    use crate::parsing::ast::Expr;
+
+    let filename = "examples/tail_opt_sum.txt";
+    let file_content = std::fs::read_to_string(filename)
+        .map_err(|_e| format!("failed to read file {}", filename))
+        .unwrap();
+    let file_content = super::normalize_string(file_content);
+    let tokens = crate::parsing::lexer::tokenize(&file_content).unwrap();
+    use crate::parsing::parser::program_parser;
+
+    let statements: Box<Expr> = program_parser::program(&tokens)
+        .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))
+        .unwrap();
+
+    let (variable_types, closed_names) =
+        crate::compile::syntax_level_check::check(&statements).unwrap();
+    let statements = crate::compile::syntax_level_opt::optimize(statements);
+    let chunks = Compiler::compile(&statements, variable_types, closed_names).unwrap();
+    let mut vm = VM::new();
+    vm.override_stack_limit(20); //should be just fine (and is definetly <1000)
+    vm.run(&chunks).unwrap();
+}
