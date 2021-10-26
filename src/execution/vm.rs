@@ -1,11 +1,15 @@
 use crate::data::gc::GC;
-use crate::data::objects::{Closure, Value, ValueBox};
+use crate::data::objects::{Closure, StackObject, Value, ValueBox};
 use crate::execution::chunk::{Chunk, Opcode};
+
+const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
+//4MB
 
 pub struct VM {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
     locals_offset: usize,
+    stack_max_size: usize,
     pub gc: GC,
 }
 
@@ -13,7 +17,7 @@ pub struct CallStackValue {
     return_chunk: usize,
     return_ip: usize,
     return_locals_offset: usize,
-    function_arguments: usize,
+    return_stack_size: usize,
 }
 
 type Result<T> = std::result::Result<T, InterpretError>;
@@ -34,6 +38,7 @@ pub enum InterpretErrorKind {
     OperandIndexing,
     JumpBounds,
     AssertionFailure,
+    StackOverflow,
     TypeError { message: String },
 }
 
@@ -44,7 +49,14 @@ impl VM {
             call_stack: Vec::new(),
             locals_offset: 0,
             gc: GC::new(16000),
+            stack_max_size: DEFAULT_MAX_STACK_SIZE,
         }
+    }
+
+    pub fn override_stack_limit(&mut self, new_limit: usize) -> usize {
+        let old_stack_size = self.stack_max_size;
+        self.stack_max_size = new_limit;
+        old_stack_size
     }
 
     pub fn run(&mut self, program: &[Chunk]) -> Result<()> {
@@ -211,13 +223,22 @@ impl VM {
                         ip += 1;
                     }
                 }
-                Opcode::Jump(delta) => {
+                Opcode::JumpRelative(delta) => {
                     let new_ip = ip + delta as usize;
                     if new_ip >= current_chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     ip = new_ip;
                 }
+
+                Opcode::JumpAbsolute(idx) => {
+                    let new_ip = idx as usize;
+                    if new_ip >= current_chunk.code.len() {
+                        return Err(runtime_error!(JumpBounds));
+                    }
+                    ip = new_ip;
+                }
+
                 Opcode::Pop(n) => {
                     if self.stack.len() < n as usize {
                         return Err(runtime_error!(StackUnderflow));
@@ -255,8 +276,8 @@ impl VM {
                     self.call_stack.push(CallStackValue {
                         return_chunk: current_chunk_id,
                         return_ip: ip + 1,
-                        function_arguments: arity,
                         return_locals_offset: self.locals_offset,
+                        return_stack_size: self.stack.len() - 1 - arity,
                     });
 
                     self.locals_offset = self.stack.len() - 1 - arity;
@@ -278,11 +299,11 @@ impl VM {
                     self.locals_offset = return_info.return_locals_offset;
 
                     let ret_value = checked_stack_pop!()?;
-                    let new_stack_size = self
-                        .stack
-                        .len()
-                        .checked_sub(1 + return_info.function_arguments)
-                        .ok_or(runtime_error!(StackUnderflow))?;
+                    if self.stack.len() < return_info.return_stack_size {
+                        return Err(runtime_error!(StackUnderflow));
+                    }
+
+                    let new_stack_size = return_info.return_stack_size;
                     self.stack.truncate(new_stack_size);
                     self.stack.push(ret_value);
                 }
@@ -403,6 +424,12 @@ impl VM {
                     print!("{} ", item);
                 }
                 println!("]");
+            }
+
+            if self.stack.len() > self.stack_max_size || self.call_stack.len() > self.stack_max_size
+            {
+                return Err(runtime_error!(StackOverflow));
+                //TODO include last stack frame?
             }
 
             unsafe {
