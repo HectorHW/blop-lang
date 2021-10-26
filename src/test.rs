@@ -82,3 +82,5 @@ fn test_tail_call_optimization_application() {
     vm.override_stack_limit(20); //should be just fine (and is definetly <1000)
     vm.run(&chunks).unwrap();
 }
+
+test_file! {munchausen}
