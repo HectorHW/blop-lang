@@ -40,6 +40,7 @@ pub enum InterpretErrorKind {
     AssertionFailure,
     StackOverflow,
     TypeError { message: String },
+    MissedReturn,
 }
 
 impl VM {
@@ -435,6 +436,14 @@ impl VM {
             unsafe {
                 self.gc.mark_and_sweep(self.stack.iter(), program);
             }
+        }
+
+        if ip == current_chunk.code.len() {
+            return Err(InterpretError {
+                opcode_index: ip - 1,
+                chunk_index: current_chunk_id,
+                kind: InterpretErrorKind::MissedReturn,
+            });
         }
 
         Ok(())
