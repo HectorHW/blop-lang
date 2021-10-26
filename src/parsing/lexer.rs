@@ -33,6 +33,7 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
+    Mod,
 
     Comma,
 
@@ -79,6 +80,7 @@ impl Display for TokenKind {
                 TokenKind::Def => "(def)".to_string(),
                 TokenKind::Comma => "<,>".to_string(),
                 TokenKind::Elif => "(elif)".to_string(),
+                TokenKind::Mod => "(mod)".to_string(),
             }
         )
     }
@@ -126,6 +128,7 @@ impl<'input> Lexer<'input> {
             ("elif", Elif),
             ("else", Else),
             ("def", Def),
+            ("mod", Mod),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
