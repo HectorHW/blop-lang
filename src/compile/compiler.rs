@@ -13,7 +13,7 @@ enum ValueRequirement {
 }
 
 pub struct Compiler {
-    names: Vec<HashMap<String, (VariableType, usize)>>,
+    names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
     chunks: Vec<Chunk>,
     per_chunk_indices: Vec<Vec<usize>>,
@@ -28,7 +28,7 @@ pub struct Compiler {
 }
 
 struct FunctionCompilerState {
-    names: Vec<HashMap<String, (VariableType, usize)>>,
+    names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     total_variables: usize,
     total_closed_variables: usize,
 }
@@ -123,18 +123,32 @@ impl Compiler {
 
     fn lookup_local(&self, name: &str) -> Option<(VariableType, usize)> {
         for scope in self.names.iter().rev() {
-            if scope.contains_key(name) {
-                return Some(*scope.get(name).unwrap());
+            if let Some((var_type, true, var_idx)) = scope.get(name) {
+                return Some((*var_type, *var_idx));
+            }
+        }
+        None
+    }
+
+    fn lookup_uninit_local(&self, name: &str) -> Option<(VariableType, usize)> {
+        for scope in self.names.iter().rev() {
+            if let Some((var_type, _any_state, var_idx)) = scope.get(name) {
+                return Some((*var_type, *var_idx));
             }
         }
         None
     }
 
     fn lookup_block(&self, name: &str) -> Option<(VariableType, usize)> {
-        self.names.last().unwrap().get(name).cloned()
+        self.names
+            .last()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .map(|t| (t.0, t.2))
     }
 
-    fn define_local(
+    fn declare_local(
         &mut self,
         variable_name: &str,
         var_type: VariableType,
@@ -148,8 +162,18 @@ impl Compiler {
         self.names
             .last_mut()
             .unwrap()
-            .insert(variable_name.to_string(), (var_type, var_index));
+            .insert(variable_name.to_string(), (var_type, false, var_index));
         Some((var_type, var_index))
+    }
+
+    fn define_local(&mut self, variable_name: &str) {
+        self.names
+            .last_mut()
+            .unwrap()
+            .entry(variable_name.to_string())
+            .and_modify(|v| {
+                v.1 = true;
+            });
     }
 
     fn define_closed_variable(&mut self, variable_name: &str) -> Option<(VariableType, usize)> {
@@ -158,7 +182,8 @@ impl Compiler {
         self.names
             .last_mut()
             .unwrap()
-            .insert(variable_name.to_string(), (VariableType::Closed, idx))
+            .insert(variable_name.to_string(), (VariableType::Closed, true, idx))
+            .map(|t| (t.0, t.2))
     }
 
     fn new_scope(&mut self, token: &Token) {
@@ -237,13 +262,16 @@ impl Compiler {
 
         self.new_scope(name);
 
-        self.define_local(name.get_string().unwrap(), VariableType::Normal)
+        self.declare_local(name.get_string().unwrap(), VariableType::Normal)
             .unwrap();
+        self.define_local(name.get_string().unwrap());
         //define function inside itself
 
         for arg_name in args {
-            match self.define_local(arg_name.get_string().unwrap(), VariableType::Normal) {
-                Some(_) => {}
+            match self.declare_local(arg_name.get_string().unwrap(), VariableType::Normal) {
+                Some(_) => {
+                    self.define_local(arg_name.get_string().unwrap());
+                }
                 None => {
                     return Err(format!(
                         "argument {} repeats in function {}",
@@ -277,7 +305,8 @@ impl Compiler {
                 self.current_indices().push(name.position.0);
                 self.current_indices().push(name.position.0);
 
-                self.define_local(arg.get_string().unwrap(), VariableType::Boxed);
+                self.declare_local(arg.get_string().unwrap(), VariableType::Boxed);
+                self.define_local(arg.get_string().unwrap());
                 closed_arguments += 1;
             }
         }
@@ -358,11 +387,12 @@ impl Compiler {
                         }
                         let varname = n.get_string().unwrap();
                         let _ = self
-                            .define_local(varname, VariableType::Normal)
+                            .declare_local(varname, VariableType::Normal)
                             .ok_or(format!("redefinition of variable {}", varname))?;
                     }
                     _a => panic!("{:?}", _a),
                 }
+                self.define_local(n.get_string().unwrap());
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0)); //TODO dup?
@@ -482,7 +512,7 @@ impl Compiler {
                     .unwrap();
 
                 for closed_over_value in map_iter {
-                    let name = self.lookup_local(closed_over_value).unwrap();
+                    let name = self.lookup_uninit_local(closed_over_value).unwrap();
 
                     match name {
                         (VariableType::Normal, var_idx) => {
@@ -511,7 +541,7 @@ impl Compiler {
                         source_indices.push(function_name.position.0);
                     }
                     None => {
-                        self.define_local(
+                        self.declare_local(
                             function_name.get_string().unwrap(),
                             VariableType::Normal,
                         )
@@ -524,6 +554,7 @@ impl Compiler {
                     }
                     _other => panic!("{:?}", _other),
                 }
+                self.define_local(function_name.get_string().unwrap());
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0));
@@ -784,7 +815,8 @@ impl Compiler {
 
         if self.needs_value() && !self.needs_return_value() {
             //if we will return after that, then no tmp slot needed, value will just stay on top of stack
-            self.define_local("_", VariableType::Normal).unwrap();
+            self.declare_local("_", VariableType::Normal).unwrap();
+            self.define_local("_");
             result.push(Opcode::LoadImmediateInt(0)); // _ variable
             source_indices.push(block_begin.position.0);
         }
@@ -796,7 +828,8 @@ impl Compiler {
 
         for (name, var_type) in map_iter {
             if let VariableType::Boxed = var_type {
-                self.define_local(name, VariableType::Boxed);
+                self.declare_local(name, VariableType::Boxed);
+                //do not define yet
                 result.push(Opcode::NewBox);
                 source_indices.push(block_begin.position.0);
             }

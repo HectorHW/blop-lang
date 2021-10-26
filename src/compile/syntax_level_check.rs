@@ -90,10 +90,10 @@ impl Checker {
                         if *is_defined.get() {
                             return Ok(());
                         } else {
-                            return Err(format!(
-                                "variable `{}` is declared in scope, but not defined at that point. Not inside function, so forward lookup in not allowed [{}]",
-                                name.get_string().unwrap(),
-                                name.position));
+                            /*return Err(format!(
+                            "variable `{}` is declared in scope, but not defined at that point. Not inside function, so forward lookup in not allowed [{}]",
+                            name.get_string().unwrap(),
+                            name.position));*/
                         }
                     }
                     Entry::Vacant(_) => {}

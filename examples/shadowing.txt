@@ -8,3 +8,8 @@ def G(a) = #a=1
         a
     H
 assert G(1)(3)?=3
+
+def M(a) =
+    var a = a
+    a
+assert M(1)?=1
