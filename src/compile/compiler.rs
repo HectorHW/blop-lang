@@ -23,6 +23,13 @@ pub struct Compiler {
     current_function: Vec<Token>,
     variable_types: BlockNameMap,
     closed_names: ClosedNamesMap,
+    current_function_was_possibly_overwritten: Vec<bool>,
+}
+
+struct FunctionCompilerState {
+    names: Vec<HashMap<String, (VariableType, usize)>>,
+    total_variables: usize,
+    total_closed_variables: usize,
 }
 
 impl Compiler {
@@ -38,6 +45,7 @@ impl Compiler {
             current_function: vec![],
             variable_types,
             closed_names,
+            current_function_was_possibly_overwritten: vec![],
         }
     }
 
@@ -156,15 +164,14 @@ impl Compiler {
         items_in_scope
     }
 
-    fn compile_function(
-        &mut self,
-        name: &Token,
-        args: &[Token],
-        body: &Expr,
-    ) -> Result<usize, String> {
-        //save current compiler
+    fn create_function_compilation_state(&mut self, name: &Token) -> FunctionCompilerState {
         let mut scope_stack = vec![];
         std::mem::swap(&mut self.names, &mut scope_stack);
+        let previous_state = FunctionCompilerState {
+            names: scope_stack,
+            total_variables: self.total_variables,
+            total_closed_variables: self.total_closed_variables,
+        };
 
         let new_chunk_idx = self.chunks.len();
         self.chunks.push(Chunk::new(format!(
@@ -172,12 +179,34 @@ impl Compiler {
             name.get_string().unwrap(),
             name.position
         )));
-
-        let previous_total_closed_variables = self.total_closed_variables;
-        let previous_total_variables = self.total_variables;
         self.current_chunk_idx.push(new_chunk_idx);
+        self.current_function_was_possibly_overwritten.push(false);
         self.total_variables = 0;
         self.total_closed_variables = 0;
+
+        previous_state
+    }
+
+    fn pop_function_compilation_state(&mut self, s: FunctionCompilerState) -> usize {
+        let mut state = s;
+        std::mem::swap(&mut self.names, &mut state.names);
+        let idx = self.current_chunk_idx.pop().unwrap();
+        self.total_variables = state.total_variables;
+        self.total_closed_variables = state.total_closed_variables;
+        self.current_function_was_possibly_overwritten.pop();
+        idx
+    }
+
+    fn compile_function(
+        &mut self,
+        name: &Token,
+        args: &[Token],
+        body: &Expr,
+    ) -> Result<usize, String> {
+        //save current compiler
+
+        let prev_state = self.create_function_compilation_state(name);
+
         //compile body
 
         self.new_scope(name);
@@ -244,10 +273,7 @@ impl Compiler {
         *self.current_chunk() += Opcode::Return;
 
         //load current compiler
-        std::mem::swap(&mut self.names, &mut scope_stack);
-        self.current_chunk_idx.pop();
-        self.total_variables = previous_total_variables;
-        self.total_closed_variables = previous_total_closed_variables;
+        let new_chunk_idx = self.pop_function_compilation_state(prev_state);
 
         Ok(new_chunk_idx)
     }
