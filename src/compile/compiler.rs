@@ -339,6 +339,17 @@ impl Compiler {
                     varname, target.position
                 ))?;
 
+                if *self.current_chunk_idx.last().unwrap() != 0 {
+                    //compiling some function
+                    if var_idx == 0 {
+                        //slot 0 - current function
+                        *self
+                            .current_function_was_possibly_overwritten
+                            .last_mut()
+                            .unwrap() = true;
+                    }
+                }
+
                 if let VariableType::Boxed = var_type {
                     result.push(Opcode::LoadLocal(var_idx as u16));
                 }
@@ -531,7 +542,7 @@ impl Compiler {
                 //instruction AFTER then_body and jump
 
                 result.append(&mut then_body);
-                result.push(Opcode::Jump((else_body_size + 1) as u16));
+                result.push(Opcode::JumpRelative((else_body_size + 1) as u16));
 
                 result.append(&mut else_body);
                 result.push(Opcode::Nop);
@@ -541,19 +552,51 @@ impl Compiler {
                 result = body;
             }
             Expr::Call(target, args) => {
-                //TODO tail call optimization
                 self.require_value();
                 let mut target = self.visit_expr(target)?;
-                result.append(&mut target);
-                for arg in args {
-                    result.append(&mut self.visit_expr(arg)?);
-                }
-
                 self.pop_requirement();
-                result.push(Opcode::Call(args.len() as u16));
 
-                if !self.needs_value() {
-                    result.push(Opcode::Pop(1));
+                if !*self.current_function_was_possibly_overwritten.last().unwrap_or(&true)
+                    && target.len() == 1 //target is 1 op (not load_* load_box)
+                    && target.last().unwrap().eq(&Opcode::LoadLocal(0)) //we load current function
+                    && self.needs_return_value()
+                //we will return after that
+                {
+                    let mut indices = vec![];
+                    //compute all arguments
+                    for (i, arg) in args.iter().enumerate() {
+                        self.require_value();
+                        result.append(&mut self.visit_expr(arg)?);
+                        self.pop_requirement(); //compile arg load
+                        indices.push((1 + i) as u16);
+                    }
+                    //store arguments which are on stack in reverse order
+                    for index in indices.into_iter().rev() {
+                        result.push(Opcode::StoreLocal(index));
+                    }
+                    //pop locals
+                    let locals_to_pop = self.total_variables
+                        - 1 //current function
+                        - args.len(); //arguments
+                    if locals_to_pop != 0 {
+                        result.push(Opcode::Pop(locals_to_pop as u16));
+                    }
+
+                    //jump
+                    result.push(Opcode::JumpAbsolute(0));
+                } else {
+                    result.append(&mut target);
+                    for arg in args {
+                        self.require_value();
+                        result.append(&mut self.visit_expr(arg)?);
+                        self.pop_requirement();
+                    }
+
+                    result.push(Opcode::Call(args.len() as u16));
+
+                    if !self.needs_value() {
+                        result.push(Opcode::Pop(1));
+                    }
                 }
             }
             Expr::SingleStatement(s) => {

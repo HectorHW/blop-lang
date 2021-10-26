@@ -9,7 +9,7 @@ pub struct Chunk {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Opcode {
     Print,
     LoadConst(u16),
@@ -36,8 +36,8 @@ pub enum Opcode {
     TestEquals,
 
     JumpIfFalse(u16),
-    Jump(u16),
-
+    JumpRelative(u16),
+    JumpAbsolute(u16),
     Pop(u16),
 
     Call(u16),
@@ -69,7 +69,7 @@ impl Display for Opcode {
                 //Opcode::ExtendDouble(a, b) => format!("Extend[{}, {}]", a, b)
                 TestEquals => "TestEquals".to_string(),
                 JumpIfFalse(delta) => format!("JumpIfFalse[{}]", delta),
-                Jump(delta) => format!("Jump[{}]", delta),
+                JumpRelative(delta) => format!("Jump[{}]", delta),
                 Pop(n) => format!("Pop[{}]", n),
                 Nop => "Nop".to_string(),
                 Assert => "Assert".to_string(),
@@ -83,6 +83,7 @@ impl Display for Opcode {
                 AddClosedValue => "AddClosedValue".to_string(),
                 LoadClosureValue(idx) => format!("LoadClosureValue[{}]", idx),
                 Duplicate => "Duplicate".to_string(),
+                JumpAbsolute(idx) => format!("JumpAbsolute[{}]", idx),
             }
         )
     }
@@ -160,11 +161,19 @@ mod chunk_pretty_printer {
                             i + *delta as usize
                         )
                     }
-                    Opcode::Jump(delta) => {
+                    Opcode::JumpRelative(delta) => {
                         format!(
                             "{:<21} ({})",
-                            format!("{}", Opcode::Jump(*delta)),
+                            format!("{}", Opcode::JumpRelative(*delta)),
                             i + *delta as usize
+                        )
+                    }
+
+                    Opcode::JumpAbsolute(idx) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", Opcode::JumpAbsolute(*idx)),
+                            *idx as usize
                         )
                     }
 
@@ -193,9 +202,14 @@ mod chunk_pretty_printer {
             .iter()
             .enumerate()
             .filter_map(|(pos, opcode)| match opcode {
-                Opcode::JumpIfFalse(delta) | Opcode::Jump(delta) => {
+                Opcode::JumpIfFalse(delta) | Opcode::JumpRelative(delta) => {
                     let start = pos;
                     let end = start + *delta as usize;
+                    Some((start, end))
+                }
+                Opcode::JumpAbsolute(idx) => {
+                    let start = pos;
+                    let end = *idx as usize;
                     Some((start, end))
                 }
                 _ => None,

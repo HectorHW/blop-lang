@@ -212,13 +212,22 @@ impl VM {
                         ip += 1;
                     }
                 }
-                Opcode::Jump(delta) => {
+                Opcode::JumpRelative(delta) => {
                     let new_ip = ip + delta as usize;
                     if new_ip >= current_chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     ip = new_ip;
                 }
+
+                Opcode::JumpAbsolute(idx) => {
+                    let new_ip = idx as usize;
+                    if new_ip >= current_chunk.code.len() {
+                        return Err(runtime_error!(JumpBounds));
+                    }
+                    ip = new_ip;
+                }
+
                 Opcode::Pop(n) => {
                     if self.stack.len() < n as usize {
                         return Err(runtime_error!(StackUnderflow));
