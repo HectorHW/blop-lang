@@ -530,6 +530,14 @@ impl Compiler {
                     source_indices.push(function_name.position.0);
                 }
             }
+            Stmt::Pass(token) => {
+                if self.needs_value() {
+                    result.push(Opcode::LoadImmediateInt(0));
+                } else {
+                    result.push(Opcode::Nop);
+                }
+                source_indices.push(token.position.0);
+            }
         }
         Ok((source_indices, result))
     }

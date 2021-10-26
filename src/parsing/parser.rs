@@ -24,6 +24,7 @@ peg::parser! {
             / print_stmt()
             / assignment_stmt()
             / assert_stmt()
+            / pass_stmt()
             / e:expr() {Stmt::Expression(e)}
 
 
@@ -86,6 +87,8 @@ peg::parser! {
                 (elif_cond, elif_body)
             }
 
+        rule pass_stmt() -> Stmt =
+            [t@t!(Pass)] {Stmt::Pass(t)}
 
         rule expr() -> Box<Expr> =
             block_expr() /
