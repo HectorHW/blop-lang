@@ -221,6 +221,7 @@ impl Checker {
                 self.check_function(name, args, body)?;
                 self.define_name(name)
             }
+            Stmt::Pass(..) => Ok(()),
         }
     }
 

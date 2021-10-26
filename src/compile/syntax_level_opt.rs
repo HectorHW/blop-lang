@@ -69,6 +69,8 @@ impl Optimizer {
                 self.new_variable_slot(&name);
                 function
             }
+
+            p @ Stmt::Pass(..) => p,
         }
     }
 
@@ -202,6 +204,8 @@ impl Optimizer {
                     })
                     //Expr::SingleStatement(a)
                 }
+
+                p @ Stmt::Pass(..) => Expr::SingleStatement(p),
             },
         };
         Box::new(expr)

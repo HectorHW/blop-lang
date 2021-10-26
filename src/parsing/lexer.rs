@@ -52,6 +52,7 @@ pub enum TokenKind {
     Elif,
     Else,
     Def,
+    Pass,
 }
 
 impl Display for TokenKind {
@@ -83,6 +84,7 @@ impl Display for TokenKind {
                 TokenKind::Elif => "(elif)".to_string(),
                 TokenKind::Mod => "(mod)".to_string(),
                 TokenKind::Power => "(**)".to_string(),
+                TokenKind::Pass => "(pass)".to_string(),
             }
         )
     }
@@ -131,6 +133,7 @@ impl<'input> Lexer<'input> {
             ("else", Else),
             ("def", Def),
             ("mod", Mod),
+            ("pass", Pass),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

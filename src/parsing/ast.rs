@@ -7,6 +7,7 @@ pub enum Stmt {
     Assignment(Token, Box<Expr>),
     Expression(Box<Expr>),
     Assert(Token, Box<Expr>),
+    Pass(Token),
     FunctionDeclaration {
         name: Token,
         args: Vec<Token>,
