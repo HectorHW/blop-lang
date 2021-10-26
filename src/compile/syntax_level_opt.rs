@@ -102,6 +102,18 @@ impl Optimizer {
                                     Expr::Binary(op, a, b)
                                 }
                             },
+
+                            TokenKind::Mod => match na.checked_rem(nb) {
+                                Some(result) => Expr::Number(Token {
+                                    position: token_a.position,
+                                    kind: TokenKind::Number(result),
+                                }),
+                                None => {
+                                    eprintln!("encountered modulo 0 while folding constants, assuming it is intended [{}]", op.position);
+                                    Expr::Binary(op, a, b)
+                                }
+                            },
+
                             TokenKind::Plus => Expr::Number(Token {
                                 position: token_a.position,
                                 kind: TokenKind::Number(na + nb),

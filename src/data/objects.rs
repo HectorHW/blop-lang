@@ -145,7 +145,7 @@ impl Display for StackObject {
                 f,
                 "{}",
                 ptr.unwrap_ref()
-                    .map(|o| format!("{}", o.0))
+                    .map(|o| format!("box[{}]", o.0))
                     .unwrap_or_else(|| "null".to_string()),
             ),
             StackObject::Closure(_, ptr) => {

@@ -32,6 +32,7 @@ pub enum Opcode {
     Sub,
     Div,
     Mul,
+    Mod,
 
     TestEquals,
 
@@ -84,6 +85,7 @@ impl Display for Opcode {
                 LoadClosureValue(idx) => format!("LoadClosureValue[{}]", idx),
                 Duplicate => "Duplicate".to_string(),
                 JumpAbsolute(idx) => format!("JumpAbsolute[{}]", idx),
+                Mod => "Mod".to_string(),
             }
         )
     }
