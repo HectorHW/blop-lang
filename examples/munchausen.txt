@@ -22,13 +22,12 @@ def pow(a, b) =
 
 def ismunchausen(n) =
     var oldvalue = n
-    var nn = n
     def nz =
-        1-(nn?=0)
+        1-(n?=0)
     var sum = 0
     def munbody =
-        var digit = nn mod 10
-        nn = nn / 10
+        var digit = n mod 10
+        n = n / 10
         var p = pow(digit, digit)
         sum = sum + p
 

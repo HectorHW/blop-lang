@@ -58,7 +58,7 @@ impl Compiler {
     ) -> Result<(Vec<Vec<usize>>, Vec<Chunk>), String> {
         let mut compiler = Compiler::new(variable_types, closed_names);
 
-        compiler.chunks = vec![Chunk::new("<script>".to_string())];
+        compiler.chunks = vec![Chunk::new("<script>".to_string(), 0)];
         compiler.per_chunk_indices = vec![vec![]];
         let block_identifier = match program.as_ref() {
             Expr::Block(bb, _be, _) => bb,
@@ -175,7 +175,11 @@ impl Compiler {
         items_in_scope
     }
 
-    fn create_function_compilation_state(&mut self, name: &Token) -> FunctionCompilerState {
+    fn create_function_compilation_state(
+        &mut self,
+        name: &Token,
+        arity: usize,
+    ) -> FunctionCompilerState {
         let mut scope_stack = vec![];
         std::mem::swap(&mut self.names, &mut scope_stack);
         let previous_state = FunctionCompilerState {
@@ -185,11 +189,10 @@ impl Compiler {
         };
 
         let new_chunk_idx = self.chunks.len();
-        self.chunks.push(Chunk::new(format!(
-            "{} [{}]",
-            name.get_string().unwrap(),
-            name.position
-        )));
+        self.chunks.push(Chunk::new(
+            format!("{} [{}]", name.get_string().unwrap(), name.position),
+            arity,
+        ));
         self.per_chunk_indices.push(vec![]);
         self.current_chunk_idx.push(new_chunk_idx);
         self.current_function_was_possibly_overwritten.push(false);
@@ -217,7 +220,7 @@ impl Compiler {
     ) -> Result<usize, String> {
         //save current compiler
 
-        let prev_state = self.create_function_compilation_state(name);
+        let prev_state = self.create_function_compilation_state(name, args.len());
 
         //compile body
 

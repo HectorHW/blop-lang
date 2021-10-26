@@ -7,6 +7,7 @@ pub struct Chunk {
     pub constants: Vec<Value>,
     pub code: Vec<Opcode>,
     pub name: String,
+    pub arity: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -92,11 +93,12 @@ impl Display for Opcode {
 }
 
 impl Chunk {
-    pub fn new(name: String) -> Chunk {
+    pub fn new(name: String, arity: usize) -> Chunk {
         Chunk {
             constants: Vec::new(),
             code: Vec::new(),
             name,
+            arity,
         }
     }
 

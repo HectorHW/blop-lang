@@ -298,6 +298,15 @@ impl VM {
                     current_chunk_id = chunk_id;
                     ip = 0;
                     current_chunk = program.get(current_chunk_id).unwrap();
+
+                    if arity as usize != current_chunk.arity {
+                        return Err(runtime_error!(TypeError {
+                            message: format!(
+                                "mismatched arguments: expected {} but got {}",
+                                current_chunk.arity, arity
+                            )
+                        }));
+                    }
                 }
 
                 Opcode::Return => {
