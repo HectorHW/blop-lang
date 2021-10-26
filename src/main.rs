@@ -3,6 +3,9 @@ use crate::execution::vm::VM;
 use crate::parsing::ast::Expr;
 use peg::error::ParseError;
 use std::env;
+#[cfg(feature = "bench")]
+use std::time::Instant;
+
 extern crate indexmap;
 
 mod compile;
@@ -76,6 +79,9 @@ fn main() {
 
     println!("running");
     let mut vm = VM::new();
+    #[cfg(feature = "bench")]
+    let start_time = Instant::now();
+
     vm.run(&chunks).unwrap_or_else(|error| {
         println!(
             "error {:?} at instruction {}\nat line {}",
@@ -84,6 +90,11 @@ fn main() {
             per_chunk_indices[error.chunk_index][error.opcode_index],
         );
     }); /**/
+    #[cfg(feature = "bench")]
+    {
+        let end_time = Instant::now();
+        println!("{:?}", end_time - start_time);
+    }
 }
 
 fn normalize_string(s: String) -> String {
