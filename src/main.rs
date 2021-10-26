@@ -66,7 +66,8 @@ fn main() {
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
 
-    let chunks = Compiler::compile(&statements, variable_types, closed_names).unwrap();
+    let (per_chunk_indices, chunks) =
+        Compiler::compile(&statements, variable_types, closed_names).unwrap();
 
     #[cfg(feature = "print-chunk")]
     for chunk in &chunks {
@@ -76,8 +77,12 @@ fn main() {
     println!("running");
     let mut vm = VM::new();
     vm.run(&chunks).unwrap_or_else(|error| {
-        println!("{:?}", error);
-        println!("{}", chunks[error.chunk_index].code[error.opcode_index])
+        println!(
+            "error {:?} at instruction {}\nat line {}",
+            error,
+            chunks[error.chunk_index].code[error.opcode_index],
+            per_chunk_indices[error.chunk_index][error.opcode_index],
+        );
     }); /**/
 }
 
@@ -97,12 +102,14 @@ pub fn run_file(filename: &str) -> Result<(), String> {
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
     let statements = compile::syntax_level_opt::optimize(statements);
-    let chunks = Compiler::compile(&statements, variable_types, closed_names)?;
+    let (per_chunk_indices, chunks) = Compiler::compile(&statements, variable_types, closed_names)?;
     let mut vm = VM::new();
     vm.run(&chunks).map_err(|error| {
         format!(
-            "{:?}\n{}",
-            error, chunks[error.chunk_index].code[error.opcode_index]
+            "error {:?} at instruction {}\nat line {}",
+            error,
+            chunks[error.chunk_index].code[error.opcode_index],
+            per_chunk_indices[error.chunk_index][error.opcode_index],
         )
     })?;
 

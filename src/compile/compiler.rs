@@ -16,6 +16,7 @@ pub struct Compiler {
     names: Vec<HashMap<String, (VariableType, usize)>>,
     value_requirements: Vec<ValueRequirement>,
     chunks: Vec<Chunk>,
+    per_chunk_indices: Vec<Vec<usize>>,
     total_variables: usize,
     total_closed_variables: usize,
     current_chunk_idx: Vec<usize>,
@@ -38,6 +39,7 @@ impl Compiler {
             names: vec![],
             value_requirements: vec![],
             chunks: vec![],
+            per_chunk_indices: vec![],
             total_variables: 0,
             total_closed_variables: 0,
             current_chunk_idx: vec![0],
@@ -53,12 +55,13 @@ impl Compiler {
         program: &Program,
         variable_types: BlockNameMap,
         closed_names: ClosedNamesMap,
-    ) -> Result<Vec<Chunk>, String> {
+    ) -> Result<(Vec<Vec<usize>>, Vec<Chunk>), String> {
         let mut compiler = Compiler::new(variable_types, closed_names);
 
         compiler.chunks = vec![Chunk::new("<script>".to_string())];
+        compiler.per_chunk_indices = vec![vec![]];
         let block_identifier = match program.as_ref() {
-            Expr::Block(bt, _) => bt,
+            Expr::Block(bb, _be, _) => bb,
             _ => &Token {
                 kind: BeginBlock,
                 position: Index(0, 0),
@@ -67,11 +70,13 @@ impl Compiler {
         compiler.new_scope(block_identifier);
 
         compiler.require_return_value();
-        let code = compiler.visit_expr(program)?;
+        let (mut indices, code) = compiler.visit_expr(program)?;
         compiler.current_chunk().append(code);
+        compiler.current_indices().append(&mut indices);
         compiler.pop_requirement();
         *compiler.current_chunk() += Opcode::Return;
-        Ok(compiler.chunks)
+        compiler.current_indices().push(0);
+        Ok((compiler.per_chunk_indices, compiler.chunks))
     }
 
     fn require_value(&mut self) {
@@ -106,6 +111,12 @@ impl Compiler {
 
     fn current_chunk(&mut self) -> &mut Chunk {
         self.chunks
+            .get_mut(*self.current_chunk_idx.last().unwrap())
+            .unwrap()
+    }
+
+    fn current_indices(&mut self) -> &mut Vec<usize> {
+        self.per_chunk_indices
             .get_mut(*self.current_chunk_idx.last().unwrap())
             .unwrap()
     }
@@ -179,6 +190,7 @@ impl Compiler {
             name.get_string().unwrap(),
             name.position
         )));
+        self.per_chunk_indices.push(vec![]);
         self.current_chunk_idx.push(new_chunk_idx);
         self.current_function_was_possibly_overwritten.push(false);
         self.total_variables = 0;
@@ -256,6 +268,12 @@ impl Compiler {
                 *self.current_chunk() += Opcode::Duplicate;
                 *self.current_chunk() += Opcode::LoadLocal(real_idx as u16);
                 *self.current_chunk() += Opcode::StoreBox;
+
+                self.current_indices().push(name.position.0);
+                self.current_indices().push(name.position.0);
+                self.current_indices().push(name.position.0);
+                self.current_indices().push(name.position.0);
+
                 self.define_local(arg.get_string().unwrap(), VariableType::Boxed);
                 closed_arguments += 1;
             }
@@ -266,11 +284,16 @@ impl Compiler {
         }
 
         self.require_return_value();
-        let code = self.visit_expr(body)?;
+        let (mut code_indices, code) = self.visit_expr(body)?;
         self.pop_requirement();
         self.current_chunk().append(code);
+        self.current_indices().append(&mut code_indices);
 
         *self.current_chunk() += Opcode::Return;
+        {
+            let last = *self.current_indices().last().unwrap();
+            self.current_indices().push(last);
+        }
 
         //load current compiler
         let new_chunk_idx = self.pop_function_compilation_state(prev_state);
@@ -278,18 +301,22 @@ impl Compiler {
         Ok(new_chunk_idx)
     }
 
-    fn visit_stmt(&mut self, stmt: &Stmt) -> Result<Vec<Opcode>, String> {
+    fn visit_stmt(&mut self, stmt: &Stmt) -> Result<(Vec<usize>, Vec<Opcode>), String> {
         let mut result = vec![];
+        let mut source_indices = vec![];
         match stmt {
-            Stmt::Print(e) => {
+            Stmt::Print(t, e) => {
                 self.require_value();
-                let mut compiled_expression = self.visit_expr(e)?;
+                let (mut indices, mut compiled_expression) = self.visit_expr(e)?;
                 self.pop_requirement();
                 result.append(&mut compiled_expression);
+                source_indices.append(&mut indices);
                 result.push(Opcode::Print);
+                source_indices.push(t.position.0);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0));
+                    source_indices.push(t.position.0);
                 }
             }
 
@@ -297,26 +324,34 @@ impl Compiler {
                 match self.lookup_block(n.get_string().unwrap()) {
                     Some((VariableType::Boxed, idx)) => {
                         result.push(Opcode::LoadLocal(idx as u16)); //load box
+                        source_indices.push(n.position.0);
                         if e.is_none() {
                             result.push(Opcode::LoadImmediateInt(0));
+                            source_indices.push(n.position.0);
                         } else {
                             self.require_value();
-                            let mut assignment_body = self.visit_expr(e.as_ref().unwrap())?;
+                            let (mut indices, mut assignment_body) =
+                                self.visit_expr(e.as_ref().unwrap())?;
                             self.pop_requirement();
                             result.append(&mut assignment_body);
+                            source_indices.append(&mut indices);
                         }
                         result.push(Opcode::StoreBox);
+                        source_indices.push(n.position.0);
                     }
 
                     None => {
                         //variable is not forward-declared => not present on stack yet
                         if e.is_none() {
                             result.push(Opcode::LoadImmediateInt(0));
+                            source_indices.push(n.position.0);
                         } else {
                             self.require_value();
-                            let mut assignment_body = self.visit_expr(e.as_ref().unwrap())?;
+                            let (mut indices, mut assignment_body) =
+                                self.visit_expr(e.as_ref().unwrap())?;
                             self.pop_requirement();
                             result.append(&mut assignment_body);
+                            source_indices.append(&mut indices);
                         }
                         let varname = n.get_string().unwrap();
                         let _ = self
@@ -327,7 +362,8 @@ impl Compiler {
                 }
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0)) //TODO dup?
+                    result.push(Opcode::LoadImmediateInt(0)); //TODO dup?
+                    source_indices.push(*source_indices.last().unwrap());
                 }
             }
 
@@ -352,60 +388,78 @@ impl Compiler {
 
                 if let VariableType::Boxed = var_type {
                     result.push(Opcode::LoadLocal(var_idx as u16));
+                    source_indices.push(target.position.0);
                 }
 
                 self.require_value();
-                let mut expr_body = self.visit_expr(expr)?;
+                let (mut indices, mut expr_body) = self.visit_expr(expr)?;
                 self.pop_requirement();
 
                 result.append(&mut expr_body);
+                source_indices.append(&mut indices);
 
                 if let VariableType::Boxed = var_type {
                     result.push(Opcode::StoreBox);
+                    source_indices.push(target.position.0);
                 } else {
                     result.push(Opcode::StoreLocal(var_idx as u16)); //TODO extension
+                    source_indices.push(target.position.0);
                 }
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0));
+                    source_indices.push(target.position.0);
                 }
             }
+
             Stmt::Expression(e) => {
-                let mut body = self.visit_expr(e)?;
+                let (mut indices, mut body) = self.visit_expr(e)?;
                 result.append(&mut body);
+                source_indices.append(&mut indices);
             }
-            Stmt::Assert(_token, expr) => {
+
+            Stmt::Assert(token, expr) => {
                 self.require_value();
-                let mut body = self.visit_expr(expr)?;
+                let (mut indices, mut body) = self.visit_expr(expr)?;
                 self.pop_requirement();
                 result.append(&mut body);
+                source_indices.append(&mut indices);
                 result.push(Opcode::Assert);
+                source_indices.push(token.position.0);
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0));
+                    source_indices.push(token.position.0);
                 }
             }
-            Stmt::FunctionDeclaration { name, args, body } => {
-                let new_chunk_idx = self.compile_function(name, args, body)?;
+
+            Stmt::FunctionDeclaration {
+                name: function_name,
+                args,
+                body,
+            } => {
+                let new_chunk_idx = self.compile_function(function_name, args, body)?;
 
                 let const_idx = self.current_chunk().constants.len();
                 self.current_chunk().constants.push(Value::Function {
                     chunk_id: new_chunk_idx,
                 });
 
-                if let Some((_, idx)) = self.lookup_block(name.get_string().unwrap()) {
+                if let Some((_, idx)) = self.lookup_block(function_name.get_string().unwrap()) {
                     //load pointer
                     result.push(Opcode::LoadLocal(idx as u16));
+                    source_indices.push(function_name.position.0);
                 }
 
                 result.push(Opcode::LoadConst(const_idx as u16)); //code block
 
-                if !self.closed_names.get(name).unwrap().is_empty() {
+                if !self.closed_names.get(function_name).unwrap().is_empty() {
                     result.push(Opcode::NewClosure);
+                    source_indices.push(function_name.position.0);
                 }
 
                 let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
                     .closed_names
-                    .get(name)
+                    .get(function_name)
                     .unwrap();
 
                 for closed_over_value in map_iter {
@@ -414,66 +468,84 @@ impl Compiler {
                     match name {
                         (VariableType::Normal, var_idx) => {
                             result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
+                            source_indices.push(function_name.position.0);
                         }
                         (VariableType::Boxed, var_idx) => {
                             result.push(Opcode::LoadLocal(var_idx as u16));
+                            source_indices.push(function_name.position.0);
                         }
                         (VariableType::Closed, idx) => {
                             result.push(Opcode::LoadClosureValue(idx as u16));
+                            source_indices.push(function_name.position.0);
                         }
                     };
                     result.push(Opcode::AddClosedValue);
+                    source_indices.push(function_name.position.0);
                 }
 
                 //match self.lookup_local()
 
-                match self.lookup_block(name.get_string().unwrap()) {
+                match self.lookup_block(function_name.get_string().unwrap()) {
                     Some((VariableType::Boxed, _)) => {
                         //pointer is on stack
                         result.push(Opcode::StoreBox);
+                        source_indices.push(function_name.position.0);
                     }
                     None => {
-                        self.define_local(name.get_string().unwrap(), VariableType::Normal)
-                            .ok_or_else(|| {
-                                format!("redifinition of name {}", name.get_string().unwrap())
-                            })?;
+                        self.define_local(
+                            function_name.get_string().unwrap(),
+                            VariableType::Normal,
+                        )
+                        .ok_or_else(|| {
+                            format!(
+                                "redifinition of name {}",
+                                function_name.get_string().unwrap()
+                            )
+                        })?;
                     }
                     _other => panic!("{:?}", _other),
                 }
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0));
+                    source_indices.push(function_name.position.0);
                 }
             }
         }
-        Ok(result)
+        Ok((source_indices, result))
     }
 
-    fn visit_expr(&mut self, expr: &Expr) -> Result<Vec<Opcode>, String> {
+    fn visit_expr(&mut self, expr: &Expr) -> Result<(Vec<usize>, Vec<Opcode>), String> {
         let mut result = vec![];
+        let mut source_indices = vec![];
         match expr {
-            Expr::Number(n) => {
-                let n = *n;
+            Expr::Number(token) => {
+                let n = token.get_number().unwrap();
                 if n >= (i16::MIN as i64) && n <= (i16::MAX as i64) {
                     result.push(Opcode::LoadImmediateInt(n as i16));
+                    source_indices.push(token.position.0);
                 } else {
                     let constant_index = self.current_chunk().constants.len();
                     self.current_chunk().constants.push(Value::Int(n));
                     result.push(Opcode::LoadConst(constant_index as u16)); //TODO extension
+                    source_indices.push(token.position.0);
                 }
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1));
+                    source_indices.push(token.position.0);
                 }
             }
 
             Expr::Binary(op, a, b) => {
                 self.require_value();
-                let mut a = self.visit_expr(a)?;
-                let mut b = self.visit_expr(b)?;
+                let (mut indices_a, mut a) = self.visit_expr(a)?;
+                let (mut indices_b, mut b) = self.visit_expr(b)?;
                 self.pop_requirement();
 
                 result.append(&mut a);
+                source_indices.append(&mut indices_a);
                 result.append(&mut b);
+                source_indices.append(&mut indices_b);
 
                 result.push(match &op.kind {
                     TokenKind::Star => Opcode::Mul,
@@ -483,32 +555,42 @@ impl Compiler {
                     TokenKind::TestEquals => Opcode::TestEquals,
                     other => panic!("unimplemented binary operator {} [{}]", other, op.position),
                 });
+                source_indices.push(op.position.0);
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1));
+                    source_indices.push(op.position.0);
                 }
             }
 
             Expr::Name(n) => match self.lookup_local(n.get_string().unwrap()) {
                 Some((VariableType::Normal, var_idx)) => {
                     result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
+                    source_indices.push(n.position.0);
                     if !self.needs_value() {
                         result.push(Opcode::Pop(1));
+                        source_indices.push(n.position.0);
                     }
                 }
 
                 Some((VariableType::Boxed, var_idx)) => {
                     result.push(Opcode::LoadLocal(var_idx as u16));
+                    source_indices.push(n.position.0);
                     result.push(Opcode::LoadBox);
+                    source_indices.push(n.position.0);
                     if !self.needs_value() {
                         result.push(Opcode::Pop(1));
+                        source_indices.push(n.position.0);
                     }
                 }
 
                 Some((VariableType::Closed, idx)) => {
                     result.push(Opcode::LoadClosureValue(idx as u16));
+                    source_indices.push(n.position.0);
                     result.push(Opcode::LoadBox);
+                    source_indices.push(n.position.0);
                     if !self.needs_value() {
                         result.push(Opcode::Pop(1));
+                        source_indices.push(n.position.0);
                     }
                 }
 
@@ -517,44 +599,59 @@ impl Compiler {
 
             Expr::IfExpr(cond, then_body, else_body) => {
                 self.require_value();
-                let mut condition = self.visit_expr(cond)?;
+                let (mut cond_indices, mut condition) = self.visit_expr(cond)?;
                 self.pop_requirement();
 
-                let mut then_body = self.visit_expr(then_body)?;
+                let (mut then_indices, mut then_body) = self.visit_expr(then_body)?;
 
-                let mut else_body = else_body
+                let (mut else_indices, mut else_body) = else_body
                     .as_ref()
                     .map(|x| self.visit_expr(x.as_ref()))
                     .unwrap_or_else(|| {
                         Ok(if self.needs_value() {
-                            vec![Opcode::LoadImmediateInt(0)]
+                            (
+                                vec![*cond_indices.get(0).unwrap()],
+                                vec![Opcode::LoadImmediateInt(0)],
+                            )
                         } else {
-                            vec![Opcode::Nop]
+                            (vec![*cond_indices.get(0).unwrap()], vec![Opcode::Nop])
                         })
                     })?;
 
                 result.append(&mut condition);
+                source_indices.append(&mut cond_indices);
 
                 let then_body_size = then_body.len();
                 let else_body_size = else_body.len();
 
                 result.push(Opcode::JumpIfFalse((then_body_size + 1 + 1) as u16));
+                source_indices.push(*source_indices.last().unwrap());
                 //instruction AFTER then_body and jump
 
                 result.append(&mut then_body);
+                source_indices.append(&mut then_indices);
+
                 result.push(Opcode::JumpRelative((else_body_size + 1) as u16));
+                source_indices.push(*source_indices.last().unwrap());
 
                 result.append(&mut else_body);
+                source_indices.append(&mut else_indices);
+
                 result.push(Opcode::Nop);
+                source_indices.push(*source_indices.last().unwrap());
             }
-            Expr::Block(block_id, block_body) => {
-                let body = self.visit_block(block_body, block_id)?;
+
+            Expr::Block(block_begin, block_end, block_body) => {
+                let (sub_indices, body) = self.visit_block(block_body, block_begin, block_end)?;
                 result = body;
+                source_indices = sub_indices;
             }
+
             Expr::Call(target, args) => {
                 self.require_value();
-                let mut target = self.visit_expr(target)?;
+                let (mut target_indices, mut target) = self.visit_expr(target)?;
                 self.pop_requirement();
+                let target_indices_copy = target_indices.clone();
 
                 if !*self.current_function_was_possibly_overwritten.last().unwrap_or(&true)
                     && target.len() == 1 //target is 1 op (not load_* load_box)
@@ -562,17 +659,20 @@ impl Compiler {
                     && self.needs_return_value()
                 //we will return after that
                 {
-                    let mut indices = vec![];
+                    let mut argument_indices = vec![];
                     //compute all arguments
                     for (i, arg) in args.iter().enumerate() {
                         self.require_value();
-                        result.append(&mut self.visit_expr(arg)?);
+                        let (mut arg_indices, mut arg_code) = self.visit_expr(arg)?;
+                        result.append(&mut arg_code);
+                        source_indices.append(&mut arg_indices);
                         self.pop_requirement(); //compile arg load
-                        indices.push((1 + i) as u16);
+                        argument_indices.push((1 + i) as u16);
                     }
                     //store arguments which are on stack in reverse order
-                    for index in indices.into_iter().rev() {
+                    for index in argument_indices.into_iter().rev() {
                         result.push(Opcode::StoreLocal(index));
+                        source_indices.push(*source_indices.last().unwrap());
                     }
                     //pop locals
                     let locals_to_pop = self.total_variables
@@ -580,37 +680,52 @@ impl Compiler {
                         - args.len(); //arguments
                     if locals_to_pop != 0 {
                         result.push(Opcode::Pop(locals_to_pop as u16));
+                        source_indices.push(*source_indices.last().unwrap());
                     }
 
                     //jump
                     result.push(Opcode::JumpAbsolute(0));
+                    source_indices.push(*source_indices.last().unwrap());
                 } else {
                     result.append(&mut target);
+                    source_indices.append(&mut target_indices);
                     for arg in args {
                         self.require_value();
-                        result.append(&mut self.visit_expr(arg)?);
+                        let (mut arg_indices, mut arg_code) = self.visit_expr(arg)?;
+                        result.append(&mut arg_code);
+                        source_indices.append(&mut arg_indices);
                         self.pop_requirement();
                     }
 
                     result.push(Opcode::Call(args.len() as u16));
+                    source_indices.push(*target_indices_copy.last().unwrap());
 
                     if !self.needs_value() {
                         result.push(Opcode::Pop(1));
+                        source_indices.push(*source_indices.last().unwrap());
                     }
                 }
             }
+
             Expr::SingleStatement(s) => {
                 self.require_value();
-                let body = self.visit_stmt(s)?;
+                let (sub_indices, body) = self.visit_stmt(s)?;
 
                 self.pop_requirement();
                 result = body;
+                source_indices = sub_indices;
             }
         }
-        Ok(result)
+
+        Ok((source_indices, result))
     }
 
-    fn visit_block(&mut self, block: &[Stmt], block_id: &Token) -> Result<Vec<Opcode>, String> {
+    fn visit_block(
+        &mut self,
+        block: &[Stmt],
+        block_begin: &Token,
+        block_end: &Token,
+    ) -> Result<(Vec<usize>, Vec<Opcode>), String> {
         /*
         block that does not return value:
             stmt(return=false)
@@ -633,25 +748,28 @@ impl Compiler {
             stmt(return=return)
         */
 
-        self.new_scope(block_id);
+        self.new_scope(block_begin);
 
         let mut result = vec![];
+        let mut source_indices = vec![];
 
         if self.needs_value() && !self.needs_return_value() {
             //if we will return after that, then no tmp slot needed, value will just stay on top of stack
             self.define_local("_", VariableType::Normal).unwrap();
             result.push(Opcode::LoadImmediateInt(0)); // _ variable
+            source_indices.push(block_begin.position.0);
         }
 
         let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
             .variable_types
-            .get(block_id)
+            .get(block_begin)
             .unwrap();
 
         for (name, var_type) in map_iter {
             if let VariableType::Boxed = var_type {
                 self.define_local(name, VariableType::Boxed);
                 result.push(Opcode::NewBox);
+                source_indices.push(block_begin.position.0);
             }
         }
 
@@ -659,25 +777,30 @@ impl Compiler {
 
         self.require_nothing();
         for item in other_statements {
-            let mut stmt_code = self.visit_stmt(item)?;
+            let (mut indices, mut stmt_code) = self.visit_stmt(item)?;
             result.append(&mut stmt_code);
+            source_indices.append(&mut indices);
         }
         self.pop_requirement();
 
-        let mut last_statement = self.visit_stmt(last_statement)?;
+        let (mut indices, mut last_statement) = self.visit_stmt(last_statement)?;
         result.append(&mut last_statement);
+        source_indices.append(&mut indices);
         if self.needs_value() && !self.needs_return_value() {
             let (_, fictional_slot) = self.lookup_local("_").unwrap();
             result.push(Opcode::StoreLocal(fictional_slot as u16));
+            source_indices.push(block_end.position.0);
             let scope_variable_count = self.pop_scope();
             result.push(Opcode::Pop((scope_variable_count - 1) as u16));
+            source_indices.push(block_end.position.0);
         } else if self.needs_return_value() {
             //do nothing - extra slots will be pop'ed by executing return instruction
         } else {
             let scope_variable_count = self.pop_scope();
             result.push(Opcode::Pop(scope_variable_count as u16));
+            source_indices.push(block_end.position.0);
         }
 
-        Ok(result)
+        Ok((source_indices, result))
     }
 }

@@ -1,5 +1,5 @@
 use crate::parsing::ast::{Expr, Program, Stmt};
-use crate::parsing::lexer::{Index, Token, TokenKind};
+use crate::parsing::lexer::Token;
 use indexmap::{IndexMap, IndexSet};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -31,7 +31,7 @@ pub type ClosedNamesMap = HashMap<Token, IndexSet<String>>;
 pub fn check(program: &Program) -> Result<(BlockNameMap, ClosedNamesMap), String> {
     let mut checker = Checker::new();
     let block_token = match program.as_ref() {
-        Expr::Block(block_token, _) => block_token,
+        Expr::Block(block_token, _block_end_token, _) => block_token,
         _ => panic!("this should never happen as program is parsed as block"),
     };
     checker.new_scope(ScopeType::Block, block_token);
@@ -204,7 +204,7 @@ impl Checker {
 
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<(), String> {
         match stmt {
-            Stmt::Print(e) => self.visit_expr(e),
+            Stmt::Print(_t, e) => self.visit_expr(e),
             Stmt::VarDeclaration(name, body) => {
                 body.as_ref()
                     .map(|e| self.visit_expr(e))
@@ -247,7 +247,7 @@ impl Checker {
                     .map(|x| self.visit_expr(x.as_ref()))
                     .unwrap_or(Ok(()))
             }
-            Expr::Block(bb, b) => self.visit_block(b, bb),
+            Expr::Block(bb, _be, b) => self.visit_block(b, bb),
             Expr::Call(target, args) => {
                 self.visit_expr(target)?;
                 for arg in args {

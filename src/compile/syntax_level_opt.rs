@@ -44,9 +44,9 @@ impl Optimizer {
 
     fn visit_stmt(&mut self, stmt: Stmt) -> Stmt {
         match stmt {
-            Stmt::Print(e) => {
+            Stmt::Print(t, e) => {
                 let containing = self.visit_expr(e);
-                Stmt::Print(containing)
+                Stmt::Print(t, containing)
             }
 
             Stmt::VarDeclaration(name, body) => {
@@ -84,20 +84,39 @@ impl Optimizer {
                 let a = self.visit_expr(a);
                 let b = self.visit_expr(b);
                 match (a.as_ref(), b.as_ref()) {
-                    (Expr::Number(na), Expr::Number(nb)) => match op.kind {
-                        TokenKind::Star => Expr::Number(na * nb),
-                        TokenKind::Slash => match na.checked_div(*nb) {
-                            Some(result) => Expr::Number(result),
-                            None => {
-                                eprintln!("encountered zero division while folding constants, assuming it is intended [{}]", op.position);
-                                Expr::Binary(op, a, b)
-                            }
-                        },
-                        TokenKind::Plus => Expr::Number(na + nb),
-                        TokenKind::Minus => Expr::Number(na - nb),
-                        TokenKind::TestEquals => Expr::Number(if na == nb { 1 } else { 0 }),
-                        _any_other => panic!("unexpected binary operator {}", _any_other),
-                    },
+                    (Expr::Number(token_a), Expr::Number(token_b)) => {
+                        let na = token_a.get_number().unwrap();
+                        let nb = token_b.get_number().unwrap();
+                        match op.kind {
+                            TokenKind::Star => Expr::Number(Token {
+                                position: token_a.position,
+                                kind: TokenKind::Number(na * nb),
+                            }),
+                            TokenKind::Slash => match na.checked_div(nb) {
+                                Some(result) => Expr::Number(Token {
+                                    position: token_a.position,
+                                    kind: TokenKind::Number(result),
+                                }),
+                                None => {
+                                    eprintln!("encountered zero division while folding constants, assuming it is intended [{}]", op.position);
+                                    Expr::Binary(op, a, b)
+                                }
+                            },
+                            TokenKind::Plus => Expr::Number(Token {
+                                position: token_a.position,
+                                kind: TokenKind::Number(na + nb),
+                            }),
+                            TokenKind::Minus => Expr::Number(Token {
+                                position: token_a.position,
+                                kind: TokenKind::Number(na - nb),
+                            }),
+                            TokenKind::TestEquals => Expr::Number(Token {
+                                position: token_a.position,
+                                kind: TokenKind::Number(if na == nb { 1 } else { 0 }),
+                            }),
+                            _any_other => panic!("unexpected binary operator {}", _any_other),
+                        }
+                    }
                     _other_cases => Expr::Binary(op, a, b),
                 }
             }
@@ -109,14 +128,14 @@ impl Optimizer {
                 Expr::IfExpr(cond, then_body, else_body)
             }
 
-            Expr::Block(bb, mut statements) => {
+            Expr::Block(bb, be, mut statements) => {
                 if statements.len() == 1 {
                     let statement = statements.remove(0);
                     let e = Box::new(Expr::SingleStatement(statement));
                     *self.visit_expr(e)
                 } else {
                     let statements = statements.into_iter().map(|s| self.visit_stmt(s)).collect();
-                    Expr::Block(bb, statements)
+                    Expr::Block(bb, be, statements)
                 }
             }
             Expr::Call(target, args) => {
@@ -127,7 +146,7 @@ impl Optimizer {
 
             Expr::SingleStatement(s) => match s {
                 //singleStatement is artificial node representing block wit single statement
-                Stmt::Print(p) => Expr::SingleStatement(Stmt::Print(p)),
+                Stmt::Print(t, p) => Expr::SingleStatement(Stmt::Print(t, p)),
 
                 Stmt::VarDeclaration(_name, maybe_body) => {
                     /*
@@ -139,7 +158,10 @@ impl Optimizer {
 
                     variable is not used anywhere else, can be substituted with expr
                     */
-                    maybe_body.map(|e| *e).unwrap_or(Expr::Number(0))
+                    maybe_body.map(|e| *e).unwrap_or(Expr::Number(Token {
+                        position: _name.position,
+                        kind: TokenKind::Number(0),
+                    }))
                 }
 
                 a @ Stmt::Assignment(..) => Expr::SingleStatement(a),
@@ -148,7 +170,7 @@ impl Optimizer {
 
                 a @ Stmt::Assert(..) => Expr::SingleStatement(a),
 
-                Stmt::FunctionDeclaration { .. } => {
+                Stmt::FunctionDeclaration { name, .. } => {
                     /*
                     thing like
                     if ...
@@ -158,7 +180,10 @@ impl Optimizer {
 
                     as def value is not used, it can be exluded from resulting program
                     */
-                    Expr::Number(0)
+                    Expr::Number(Token {
+                        position: name.position,
+                        kind: TokenKind::Number(0),
+                    })
                     //Expr::SingleStatement(a)
                 }
             },

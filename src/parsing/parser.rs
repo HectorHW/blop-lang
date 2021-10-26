@@ -13,8 +13,8 @@ peg::parser! {
         pub rule program() -> Box<Expr>
             = block_expr()
 
-        rule block() -> (Token, Vec<Stmt>) =
-            [bb@t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [t!(EndBlock)] {(bb, s)}
+        rule block() -> (Token, Token, Vec<Stmt>) =
+            [bb@t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {(bb, be, s)}
 
 
         rule stmt() -> Stmt =
@@ -46,7 +46,7 @@ peg::parser! {
             / [t!(Equals)] {Vec::new()}
 
         rule print_stmt() -> Stmt =
-            [t!(Print)] e:expr() {Stmt::Print(e)}
+            [print_token@t!(Print)] e:expr() {Stmt::Print(print_token, e)}
 
         rule assignment_stmt() -> Stmt =
             n:name() [t!(Equals)] e:expr() {Stmt::Assignment(n, e)}
@@ -93,7 +93,7 @@ peg::parser! {
             simple_expr()
 
         rule block_expr() -> Box<Expr> =
-            b:block() {Box::new(Expr::Block(b.0, b.1))}
+            b:block() {Box::new(Expr::Block(b.0, b.1, b.2))}
 
         rule simple_expr() -> Box<Expr> =
             arithmetic()
@@ -129,7 +129,7 @@ peg::parser! {
             [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {args}
 
         rule term() -> Box<Expr>
-            = [t!(Number(x))] { Box::new(Expr::Number(x))}
+            = [num@t!(Number(..))] { Box::new(Expr::Number(num))}
             / t:name()
                 {Box::new(Expr::Name(t))}
             / [t!(LParen)] e:expr() [t!(RParen)] {e}
