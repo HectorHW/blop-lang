@@ -34,6 +34,7 @@ pub enum TokenKind {
     Star,
     Slash,
     Mod,
+    Power,
 
     Comma,
 
@@ -81,6 +82,7 @@ impl Display for TokenKind {
                 TokenKind::Comma => "<,>".to_string(),
                 TokenKind::Elif => "(elif)".to_string(),
                 TokenKind::Mod => "(mod)".to_string(),
+                TokenKind::Power => "(**)".to_string(),
             }
         )
     }
@@ -254,9 +256,19 @@ impl<'input> Lexer<'input> {
                     result.push(token!(Minus));
                     self.input_iterator.next();
                 }
+
                 '*' => {
-                    result.push(token!(Star));
+                    let index = self.compute_index();
                     self.input_iterator.next();
+                    match self.input_iterator.peek() {
+                        Some((_, '*')) => {
+                            result.push(token!(index, Power));
+                            self.input_iterator.next();
+                        }
+                        _ => {
+                            result.push(token!(index, Star));
+                        }
+                    }
                 }
                 '/' => {
                     result.push(token!(Slash));

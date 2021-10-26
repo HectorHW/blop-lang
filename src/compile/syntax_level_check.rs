@@ -235,7 +235,7 @@ impl Checker {
                 self.visit_expr(b)?;
                 use crate::parsing::lexer::TokenKind::*;
                 match &op.kind {
-                    Plus | Minus | Star | Slash | TestEquals | Mod => Ok(()),
+                    Plus | Minus | Star | Slash | TestEquals | Mod | Power => Ok(()),
                     _ => Err(format!("cannot compile operator {:?}", op)),
                 }
             }

@@ -181,6 +181,14 @@ impl VM {
                     ip += 1;
                 }
 
+                Opcode::Power => {
+                    let second_operand = as_int!(checked_stack_pop!()?)?;
+                    let first_operand = as_int!(checked_stack_pop!()?)?;
+                    let value = first_operand.pow(second_operand as u64 as u32);
+                    self.stack.push(Value::Int(value));
+                    ip += 1;
+                }
+
                 Opcode::LoadGlobal(idx) => {
                     let value = *self
                         .stack

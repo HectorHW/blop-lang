@@ -126,6 +126,10 @@ impl Optimizer {
                                 position: token_a.position,
                                 kind: TokenKind::Number(if na == nb { 1 } else { 0 }),
                             }),
+                            TokenKind::Power => Expr::Number(Token {
+                                position: token_a.position,
+                                kind: TokenKind::Number(na.pow(nb as u64 as u32)),
+                            }),
                             _any_other => panic!("unexpected binary operator {}", _any_other),
                         }
                     }

@@ -34,6 +34,7 @@ pub enum Opcode {
     Div,
     Mul,
     Mod,
+    Power,
 
     TestEquals,
 
@@ -87,6 +88,7 @@ impl Display for Opcode {
                 Duplicate => "Duplicate".to_string(),
                 JumpAbsolute(idx) => format!("JumpAbsolute[{}]", idx),
                 Mod => "Mod".to_string(),
+                Power => "Power".to_string(),
             }
         )
     }

@@ -114,6 +114,9 @@ peg::parser! {
             x: (@) [op@t!(Mod)] y:@
                 {Box::new(Expr::Binary(op, x, y))}
             --
+            x:@ [op@t!(Power)] y:(@)
+                {Box::new(Expr::Binary(op, x, y))}
+            --
             n:call() {n}
         }
 

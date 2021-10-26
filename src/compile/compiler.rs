@@ -573,6 +573,7 @@ impl Compiler {
                     TokenKind::Minus => Opcode::Sub,
                     TokenKind::TestEquals => Opcode::TestEquals,
                     TokenKind::Mod => Opcode::Mod,
+                    TokenKind::Power => Opcode::Power,
                     other => panic!("unimplemented binary operator {} [{}]", other, op.position),
                 });
                 source_indices.push(op.position.0);

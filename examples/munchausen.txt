@@ -12,14 +12,6 @@ def while(cond, body) =
     else
         0
 
-def pow(a, b) =
-    def pow(a, b, acc) =
-        if b?=0
-            acc
-        else
-            pow(a, b-1, acc*a)
-    pow(a,b,1)
-
 def ismunchausen(n) =
     var oldvalue = n
     def nz =
@@ -28,7 +20,7 @@ def ismunchausen(n) =
     def munbody =
         var digit = n mod 10
         n = n / 10
-        var p = pow(digit, digit)
+        var p = digit**digit
         sum = sum + p
 
     while(nz, munbody)
