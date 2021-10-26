@@ -13,6 +13,7 @@ def while(cond, body) =
         pass
 
 def ismunchausen(n) =
+    var n = n
     var oldvalue = n
     def nz =
         1-(n?=0)
