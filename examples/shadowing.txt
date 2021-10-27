@@ -13,3 +13,18 @@ def M(a) =
     var a = a
     a
 assert M(1)?=1
+
+var c = 1
+var K =
+    def K =
+        c
+    var c = 2
+    K
+assert K() ?= 1
+
+def R =
+    var a = 2
+    def S(a) =
+        a
+    S
+assert R()(5)?=5

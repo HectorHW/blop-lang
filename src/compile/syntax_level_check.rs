@@ -53,61 +53,91 @@ impl Checker {
     }
 
     fn lookup_local(&mut self, name: &Token) -> Result<(), String> {
-        let mut passed_function_scope = false;
+        let mut found_init = None;
+        //try to lookup initialized value
+        for (_scope_type, scope_identifier, scope_map) in self.names.iter_mut().rev() {
+            match scope_map.entry(name.get_string().unwrap().clone()) {
+                Entry::Occupied(entry) if *entry.get() => {
+                    found_init = Some(scope_identifier.clone());
+                    break;
+                }
+                _ => {}
+            }
+        }
 
-        let mut depending_functions = HashSet::new();
+        if found_init.is_some() {
+            let found_init = found_init.unwrap();
+            let mut passed_function_scope = false;
 
-        for (scope_type, scope_identifier, scope_map) in self.names.iter_mut().rev() {
-            if passed_function_scope {
-                if scope_map.contains_key(name.get_string().unwrap()) {
-                    self.variable_types
-                        .get_mut(scope_identifier)
-                        .unwrap()
-                        .insert(name.get_string().unwrap().clone(), VariableType::Boxed);
-
-                    self.closed_names
-                        .get_mut(self.current_function.last().unwrap())
-                        .unwrap()
-                        .insert(name.get_string().unwrap().clone());
-
-                    //mark all functions that are in our way to close over that name
-
-                    for function in depending_functions {
-                        self.closed_names
-                            .get_mut(&function)
+            for (scope_type, scope_identifier, _scope_map) in self.names.iter_mut().rev() {
+                if scope_identifier == &found_init {
+                    //we are in right scope
+                    if passed_function_scope {
+                        self.variable_types
+                            .get_mut(scope_identifier)
                             .unwrap()
-                            .insert(name.get_string().unwrap().clone());
+                            .insert(name.get_string().unwrap().clone(), VariableType::Boxed);
                     }
 
                     return Ok(());
-                } else if let ScopeType::Function = scope_type {
-                    //define value as closed in function
-                    depending_functions.insert(scope_identifier.clone());
-                }
-            } else {
-                match scope_map.entry(name.get_string().unwrap().clone()) {
-                    Entry::Occupied(is_defined) => {
-                        if *is_defined.get() {
-                            return Ok(());
-                        } else {
-                            /*return Err(format!(
-                            "variable `{}` is declared in scope, but not defined at that point. Not inside function, so forward lookup in not allowed [{}]",
-                            name.get_string().unwrap(),
-                            name.position));*/
-                        }
-                    }
-                    Entry::Vacant(_) => {}
                 }
 
-                match scope_type {
-                    ScopeType::Block => {}
-                    ScopeType::Function => {
-                        passed_function_scope = true;
-                    }
+                if let ScopeType::Function = scope_type {
+                    //mark closing
+                    self.closed_names
+                        .get_mut(scope_identifier)
+                        .unwrap()
+                        .insert(name.get_string().unwrap().clone());
+                    passed_function_scope = true;
                 }
             }
         }
 
+        //try to lookup uninitialized in block right after passing function scope
+
+        let mut passed_function_scope = false;
+        let mut found_uninit = None;
+
+        for (scope_type, scope_identifier, scope_map) in self.names.iter_mut().rev() {
+            if passed_function_scope {
+                match scope_map.entry(name.get_string().unwrap().clone()) {
+                    Entry::Occupied(_entry) => {
+                        found_uninit = Some(scope_identifier.clone());
+                    }
+                    _ => {}
+                }
+                break; //we only look in one scope
+            }
+            match scope_type {
+                ScopeType::Block => {}
+                ScopeType::Function => {
+                    passed_function_scope = true;
+                }
+            }
+        }
+
+        if found_uninit.is_some() {
+            let found_uninit = found_uninit.unwrap();
+
+            for (scope_type, scope_identifier, _scope_map) in self.names.iter_mut().rev() {
+                if scope_identifier == &found_uninit {
+                    //we are in right scope
+                    self.variable_types
+                        .get_mut(&scope_identifier.clone())
+                        .unwrap()
+                        .insert(name.get_string().unwrap().clone(), VariableType::Boxed);
+                    return Ok(());
+                }
+
+                if let ScopeType::Function = scope_type {
+                    //mark closing
+                    self.closed_names
+                        .get_mut(scope_identifier)
+                        .unwrap()
+                        .insert(name.get_string().unwrap().clone());
+                }
+            }
+        }
         Err(format!(
             "no variable `{}` found in scope [{}]",
             name.get_string().unwrap(),

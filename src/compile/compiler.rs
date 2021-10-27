@@ -69,7 +69,7 @@ impl Compiler {
         };
         compiler.new_scope(block_identifier);
 
-        compiler.require_return_value();
+        compiler.require_nothing();
         let (mut indices, code) = compiler.visit_expr(program)?;
         compiler.current_chunk().append(code);
         compiler.current_indices().append(&mut indices);
@@ -131,6 +131,9 @@ impl Compiler {
     }
 
     fn lookup_uninit_local(&self, name: &str) -> Option<(VariableType, usize)> {
+        if let Some((v_type, idx)) = self.lookup_local(name) {
+            return Some((v_type, idx));
+        }
         for scope in self.names.iter().rev() {
             if let Some((var_type, _any_state, var_idx)) = scope.get(name) {
                 return Some((*var_type, *var_idx));
