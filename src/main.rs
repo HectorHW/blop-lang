@@ -114,6 +114,11 @@ pub fn run_file(filename: &str) -> Result<(), String> {
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
     let statements = compile::syntax_level_opt::optimize(statements);
     let (per_chunk_indices, chunks) = Compiler::compile(&statements, variable_types, closed_names)?;
+    #[cfg(debug_assertions)]
+    for idx in 0..chunks.len() {
+        assert_eq!(per_chunk_indices[idx].len(), chunks[idx].code.len());
+    }
+
     let mut vm = VM::new();
     vm.run(&chunks).map_err(|error| {
         format!(

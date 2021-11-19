@@ -386,7 +386,7 @@ impl GC {
                 chunk_id: *chunk_id,
             }, //no cloning necessary for function as it itself carries no data that can change during runtime
 
-            s @ StackObject::ConstantString(ptr1, ptr2) => {
+            s @ StackObject::ConstantString(..) => {
                 s.clone()
                 //constant string are *cough cough* constant, no need to add new object,
                 // just reuse old one, but bump counter

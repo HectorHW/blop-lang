@@ -503,6 +503,7 @@ impl Compiler {
                 }
 
                 result.push(Opcode::LoadConst(const_idx as u16)); //code block
+                source_indices.push(function_name.position.0);
 
                 if !self.closed_names.get(function_name).unwrap().is_empty() {
                     result.push(Opcode::NewClosure);
