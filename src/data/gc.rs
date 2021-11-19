@@ -7,10 +7,9 @@ use crate::execution::chunk::Chunk;
 use std::pin::Pin;
 
 pub struct GC {
-    objects: Vec<Pin<Box<OwnedObject>>>,
+    old_objects: Vec<Pin<Box<OwnedObject>>>,
     young_objects: Vec<Pin<Box<OwnedObject>>>,
-    new_allocations: usize,
-    new_young_allocations: usize,
+    old_allocations: usize,
     pub new_allocations_threshold: usize,
     pub new_allocations_threshold_young: usize,
 }
@@ -292,10 +291,9 @@ impl GCAlloc for Closure {
 impl GC {
     pub fn new(thr: usize, thr_young: usize) -> Self {
         GC {
-            objects: Vec::new(),
+            old_objects: Vec::new(),
             young_objects: Vec::new(),
-            new_allocations: 0,
-            new_young_allocations: 0,
+            old_allocations: 0,
             new_allocations_threshold: thr,
             new_allocations_threshold_young: thr_young,
         }
@@ -307,14 +305,13 @@ impl GC {
 
     pub fn store<T: GCAlloc>(&mut self, item: T) -> StackObject {
         if T::needs_gc() {
-            self.new_young_allocations += 1;
             let obj = T::store(item);
             let boxed = Box::new(obj);
             self.young_objects.push(Pin::new(boxed));
 
             let box_ref = self.young_objects.last_mut().unwrap(); //obj is not null
 
-            return OwnedObject::make_stack_object(box_ref);
+            OwnedObject::make_stack_object(box_ref)
         } else {
             T::make(item)
         }
@@ -332,13 +329,13 @@ impl GC {
     where
         I: Iterator<Item = &'a StackObject>,
     {
-        if self.new_young_allocations < self.new_allocations_threshold_young {
+        if self.young_objects.len() < self.new_allocations_threshold_young {
             return;
         }
 
         self.quick_pass();
 
-        if self.new_allocations < self.new_allocations_threshold {
+        if self.old_allocations < self.new_allocations_threshold {
             return;
         }
 
@@ -352,29 +349,24 @@ impl GC {
         }
 
         //sweep - drop unmarked objects
-        self.objects.retain(|obj| obj.is_marked());
+        self.old_objects.retain(|obj| obj.is_marked());
 
-        for item in &mut self.objects {
+        for item in &mut self.old_objects {
             item.mark_shallow(false);
         }
 
         for chunk in chunks {
             let _ = chunk.constants.iter().map(|obj| obj.mark(false));
         }
-        self.new_allocations = 0;
-
-        //let's hope some day Vec.drain_filter() will be accessible
-        //mark shallow 479 at thr=16000
-        //mark 456
+        self.old_allocations = 0;
     }
 
     unsafe fn quick_pass(&mut self) {
         //drop young objects whose RC is zero
         self.young_objects.retain(|obj| obj.marker.counter() > 0);
-        //move young objects into normal
-        self.objects.append(&mut self.young_objects);
-        self.new_allocations += self.new_young_allocations;
-        self.new_young_allocations = 0;
+        //move young objects into old
+        self.old_allocations += self.young_objects.len();
+        self.old_objects.append(&mut self.young_objects);
     }
 
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
@@ -400,9 +392,9 @@ impl GC {
                 let owned_ref = obj.unwrap_traceable().expect("null ptr in clone");
                 let new_obj = owned_ref.clone();
                 let obj_boxed = Box::new(new_obj);
-                self.objects.push(Pin::new(obj_boxed));
+                self.old_objects.push(Pin::new(obj_boxed));
 
-                let mut_ref = self.objects.last_mut().unwrap();
+                let mut_ref = self.old_objects.last_mut().unwrap();
 
                 OwnedObject::make_stack_object(mut_ref)
             }
@@ -410,11 +402,11 @@ impl GC {
     }
 
     pub fn len(&self) -> usize {
-        self.objects.len()
+        self.old_objects.len()
     }
 
     pub unsafe fn clear(&mut self) {
-        self.objects.clear()
+        self.old_objects.clear()
     }
 
     pub fn new_string(&mut self, s: &str) -> StackObject {
