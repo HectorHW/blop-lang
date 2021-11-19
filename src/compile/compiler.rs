@@ -413,7 +413,7 @@ impl Compiler {
 
                 if *self.current_chunk_idx.last().unwrap() != 0 {
                     //compiling some function
-                    if var_idx == 0 {
+                    if var_type != VariableType::Closed && var_idx == 0 {
                         //slot 0 - current function
                         return Err(format!(
                             "cannot assign to function inside itself. Maybe try shadowing? [{}]",

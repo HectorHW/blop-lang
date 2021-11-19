@@ -18,7 +18,7 @@ enum ScopeType {
     Function,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum VariableType {
     Normal,
     Boxed,
