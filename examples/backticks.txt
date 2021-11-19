@@ -1,0 +1,21 @@
+var `name with spaces` = 0
+assert `name with spaces` ?= 0
+print `name with spaces`
+
+#note that backticks are only used for escaping and are not included in token
+var `a` = 10
+assert a ?= 10
+print a
+
+#backticks can be used to override keywords
+var `print` = 5
+assert `print` ?=5
+print `print`
+
+#you *can* use newlines, but please be carefull with newlines and indentation as they will be included in resulting token
+def `very long function name that contains lots of words
+which I would like to break into multiple lines` =
+    2
+
+print `very long function name that contains lots of words
+which I would like to break into multiple lines`()

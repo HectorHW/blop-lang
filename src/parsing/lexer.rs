@@ -298,12 +298,24 @@ impl<'input> Lexer<'input> {
                     let start_idx = self.compute_input_shift();
                     let token_index = self.compute_index();
 
-                    self.read_while(&|c| c.is_alphanumeric());
+                    self.read_while(&|c| c.is_alphanumeric() || c == '_');
 
                     let end_idx = self.compute_input_shift();
                     let name = &self.input_string[start_idx..end_idx];
                     //keywords
                     result.push(token!(token_index, self.keyword_or_name(name)))
+                }
+
+                '`' => {
+                    self.input_iterator.next(); //skip `
+                    let start_idx = self.compute_input_shift();
+                    let token_index = self.compute_index();
+
+                    self.read_while(&|c| c != '`');
+                    let end_idx = self.compute_input_shift();
+                    self.input_iterator.next(); //skip closing `
+                    let name = &self.input_string[start_idx..end_idx];
+                    result.push(token!(token_index, TokenKind::Name(name.to_string())))
                 }
 
                 '(' => {
@@ -394,9 +406,15 @@ impl<'input> Lexer<'input> {
     }
 
     fn read_while<F: (Fn(char) -> bool)>(&mut self, predicate: &F) {
-        while let Some((_, character)) = self.input_iterator.peek() {
+        while let Some((idx, character)) = self.input_iterator.peek() {
             let character = *character;
             if predicate(character) {
+                if character == '\n' {
+                    self.line_number += 1;
+                    self.line_start = idx + 1;
+                    eprintln!("warning: encountered newline inside token");
+                }
+
                 self.input_iterator.next();
             } else {
                 break;

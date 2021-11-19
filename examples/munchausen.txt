@@ -1,36 +1,22 @@
-def loop(start, stop, body) =
-    if start?=stop+1
-        pass
-    else
-        body(start)
-        loop(start+1, stop, body)
+def find_munchausen(start, stop) =
+    def find_munchausen(start, stop, total) =
+        if start ?= stop+1
+            total
+        else
+            def is_munchausen(n) =
+                def munbody(n, sum) =
+                    if n?=0
+                        sum
+                    else
+                        var p = n mod 10
+                        p = p**p
+                        munbody(n/10, sum+p)
 
-def while(cond, body) =
-    if cond()
-        body()
-        while(cond, body)
-    else
-        pass
-
-def ismunchausen(n) =
-    var oldvalue = n
-    def nz =
-        1-(n?=0)
-    var sum = 0
-    def munbody =
-        var digit = n mod 10
-        n = n / 10
-        var p = digit**digit
-        sum = sum + p
-
-    while(nz, munbody)
-    sum?=oldvalue
-var total = 0
-def fornumber(n) =
-    if ismunchausen(n)
-        total = total + 1
-
-#print ismunchausen(2)
-loop(1, 5000, fornumber)
+                munbody(n, 0)?=n
+            if is_munchausen(start)
+                total = total+1
+            find_munchausen(start+1, stop, total)
+    find_munchausen(start, stop, 0)
+var total = find_munchausen(1, 5000)
 print total
 assert total?=2
