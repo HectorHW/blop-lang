@@ -1,0 +1,6 @@
+var abc = 1
+def x =
+    x = 2
+    abc
+
+print x()

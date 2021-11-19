@@ -415,10 +415,10 @@ impl Compiler {
                     //compiling some function
                     if var_idx == 0 {
                         //slot 0 - current function
-                        *self
-                            .current_function_was_possibly_overwritten
-                            .last_mut()
-                            .unwrap() = true;
+                        return Err(format!(
+                            "cannot assign to function inside itself. Maybe try shadowing? [{}]",
+                            target.position
+                        ));
                     }
                 }
                 //maybe we need to load pointer
