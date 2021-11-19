@@ -1,3 +1,4 @@
+use super::compile_file;
 use super::run_file;
 
 macro_rules! test_file {
@@ -26,6 +27,20 @@ macro_rules! test_fail_file {
             println!("{}", path);
 
             run_file(&path).unwrap_err();
+        }
+    };
+}
+
+macro_rules! test_fail_compile {
+    ($name:ident) => {
+        #[test]
+        fn $name() {
+            let mut path = String::new();
+            path.push_str("examples/");
+            path.push_str(stringify!($name));
+            path.push_str(".txt");
+
+            compile_file(&path).unwrap_err();
         }
     };
 }
@@ -84,3 +99,5 @@ fn test_tail_call_optimization_application() {
 }
 
 test_file! {munchausen}
+
+test_fail_compile! {fail_prohibit_assignment_to_function_inside_itself}

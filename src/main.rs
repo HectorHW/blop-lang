@@ -1,4 +1,5 @@
 use crate::compile::compiler::Compiler;
+use crate::execution::chunk::Chunk;
 use crate::execution::vm::VM;
 use crate::parsing::ast::Expr;
 use peg::error::ParseError;
@@ -102,6 +103,22 @@ fn normalize_string(s: String) -> String {
 }
 
 pub fn run_file(filename: &str) -> Result<(), String> {
+    let (per_chunk_indices, chunks) = compile_file(filename)?;
+
+    let mut vm = VM::new();
+    vm.run(&chunks).map_err(|error| {
+        format!(
+            "error {:?} at instruction {}\nat line {}",
+            error,
+            chunks[error.chunk_index].code[error.opcode_index],
+            per_chunk_indices[error.chunk_index][error.opcode_index],
+        )
+    })?;
+
+    Ok(())
+}
+
+pub fn compile_file(filename: &str) -> Result<(Vec<Vec<usize>>, Vec<Chunk>), String> {
     let file_content = std::fs::read_to_string(filename)
         .map_err(|_e| format!("failed to read file {}", filename))?;
     let file_content = normalize_string(file_content);
@@ -118,16 +135,5 @@ pub fn run_file(filename: &str) -> Result<(), String> {
     for idx in 0..chunks.len() {
         assert_eq!(per_chunk_indices[idx].len(), chunks[idx].code.len());
     }
-
-    let mut vm = VM::new();
-    vm.run(&chunks).map_err(|error| {
-        format!(
-            "error {:?} at instruction {}\nat line {}",
-            error,
-            chunks[error.chunk_index].code[error.opcode_index],
-            per_chunk_indices[error.chunk_index][error.opcode_index],
-        )
-    })?;
-
-    Ok(())
+    Ok((per_chunk_indices, chunks))
 }
