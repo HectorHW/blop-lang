@@ -1,3 +1,4 @@
+use crate::data::marked_counter::MarkedCounter;
 use crate::data::objects::StackObject::Function;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -6,7 +7,7 @@ use std::ops::{Deref, DerefMut};
 
 pub type Value = StackObject;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug)]
 pub enum StackObject {
     Int(i64),
     Function { chunk_id: usize },
@@ -21,7 +22,7 @@ pub enum StackObject {
 #[derive(Clone, Debug)]
 pub struct OwnedObject {
     pub item: OwnedObjectItem,
-    pub marker: bool,
+    pub marker: MarkedCounter,
 }
 
 #[derive(Clone, Debug)]

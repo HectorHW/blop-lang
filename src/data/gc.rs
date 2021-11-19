@@ -1,14 +1,18 @@
 // this module defines api for working with objects from memory side
 
 use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
+use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
 use crate::data::objects::{Closure, ValueBox};
 use crate::execution::chunk::Chunk;
 use std::pin::Pin;
 
 pub struct GC {
     objects: Vec<Pin<Box<OwnedObject>>>,
+    young_objects: Vec<Pin<Box<OwnedObject>>>,
     new_allocations: usize,
+    new_young_allocations: usize,
     pub new_allocations_threshold: usize,
+    pub new_allocations_threshold_young: usize,
 }
 
 impl StackObject {
@@ -22,6 +26,59 @@ impl StackObject {
                 if let Some(obj) = self.unwrap_traceable() {
                     obj.mark(value)
                 }
+            }
+        }
+    }
+}
+
+impl Clone for StackObject {
+    fn clone(&self) -> Self {
+        match self {
+            StackObject::Int(i) => StackObject::Int(*i),
+            StackObject::Function { chunk_id } => StackObject::Function {
+                chunk_id: *chunk_id,
+            },
+
+            StackObject::Map(gc_ptr, obj_ptr) => {
+                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                return StackObject::Map(*gc_ptr, *obj_ptr);
+            }
+            StackObject::Vector(gc_ptr, obj_ptr) => {
+                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                StackObject::Vector(*gc_ptr, *obj_ptr)
+            }
+            StackObject::MutableString(gc_ptr, obj_ptr) => {
+                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                StackObject::MutableString(*gc_ptr, *obj_ptr)
+            }
+            StackObject::ConstantString(gc_ptr, obj_ptr) => {
+                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                StackObject::ConstantString(*gc_ptr, *obj_ptr)
+            }
+            StackObject::Box(gc_ptr, obj_ptr) => {
+                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                StackObject::Box(*gc_ptr, *obj_ptr)
+            }
+            StackObject::Closure(gc_ptr, obj_ptr) => {
+                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                StackObject::Closure(*gc_ptr, *obj_ptr)
+            }
+        }
+    }
+}
+
+impl Drop for StackObject {
+    fn drop(&mut self) {
+        match self {
+            StackObject::Int(_) => {}
+            StackObject::Function { .. } => {}
+            StackObject::Map(gc_ptr, _)
+            | StackObject::Vector(gc_ptr, _)
+            | StackObject::MutableString(gc_ptr, _)
+            | StackObject::ConstantString(gc_ptr, _)
+            | StackObject::Box(gc_ptr, _)
+            | StackObject::Closure(gc_ptr, _) => {
+                gc_ptr.unwrap_ref_mut().unwrap().dec_gc_counter();
             }
         }
     }
@@ -62,10 +119,10 @@ impl OwnedObject {
     }
 
     fn mark(&mut self, value: bool) {
-        if self.marker == value {
+        if self.marker.flag() == value {
             return;
         }
-        self.marker = value; //mark object itself
+        self.marker.set_flag(value); //mark object itself
 
         match &self.item {
             OwnedObjectItem::Map(object) => {
@@ -94,12 +151,20 @@ impl OwnedObject {
         }
     }
 
+    fn inc_gc_counter(&mut self) {
+        self.marker.inc()
+    }
+
+    fn dec_gc_counter(&mut self) {
+        self.marker.dec()
+    }
+
     fn mark_shallow(&mut self, value: bool) {
-        self.marker = value;
+        self.marker.set_flag(value);
     }
 
     fn is_marked(&self) -> bool {
-        self.marker
+        self.marker.flag()
     }
 }
 
@@ -145,7 +210,7 @@ impl GCAlloc for VMap {
     fn store(obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Map(obj),
-            marker: false,
+            marker: UNMARKED_ONE,
         }
     }
 }
@@ -160,7 +225,7 @@ impl GCAlloc for VVec {
     fn store(obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Vector(obj),
-            marker: false,
+            marker: UNMARKED_ONE,
         }
     }
 }
@@ -175,7 +240,7 @@ impl GCAlloc for String {
     fn store(obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::MutableString(obj),
-            marker: false,
+            marker: UNMARKED_ONE,
         }
     }
 }
@@ -192,7 +257,7 @@ impl GCAlloc for _ConstHeapString {
     fn store(_obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::ConstantString(_obj.0),
-            marker: false,
+            marker: UNMARKED_ONE,
         }
     }
 }
@@ -206,7 +271,7 @@ impl GCAlloc for ValueBox {
     fn store(_obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Box(_obj),
-            marker: false,
+            marker: UNMARKED_ONE,
         }
     }
 }
@@ -219,17 +284,20 @@ impl GCAlloc for Closure {
     fn store(_obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Closure(_obj),
-            marker: false,
+            marker: UNMARKED_ONE,
         }
     }
 }
 
 impl GC {
-    pub fn new(thr: usize) -> Self {
+    pub fn new(thr: usize, thr_young: usize) -> Self {
         GC {
             objects: Vec::new(),
+            young_objects: Vec::new(),
             new_allocations: 0,
+            new_young_allocations: 0,
             new_allocations_threshold: thr,
+            new_allocations_threshold_young: thr_young,
         }
     }
 
@@ -239,12 +307,12 @@ impl GC {
 
     pub fn store<T: GCAlloc>(&mut self, item: T) -> StackObject {
         if T::needs_gc() {
-            self.new_allocations += 1;
+            self.new_young_allocations += 1;
             let obj = T::store(item);
             let boxed = Box::new(obj);
-            self.objects.push(Pin::new(boxed));
+            self.young_objects.push(Pin::new(boxed));
 
-            let box_ref = self.objects.last_mut().unwrap(); //obj is not null
+            let box_ref = self.young_objects.last_mut().unwrap(); //obj is not null
 
             return OwnedObject::make_stack_object(box_ref);
         } else {
@@ -264,6 +332,12 @@ impl GC {
     where
         I: Iterator<Item = &'a StackObject>,
     {
+        if self.new_young_allocations < self.new_allocations_threshold_young {
+            return;
+        }
+
+        self.quick_pass();
+
         if self.new_allocations < self.new_allocations_threshold {
             return;
         }
@@ -287,10 +361,20 @@ impl GC {
         for chunk in chunks {
             let _ = chunk.constants.iter().map(|obj| obj.mark(false));
         }
+        self.new_allocations = 0;
 
         //let's hope some day Vec.drain_filter() will be accessible
         //mark shallow 479 at thr=16000
         //mark 456
+    }
+
+    unsafe fn quick_pass(&mut self) {
+        //drop young objects whose RC is zero
+        self.young_objects.retain(|obj| obj.marker.counter() > 0);
+        //move young objects into normal
+        self.objects.append(&mut self.young_objects);
+        self.new_allocations += self.new_young_allocations;
+        self.new_young_allocations = 0;
     }
 
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
@@ -302,9 +386,10 @@ impl GC {
                 chunk_id: *chunk_id,
             }, //no cloning necessary for function as it itself carries no data that can change during runtime
 
-            StackObject::ConstantString(ptr1, ptr2) => {
-                StackObject::ConstantString(*ptr1, *ptr2)
-                //constant string are *cough cough* counstant, no need to add new object, just reuse old one
+            s @ StackObject::ConstantString(ptr1, ptr2) => {
+                s.clone()
+                //constant string are *cough cough* constant, no need to add new object,
+                // just reuse old one, but bump counter
             }
 
             StackObject::MutableString(..)

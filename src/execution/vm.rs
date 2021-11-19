@@ -49,7 +49,7 @@ impl VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
             locals_offset: 0,
-            gc: GC::new(16000),
+            gc: GC::new(16000, 100),
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
         }
     }
@@ -89,7 +89,7 @@ impl VM {
         macro_rules! as_int {
             ($value:expr) => {
                 Ok($value).and_then(|u| {
-                    u.unwrap_int().ok_or_else(|| {
+                    u.clone().unwrap_int().ok_or_else(|| {
                         runtime_error!(TypeError {
                             message: format!(
                                 "expected {} but got {}",
@@ -124,9 +124,10 @@ impl VM {
                 }
                 Opcode::LoadConst(idx) => {
                     let idx = idx as usize;
-                    let value = *current_chunk
+                    let value = current_chunk
                         .constants
                         .get(idx)
+                        .cloned()
                         .ok_or(runtime_error!(OperandIndexing))?;
                     self.stack.push(value);
                     ip += 1;
@@ -190,9 +191,10 @@ impl VM {
                 }
 
                 Opcode::LoadGlobal(idx) => {
-                    let value = *self
+                    let value = self
                         .stack
                         .get(idx as usize)
+                        .cloned()
                         .ok_or(runtime_error!(OperandIndexing))?;
 
                     self.stack.push(value);
@@ -201,9 +203,10 @@ impl VM {
 
                 Opcode::LoadLocal(idx) => {
                     let absolute_pos = self.locals_offset + idx as usize;
-                    let value = *self
+                    let value = self
                         .stack
                         .get(absolute_pos)
+                        .cloned()
                         .ok_or(runtime_error!(OperandIndexing))?;
                     self.stack.push(value);
                     ip += 1;
@@ -285,7 +288,11 @@ impl VM {
                         return Err(runtime_error!(StackUnderflow));
                     }
 
-                    let object = *self.stack.get(self.stack.len() - 1 - arity).unwrap();
+                    let object = self
+                        .stack
+                        .get(self.stack.len() - 1 - arity)
+                        .cloned()
+                        .unwrap();
                     let chunk_id = match object {
                         Value::Function { chunk_id } => Ok(chunk_id),
                         Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().unwrap().chunk_id),
@@ -346,7 +353,7 @@ impl VM {
                     match checked_stack_pop!()? {
                         Value::Box(_gc, _obj) => {
                             let box_obj = _obj.unwrap_ref_mut().unwrap();
-                            self.stack.push(box_obj.0);
+                            self.stack.push(box_obj.0.clone());
                         }
                         _any_other => {
                             return Err(runtime_error!(TypeError {
@@ -433,16 +440,17 @@ impl VM {
                 }
                 Opcode::LoadClosureValue(idx) => {
                     let closure = as_closure!(self.stack.get(self.locals_offset).unwrap())?;
-                    let value = *closure
+                    let value = closure
                         .closed_values
                         .get(idx as usize)
+                        .cloned()
                         .ok_or(runtime_error!(OperandIndexing))?;
                     self.stack.push(value);
                     ip += 1;
                 }
                 Opcode::Duplicate => {
                     let value = checked_stack_pop!()?;
-                    self.stack.push(value);
+                    self.stack.push(value.clone());
                     self.stack.push(value);
                     ip += 1;
                 }
