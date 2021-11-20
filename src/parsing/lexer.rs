@@ -44,6 +44,7 @@ pub enum TokenKind {
 
     Number(i64),
     Name(String),
+    ConstString(String),
 
     Print,
     Assert,
@@ -70,6 +71,7 @@ impl Display for TokenKind {
                 TokenKind::Slash => "(/)".to_string(),
                 TokenKind::Number(n) => format!("[NUMBER {}]", n),
                 TokenKind::Name(s) => format!("[NAME {}]", s),
+                TokenKind::ConstString(s) => format!("[STRING {}]", s),
                 TokenKind::Print => "(PRINT)".to_string(),
                 TokenKind::LParen => "<(>".to_string(),
                 TokenKind::RParen => "<)>".to_string(),
@@ -94,6 +96,7 @@ impl Token {
     pub fn get_string(&self) -> Option<&String> {
         match &self.kind {
             TokenKind::Name(n) => Some(n),
+            TokenKind::ConstString(s) => Some(s),
             _ => None,
         }
     }
@@ -316,6 +319,20 @@ impl<'input> Lexer<'input> {
                     self.input_iterator.next(); //skip closing `
                     let name = &self.input_string[start_idx..end_idx];
                     result.push(token!(token_index, TokenKind::Name(name.to_string())))
+                }
+
+                '"' => {
+                    let token_index = self.compute_index();
+                    self.input_iterator.next(); //skip opening "
+                    let start_idx = self.compute_input_shift();
+                    self.read_while(&|c| c != '"');
+                    if self.input_iterator.peek().is_none() {
+                        return Err(format!("unterminated string at [{}]", token_index));
+                    }
+                    let end_idx = self.compute_input_shift();
+                    self.input_iterator.next(); //skip closing "
+                    let s = self.input_string[start_idx..end_idx].to_string();
+                    result.push(token!(token_index, TokenKind::ConstString(s)));
                 }
 
                 '(' => {

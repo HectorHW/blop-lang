@@ -1,4 +1,5 @@
 use crate::compile::syntax_level_check::{BlockNameMap, ClosedNamesMap, VariableType};
+use crate::data::gc::GC;
 use crate::data::objects::Value;
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
@@ -12,7 +13,7 @@ enum ValueRequirement {
     ReturnValue,
 }
 
-pub struct Compiler {
+pub struct Compiler<'gc> {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
     chunks: Vec<Chunk>,
@@ -25,6 +26,7 @@ pub struct Compiler {
     variable_types: BlockNameMap,
     closed_names: ClosedNamesMap,
     current_function_was_possibly_overwritten: Vec<bool>,
+    gc: &'gc mut GC,
 }
 
 struct FunctionCompilerState {
@@ -33,8 +35,12 @@ struct FunctionCompilerState {
     total_closed_variables: usize,
 }
 
-impl Compiler {
-    pub fn new(variable_types: BlockNameMap, closed_names: ClosedNamesMap) -> Compiler {
+impl<'gc> Compiler<'gc> {
+    pub fn new(
+        variable_types: BlockNameMap,
+        closed_names: ClosedNamesMap,
+        gc: &'gc mut GC,
+    ) -> Compiler {
         Compiler {
             names: vec![],
             value_requirements: vec![],
@@ -48,6 +54,7 @@ impl Compiler {
             variable_types,
             closed_names,
             current_function_was_possibly_overwritten: vec![],
+            gc,
         }
     }
 
@@ -55,8 +62,9 @@ impl Compiler {
         program: &Program,
         variable_types: BlockNameMap,
         closed_names: ClosedNamesMap,
+        gc: &'gc mut GC,
     ) -> Result<(Vec<Vec<usize>>, Vec<Chunk>), String> {
-        let mut compiler = Compiler::new(variable_types, closed_names);
+        let mut compiler = Compiler::new(variable_types, closed_names, gc);
 
         compiler.chunks = vec![Chunk::new("<script>".to_string(), 0)];
         compiler.per_chunk_indices = vec![vec![]];
@@ -595,6 +603,17 @@ impl Compiler {
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1));
                     source_indices.push(token.position.0);
+                }
+            }
+            Expr::ConstString(s) => {
+                let obj_ptr = self.gc.new_const_string(s.get_string().unwrap().as_str());
+                let constant_index = self.current_chunk().constants.len();
+                self.current_chunk().constants.push(obj_ptr);
+                result.push(Opcode::LoadConst(constant_index as u16));
+                source_indices.push(s.position.0);
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1));
+                    source_indices.push(s.position.0);
                 }
             }
 

@@ -19,6 +19,7 @@ pub enum Stmt {
 pub enum Expr {
     Number(Token),
     Name(Token),
+    ConstString(Token),
     Binary(Token, Box<Expr>, Box<Expr>),
     IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Block(Token, Token, Vec<Stmt>),

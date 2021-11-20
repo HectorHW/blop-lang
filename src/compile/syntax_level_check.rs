@@ -258,6 +258,7 @@ impl Checker {
     fn visit_expr(&mut self, expr: &Expr) -> Result<(), String> {
         match expr {
             Expr::Number(_) => Ok(()),
+            Expr::ConstString(_) => Ok(()),
 
             Expr::Name(n) => self.lookup_local(n),
 
