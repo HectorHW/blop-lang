@@ -8,6 +8,7 @@ use std::pin::Pin;
 
 const GC_YOUNG_THR_DEFAULT: usize = 100;
 const GC_OLD_THR_DEFAULT: usize = 16000;
+const GC_YOUNG_PASSES_DEFAULT: usize = 3;
 
 pub struct GC {
     old_objects: Vec<Pin<Box<OwnedObject>>>,
@@ -15,6 +16,7 @@ pub struct GC {
     old_allocations: usize,
     pub new_allocations_threshold: usize,
     pub new_allocations_threshold_young: usize,
+    gc_young_passes: usize,
 }
 
 impl StackObject {
@@ -335,13 +337,14 @@ impl Drop for OwnedObject {
 }
 
 impl GC {
-    pub fn new(thr: usize, thr_young: usize) -> Self {
+    pub fn new(thr: usize, thr_young: usize, young_passes: usize) -> Self {
         GC {
             old_objects: Vec::new(),
             young_objects: Vec::new(),
             old_allocations: 0,
             new_allocations_threshold: thr,
             new_allocations_threshold_young: thr_young,
+            gc_young_passes: young_passes,
         }
     }
 
@@ -356,7 +359,7 @@ impl GC {
         } else {
             GC_OLD_THR_DEFAULT
         };
-        Self::new(old_thr, young_thr)
+        Self::new(old_thr, young_thr, GC_YOUNG_PASSES_DEFAULT)
     }
 
     pub fn allocate_new<T: GCNew>(&mut self) -> StackObject {
@@ -435,22 +438,38 @@ impl GC {
         println!("end slow_pass");
     }
 
+    /*
+    return value indicates if actually cleared references which could create
+    more objects for deletion
+     */
+    fn clear_young_references_pass(&mut self) -> bool {
+        let mut flag = false;
+        for item in &mut self.young_objects {
+            if item.marker.counter() == 0 && item.clear_references() {
+                flag = true;
+                #[cfg(feature = "debug-gc")]
+                println!("cleared refs in {:p}", item.as_ref());
+            }
+        }
+        flag
+    }
+
     unsafe fn quick_pass(&mut self) {
         #[cfg(feature = "debug-gc")]
         println!("begin quick_pass");
         //clear references in objects that will be deleted.
         //this action may create more objects to clear
-        loop {
-            let mut changed = false;
-            for item in &mut self.young_objects {
-                if item.marker.counter() == 0 && item.clear_references() {
-                    changed = true;
-                    #[cfg(feature = "debug-gc")]
-                    println!("cleared refs in {:p}", item.as_ref());
+        if self.gc_young_passes == 0 {
+            loop {
+                if !self.clear_young_references_pass() {
+                    break;
                 }
             }
-            if !changed {
-                break;
+        } else {
+            for _ in 0..self.gc_young_passes {
+                if !self.clear_young_references_pass() {
+                    break;
+                }
             }
         }
 
