@@ -69,9 +69,9 @@ fn main() {
 
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
-
+    let mut vm = VM::new();
     let (per_chunk_indices, chunks) =
-        Compiler::compile(&statements, variable_types, closed_names).unwrap();
+        Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
 
     #[cfg(feature = "print-chunk")]
     for chunk in &chunks {
@@ -79,7 +79,7 @@ fn main() {
     }
 
     println!("running");
-    let mut vm = VM::new();
+
     #[cfg(feature = "bench")]
     let start_time = Instant::now();
 
@@ -103,9 +103,8 @@ fn normalize_string(s: String) -> String {
 }
 
 pub fn run_file(filename: &str) -> Result<(), String> {
-    let (per_chunk_indices, chunks) = compile_file(filename)?;
+    let (per_chunk_indices, chunks, mut vm) = compile_file(filename)?;
 
-    let mut vm = VM::new();
     vm.run(&chunks).map_err(|error| {
         format!(
             "error {:?} at instruction {}\nat line {}",
@@ -118,7 +117,7 @@ pub fn run_file(filename: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn compile_file(filename: &str) -> Result<(Vec<Vec<usize>>, Vec<Chunk>), String> {
+pub fn compile_file(filename: &str) -> Result<(Vec<Vec<usize>>, Vec<Chunk>, VM), String> {
     let file_content = std::fs::read_to_string(filename)
         .map_err(|_e| format!("failed to read file {}", filename))?;
     let file_content = normalize_string(file_content);
@@ -130,10 +129,12 @@ pub fn compile_file(filename: &str) -> Result<(Vec<Vec<usize>>, Vec<Chunk>), Str
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
     let statements = compile::syntax_level_opt::optimize(statements);
-    let (per_chunk_indices, chunks) = Compiler::compile(&statements, variable_types, closed_names)?;
+    let mut vm = VM::new();
+    let (per_chunk_indices, chunks) =
+        Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc)?;
     #[cfg(debug_assertions)]
     for idx in 0..chunks.len() {
         assert_eq!(per_chunk_indices[idx].len(), chunks[idx].code.len());
     }
-    Ok((per_chunk_indices, chunks))
+    Ok((per_chunk_indices, chunks, vm))
 }

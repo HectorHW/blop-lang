@@ -140,6 +140,7 @@ peg::parser! {
             = [num@t!(Number(..))] { Box::new(Expr::Number(num))}
             / t:name()
                 {Box::new(Expr::Name(t))}
+            / [s@t!(ConstString(..))] {Box::new(Expr::ConstString(s))}
             / [t!(LParen)] e:expr() [t!(RParen)] {e}
 
 

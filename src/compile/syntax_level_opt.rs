@@ -79,6 +79,7 @@ impl Optimizer {
 
         let expr: Expr = match expr {
             n @ Expr::Number(..) => n,
+            s @ Expr::ConstString(..) => s,
 
             na @ Expr::Name(..) => na,
 

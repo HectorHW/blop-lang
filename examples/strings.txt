@@ -1,0 +1,3 @@
+var s1 = "abcd" # creation of strings
+var s2 = "abcd" # constant strings are internalized, s1 and s2 point to same object
+print s1

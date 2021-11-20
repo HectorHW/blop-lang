@@ -528,16 +528,51 @@ impl GC {
         self.old_objects.len()
     }
 
-    pub unsafe fn clear(&mut self) {
-        self.old_objects.clear()
-    }
-
     pub fn new_string(&mut self, s: &str) -> StackObject {
         self.store(s.to_string())
     }
 
     pub fn new_const_string(&mut self, s: &str) -> StackObject {
-        //TODO: interning?
+        for item in &mut self.young_objects {
+            match &item.item {
+                OwnedObjectItem::ConstantString(obj) if obj.as_str() == s => {
+                    #[cfg(feature = "debug-gc")]
+                    println!(
+                        "found string {} in young objects [{:p}] with RC = {}",
+                        s,
+                        item.as_ref(),
+                        item.marker.counter()
+                    );
+                    let ptr = OwnedObject::make_stack_object(item);
+                    item.inc_gc_counter();
+                    #[cfg(feature = "debug-gc")]
+                    println!("new RC is {}", item.marker.counter());
+                    return ptr;
+                }
+                _ => {}
+            }
+        }
+
+        for item in &mut self.old_objects {
+            match &item.item {
+                OwnedObjectItem::ConstantString(obj) if obj.as_str() == s => {
+                    #[cfg(feature = "debug-gc")]
+                    println!(
+                        "found string {} in old objects [{:p}] with RC = {}",
+                        s,
+                        item.as_ref(),
+                        item.marker.counter()
+                    );
+                    let ptr = OwnedObject::make_stack_object(item);
+                    item.inc_gc_counter();
+                    #[cfg(feature = "debug-gc")]
+                    println!("new RC is {}", item.marker.counter());
+                    return ptr;
+                }
+                _ => {}
+            }
+        }
+
         self.store(_ConstHeapString(s.to_string()))
     }
 }
