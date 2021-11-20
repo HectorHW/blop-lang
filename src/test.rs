@@ -40,7 +40,7 @@ macro_rules! test_fail_compile {
             path.push_str(stringify!($name));
             path.push_str(".txt");
 
-            compile_file(&path).unwrap_err();
+            assert!(compile_file(&path).is_err());
         }
     };
 }
@@ -92,8 +92,10 @@ fn test_tail_call_optimization_application() {
     let (variable_types, closed_names) =
         crate::compile::syntax_level_check::check(&statements).unwrap();
     let statements = crate::compile::syntax_level_opt::optimize(statements);
-    let (_, chunks) = Compiler::compile(&statements, variable_types, closed_names).unwrap();
     let mut vm = VM::new();
+    let (_, chunks) =
+        Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
+
     vm.override_stack_limit(20); //should be just fine (and is definetly <1000)
     vm.run(&chunks).unwrap();
 }
