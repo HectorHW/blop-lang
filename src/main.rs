@@ -117,7 +117,9 @@ pub fn run_file(filename: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn compile_file(filename: &str) -> Result<(Vec<Vec<usize>>, Vec<Chunk>, VM), String> {
+type CompilationResult = (Vec<Vec<usize>>, Vec<Chunk>, VM);
+
+pub fn compile_file(filename: &str) -> Result<CompilationResult, String> {
     let file_content = std::fs::read_to_string(filename)
         .map_err(|_e| format!("failed to read file {}", filename))?;
     let file_content = normalize_string(file_content);
