@@ -6,6 +6,9 @@ use crate::data::objects::{Closure, ValueBox};
 use crate::execution::chunk::Chunk;
 use std::pin::Pin;
 
+const GC_YOUNG_THR_DEFAULT: usize = 100;
+const GC_OLD_THR_DEFAULT: usize = 16000;
+
 pub struct GC {
     old_objects: Vec<Pin<Box<OwnedObject>>>,
     young_objects: Vec<Pin<Box<OwnedObject>>>,
@@ -78,6 +81,12 @@ impl Drop for StackObject {
             | StackObject::Box(gc_ptr, _)
             | StackObject::Closure(gc_ptr, _) => {
                 gc_ptr.unwrap_ref_mut().dec_gc_counter();
+                #[cfg(feature = "debug-gc")]
+                println!(
+                    "drop stackobject of {:p}, RC is now {}",
+                    gc_ptr.unwrap_ref(),
+                    gc_ptr.unwrap_ref().marker.counter()
+                );
             }
         }
     }
@@ -288,6 +297,13 @@ impl GCAlloc for Closure {
     }
 }
 
+#[cfg(feature = "debug-gc")]
+impl Drop for OwnedObject {
+    fn drop(&mut self) {
+        println!("drop {:p}", self);
+    }
+}
+
 impl GC {
     pub fn new(thr: usize, thr_young: usize) -> Self {
         GC {
@@ -297,6 +313,20 @@ impl GC {
             new_allocations_threshold: thr,
             new_allocations_threshold_young: thr_young,
         }
+    }
+
+    pub fn default_gc() -> Self {
+        let young_thr = if cfg!(feature = "debug-gc") {
+            10
+        } else {
+            GC_YOUNG_THR_DEFAULT
+        };
+        let old_thr = if cfg!(feature = "debug-gc") {
+            10
+        } else {
+            GC_OLD_THR_DEFAULT
+        };
+        Self::new(old_thr, young_thr)
     }
 
     pub fn allocate_new<T: GCNew>(&mut self) -> StackObject {
@@ -339,6 +369,9 @@ impl GC {
             return;
         }
 
+        #[cfg(feature = "debug-gc")]
+        println!("begin slow_pass");
+
         //mark
         for item in iter {
             item.mark(true);
@@ -359,14 +392,28 @@ impl GC {
             let _ = chunk.constants.iter().map(|obj| obj.mark(false));
         }
         self.old_allocations = 0;
+        #[cfg(feature = "debug-gc")]
+        println!("end slow_pass");
     }
 
     unsafe fn quick_pass(&mut self) {
+        #[cfg(feature = "debug-gc")]
+        println!("begin quick_pass");
         //drop young objects whose RC is zero
-        self.young_objects.retain(|obj| obj.marker.counter() > 0);
+        self.young_objects.retain(|obj| {
+            #[cfg(feature = "debug-gc")]
+            println!(
+                "retain check on {:p}, RC is {}",
+                obj.as_ref(),
+                obj.marker.counter()
+            );
+            obj.marker.counter() > 0
+        });
         //move young objects into old
         self.old_allocations += self.young_objects.len();
         self.old_objects.append(&mut self.young_objects);
+        #[cfg(feature = "debug-gc")]
+        println!("end quick_pass");
     }
 
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
