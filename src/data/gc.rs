@@ -159,6 +159,36 @@ impl OwnedObject {
         }
     }
 
+    fn clear_references(&mut self) -> bool {
+        match &mut self.item {
+            OwnedObjectItem::ConstantString(_) => false,
+            OwnedObjectItem::MutableString(_) => false,
+
+            OwnedObjectItem::Vector(v) => {
+                let f = !v.is_empty();
+                v.clear();
+                f
+            }
+            OwnedObjectItem::Map(m) => {
+                let f = !m.is_empty();
+                m.clear();
+                f
+            }
+            OwnedObjectItem::Box(b) => {
+                if b.0 != StackObject::Int(0) {
+                    b.0 = StackObject::Int(0);
+                    return true;
+                }
+                false
+            }
+            OwnedObjectItem::Closure(c) => {
+                let f = !c.closed_values.is_empty();
+                c.closed_values.clear();
+                f
+            }
+        }
+    }
+
     fn inc_gc_counter(&mut self) {
         self.marker.inc()
     }
@@ -381,6 +411,15 @@ impl GC {
             let _ = chunk.constants.iter().map(|obj| obj.mark(true));
         }
 
+        //clean refs
+        for obj in &mut self.old_objects {
+            if !obj.is_marked() {
+                #[cfg(feature = "debug-gc")]
+                println!("long pass: cleared refs in {:p}", obj.as_ref());
+                obj.clear_references();
+            }
+        }
+
         //sweep - drop unmarked objects
         self.old_objects.retain(|obj| obj.is_marked());
 
@@ -399,6 +438,22 @@ impl GC {
     unsafe fn quick_pass(&mut self) {
         #[cfg(feature = "debug-gc")]
         println!("begin quick_pass");
+        //clear references in objects that will be deleted.
+        //this action may create more objects to clear
+        loop {
+            let mut changed = false;
+            for item in &mut self.young_objects {
+                if item.marker.counter() == 0 && item.clear_references() {
+                    changed = true;
+                    #[cfg(feature = "debug-gc")]
+                    println!("cleared refs in {:p}", item.as_ref());
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
         //drop young objects whose RC is zero
         self.young_objects.retain(|obj| {
             #[cfg(feature = "debug-gc")]
@@ -411,6 +466,8 @@ impl GC {
         });
         //move young objects into old
         self.old_allocations += self.young_objects.len();
+        #[cfg(feature = "debug-gc")]
+        println!("added {} old object(s)", self.young_objects.len());
         self.old_objects.append(&mut self.young_objects);
         #[cfg(feature = "debug-gc")]
         println!("end quick_pass");
@@ -463,5 +520,17 @@ impl GC {
     pub fn new_const_string(&mut self, s: &str) -> StackObject {
         //TODO: interning?
         self.store(_ConstHeapString(s.to_string()))
+    }
+}
+
+impl Drop for GC {
+    fn drop(&mut self) {
+        //clean refs
+        for obj in &mut self.young_objects {
+            obj.clear_references();
+        }
+        for obj in &mut self.old_objects {
+            obj.clear_references();
+        }
     }
 }
