@@ -49,7 +49,7 @@ impl VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
             locals_offset: 0,
-            gc: GC::new(16000, 100),
+            gc: GC::default_gc(),
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
         }
     }
