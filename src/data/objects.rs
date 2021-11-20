@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 
 pub type Value = StackObject;
 
@@ -55,19 +56,26 @@ pub type VMap = HashMap<StackObject, StackObject>;
 
 #[derive(Debug)]
 pub struct PrivatePtr<T> {
-    ptr: *mut T,
+    ptr: NonNull<T>,
 }
 
 impl<T> PrivatePtr<T> {
     #[inline(always)]
     pub(self) fn unwrap(&self) -> *mut T {
-        self.ptr
+        self.ptr.as_ptr()
     }
-    pub fn unwrap_ref(&self) -> Option<&T> {
+    pub fn unwrap_ref(&self) -> &T {
         unsafe { self.ptr.as_ref() }
     }
-    pub fn unwrap_ref_mut(&self) -> Option<&mut T> {
-        unsafe { self.ptr.as_mut() }
+
+    #[deny(clippy::mut_from_ref)]
+    pub fn unwrap_ref_mut(&self) -> &mut T {
+        unsafe {
+            self.ptr
+                .as_ptr()
+                .as_mut()
+                .expect("null ptr in unwrap_ref_mut")
+        }
     }
 }
 
@@ -85,7 +93,7 @@ where
 {
     fn wrap_private(&mut self) -> PrivatePtr<Self> {
         PrivatePtr {
-            ptr: (self as *mut Self),
+            ptr: NonNull::from(self),
         }
     }
 }
@@ -111,46 +119,16 @@ impl Display for StackObject {
             StackObject::Function { chunk_id, .. } => {
                 write!(f, "function<{}>", chunk_id)
             }
-            StackObject::Map(_, ptr) => write!(
-                f,
-                "{}",
-                ptr.unwrap_ref()
-                    .map(|o| format!("Map {:?}", o))
-                    .unwrap_or_else(|| "null".to_string())
-            ),
+            StackObject::Map(_, ptr) => write!(f, "Map {:?}", ptr.unwrap_ref()),
 
-            StackObject::Vector(_, ptr) => write!(
-                f,
-                "{}",
-                ptr.unwrap_ref()
-                    .map(|o| format!("Vector {:?}", o))
-                    .unwrap_or_else(|| "null".to_string()),
-            ),
+            StackObject::Vector(_, ptr) => write!(f, "Vector {:?}", ptr.unwrap_ref()),
 
-            StackObject::MutableString(_, ptr) => write!(
-                f,
-                "{}",
-                ptr.unwrap_ref()
-                    .cloned()
-                    .unwrap_or_else(|| "null".to_string()),
-            ),
+            StackObject::MutableString(_, ptr) => write!(f, "{}", ptr.unwrap_ref()),
 
-            StackObject::ConstantString(_, ptr) => write!(
-                f,
-                "{}",
-                ptr.unwrap_ref()
-                    .cloned()
-                    .unwrap_or_else(|| "null".to_string()),
-            ),
-            StackObject::Box(_, ptr) => write!(
-                f,
-                "{}",
-                ptr.unwrap_ref()
-                    .map(|o| format!("box[{}]", o.0))
-                    .unwrap_or_else(|| "null".to_string()),
-            ),
+            StackObject::ConstantString(_, ptr) => write!(f, "{}", ptr.unwrap_ref()),
+            StackObject::Box(_, ptr) => write!(f, "box[{}]", ptr.unwrap_ref().0),
             StackObject::Closure(_, ptr) => {
-                let closure = ptr.unwrap_ref().unwrap();
+                let closure = ptr.unwrap_ref();
                 write!(
                     f,
                     "closure<{}, {}>",
@@ -173,7 +151,7 @@ impl StackObject {
         match self {
             Int(..) | MutableString(..) | ConstantString(..) => true,
             Box(_gc_ptr, obj_ptr) => {
-                let object = obj_ptr.unwrap_ref().unwrap();
+                let object = obj_ptr.unwrap_ref();
                 object.0.can_hash()
             }
 
@@ -183,21 +161,21 @@ impl StackObject {
 
     pub fn unwrap_map(&mut self) -> Option<&mut VMap> {
         match self {
-            StackObject::Map(_, ptr) => ptr.unwrap_ref_mut(),
+            StackObject::Map(_, ptr) => Some(ptr.unwrap_ref_mut()),
             _ => None,
         }
     }
 
     pub fn unwrap_vector(&mut self) -> Option<&mut VVec> {
         match self {
-            StackObject::Vector(_, ptr) => ptr.unwrap_ref_mut(),
+            StackObject::Vector(_, ptr) => Some(ptr.unwrap_ref_mut()),
             _ => None,
         }
     }
 
     pub fn unwrap_mutable_string(&mut self) -> Option<&mut String> {
         match self {
-            StackObject::MutableString(_, ptr) => ptr.unwrap_ref_mut(),
+            StackObject::MutableString(_, ptr) => Some(ptr.unwrap_ref_mut()),
             _ => None,
         }
     }
@@ -205,7 +183,7 @@ impl StackObject {
     pub fn unwrap_const_string(&mut self) -> Option<&str> {
         //return &str because ConstString is guaranteed not to be mutable;
         match self {
-            StackObject::ConstantString(_, ptr) => ptr.unwrap_ref().map(|obj| obj.as_str()),
+            StackObject::ConstantString(_, ptr) => Some(ptr.unwrap_ref().as_str()),
             _ => None,
         }
     }
@@ -224,7 +202,7 @@ impl StackObject {
             | StackObject::Map(trace_ptr, _)
             | StackObject::Box(trace_ptr, _)
             | StackObject::Closure(trace_ptr, _)
-            | StackObject::ConstantString(trace_ptr, _) => trace_ptr.unwrap_ref_mut(),
+            | StackObject::ConstantString(trace_ptr, _) => Some(trace_ptr.unwrap_ref_mut()),
 
             StackObject::Int(_) => None,
             StackObject::Function { .. } => None,
@@ -233,8 +211,8 @@ impl StackObject {
 
     pub fn unwrap_any_str(&self) -> Option<&str> {
         match self {
-            StackObject::MutableString(_, ptr) => ptr.unwrap_ref().map(|o| o.as_str()),
-            StackObject::ConstantString(_, ptr) => ptr.unwrap_ref().map(|o| o.as_str()),
+            StackObject::MutableString(_, ptr) => Some(ptr.unwrap_ref().as_str()),
+            StackObject::ConstantString(_, ptr) => Some(ptr.unwrap_ref().as_str()),
             _ => None,
         }
     }
@@ -268,23 +246,11 @@ impl PartialEq for StackObject {
             (StackObject::Int(a), StackObject::Int(b)) => a == b,
 
             (StackObject::Map(_, ptr1), StackObject::Map(_, ptr2)) => {
-                std::ptr::eq(ptr1.unwrap(), ptr2.unwrap())
-                    || match (ptr1.unwrap_ref(), ptr2.unwrap_ref()) {
-                        (None, None) => true, //null pointers are considered equal
-                        // (this should never execute normally)
-                        (Some(r1), Some(r2)) => r1 == r2,
-                        _ => false,
-                    }
+                std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
             }
 
             (StackObject::Vector(_, ptr1), StackObject::Vector(_, ptr2)) => {
-                std::ptr::eq(ptr1.unwrap(), ptr2.unwrap())
-                    || match (ptr1.unwrap_ref(), ptr2.unwrap_ref()) {
-                        (None, None) => true, //null pointers are considered equal
-                        // (this should never execute normally)
-                        (Some(r1), Some(r2)) => r1 == r2,
-                        _ => false,
-                    }
+                std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
             }
             _ => panic!("eq: same discriminant, not string, unhandled case"),
         }
@@ -297,12 +263,9 @@ impl Hash for StackObject {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             StackObject::Int(i) => i.hash(state),
-            StackObject::MutableString(_, ptr) => ptr.unwrap_ref().unwrap().hash(state),
+            StackObject::MutableString(_, ptr) => ptr.unwrap_ref().hash(state),
 
-            StackObject::ConstantString(_, ptr) => ptr
-                .unwrap_ref()
-                .expect("null reference in const string")
-                .hash(state),
+            StackObject::ConstantString(_, ptr) => ptr.unwrap_ref().hash(state),
 
             StackObject::Vector(..) | StackObject::Map(..) | Function { .. } => {
                 panic!("hash on unhashable object")
