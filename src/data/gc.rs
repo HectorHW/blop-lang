@@ -39,27 +39,27 @@ impl Clone for StackObject {
             },
 
             StackObject::Map(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 return StackObject::Map(*gc_ptr, *obj_ptr);
             }
             StackObject::Vector(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::Vector(*gc_ptr, *obj_ptr)
             }
             StackObject::MutableString(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::MutableString(*gc_ptr, *obj_ptr)
             }
             StackObject::ConstantString(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::ConstantString(*gc_ptr, *obj_ptr)
             }
             StackObject::Box(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::Box(*gc_ptr, *obj_ptr)
             }
             StackObject::Closure(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().unwrap().inc_gc_counter();
+                gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::Closure(*gc_ptr, *obj_ptr)
             }
         }
@@ -77,7 +77,7 @@ impl Drop for StackObject {
             | StackObject::ConstantString(gc_ptr, _)
             | StackObject::Box(gc_ptr, _)
             | StackObject::Closure(gc_ptr, _) => {
-                gc_ptr.unwrap_ref_mut().unwrap().dec_gc_counter();
+                gc_ptr.unwrap_ref_mut().dec_gc_counter();
             }
         }
     }

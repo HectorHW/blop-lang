@@ -105,7 +105,7 @@ impl VM {
         macro_rules! as_closure {
             ($value:expr) => {
                 Ok($value).and_then(|closure| match &closure {
-                    Value::Closure(_gc_ptr, closure_ptr) => Ok(closure_ptr.unwrap_ref().unwrap()),
+                    Value::Closure(_gc_ptr, closure_ptr) => Ok(closure_ptr.unwrap_ref()),
                     other => Err(runtime_error!(TypeError {
                         message: format!("expected {} but got {}", "function", other.type_string())
                     })),
@@ -295,7 +295,7 @@ impl VM {
                         .unwrap();
                     let chunk_id = match object {
                         Value::Function { chunk_id } => Ok(chunk_id),
-                        Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().unwrap().chunk_id),
+                        Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().chunk_id),
                         _ => Err(runtime_error!(TypeError {
                             message: format!("expected function but got {}", object.type_string())
                         })),
@@ -352,7 +352,7 @@ impl VM {
                 Opcode::LoadBox => {
                     match checked_stack_pop!()? {
                         Value::Box(_gc, _obj) => {
-                            let box_obj = _obj.unwrap_ref_mut().unwrap();
+                            let box_obj = _obj.unwrap_ref_mut();
                             self.stack.push(box_obj.0.clone());
                         }
                         _any_other => {
@@ -374,7 +374,7 @@ impl VM {
 
                     match addr {
                         Value::Box(_gc, _obj) => {
-                            let box_obj = _obj.unwrap_ref_mut().unwrap();
+                            let box_obj = _obj.unwrap_ref_mut();
                             box_obj.0 = value;
                         }
                         _any_other => {
@@ -419,11 +419,7 @@ impl VM {
 
                     match &closure {
                         Value::Closure(_gc_ptr, closure_ptr) => {
-                            closure_ptr
-                                .unwrap_ref_mut()
-                                .unwrap()
-                                .closed_values
-                                .push(value);
+                            closure_ptr.unwrap_ref_mut().closed_values.push(value);
                         }
                         other => {
                             return Err(runtime_error!(TypeError {
