@@ -438,41 +438,41 @@ impl GC {
         println!("end slow_pass");
     }
 
-    /*
-    return value indicates if actually cleared references which could create
-    more objects for deletion
-     */
-    fn clear_young_references_pass(&mut self) -> bool {
-        let mut flag = false;
-        for item in &mut self.young_objects {
-            if item.marker.counter() == 0 && item.clear_references() {
-                flag = true;
-                #[cfg(feature = "debug-gc")]
-                println!("cleared refs in {:p}", item.as_ref());
-            }
-        }
-        flag
-    }
-
     unsafe fn quick_pass(&mut self) {
         #[cfg(feature = "debug-gc")]
         println!("begin quick_pass");
-        //clear references in objects that will be deleted.
-        //this action may create more objects to clear
         if self.gc_young_passes == 0 {
             loop {
-                if !self.clear_young_references_pass() {
+                let before = self.young_objects.len();
+                self.gc_quick_pass_step();
+                let after = self.young_objects.len();
+                if before == after {
                     break;
                 }
             }
         } else {
-            for _ in 0..self.gc_young_passes {
-                if !self.clear_young_references_pass() {
+            for _i in 0..self.gc_young_passes {
+                #[cfg(feature = "debug-gc")]
+                println!("quick pass step {}", _i);
+                let before = self.young_objects.len();
+                self.gc_quick_pass_step();
+                let after = self.young_objects.len();
+                if before == after {
                     break;
                 }
             }
         }
 
+        //move young objects into old
+        self.old_allocations += self.young_objects.len();
+        #[cfg(feature = "debug-gc")]
+        println!("added {} old object(s)", self.young_objects.len());
+        self.old_objects.append(&mut self.young_objects);
+        #[cfg(feature = "debug-gc")]
+        println!("end quick_pass");
+    }
+
+    unsafe fn gc_quick_pass_step(&mut self) {
         //drop young objects whose RC is zero
         self.young_objects.retain(|obj| {
             #[cfg(feature = "debug-gc")]
@@ -483,13 +483,6 @@ impl GC {
             );
             obj.marker.counter() > 0
         });
-        //move young objects into old
-        self.old_allocations += self.young_objects.len();
-        #[cfg(feature = "debug-gc")]
-        println!("added {} old object(s)", self.young_objects.len());
-        self.old_objects.append(&mut self.young_objects);
-        #[cfg(feature = "debug-gc")]
-        println!("end quick_pass");
     }
 
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
