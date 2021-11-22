@@ -677,7 +677,28 @@ impl<'gc> Compiler<'gc> {
                     }
                 }
 
-                None => return Err(format!("undeclared variable {}", n.get_string().unwrap())),
+                None => {
+                    //global
+                    let existing_index = self
+                        .current_chunk()
+                        .global_names
+                        .iter()
+                        .position(|x| x == n.get_string().unwrap());
+                    let idx = existing_index.unwrap_or_else(|| {
+                        let idx = self.current_chunk().global_names.len();
+                        self.current_chunk()
+                            .global_names
+                            .push(n.get_string().unwrap().clone());
+                        idx
+                    });
+                    result.push(Opcode::LoadGlobal(idx as u16));
+                    source_indices.push(n.position.0);
+
+                    if !self.needs_value() {
+                        result.push(Opcode::Pop(1));
+                        source_indices.push(n.position.0);
+                    }
+                }
             },
 
             Expr::IfExpr(cond, then_body, else_body) => {

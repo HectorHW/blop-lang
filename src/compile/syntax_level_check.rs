@@ -243,6 +243,7 @@ impl Checker {
             }
             Stmt::Assignment(target, expr) => {
                 self.lookup_local(target)?;
+                //we can only assign to locals
                 self.visit_expr(expr)
             }
             Stmt::Expression(e) => self.visit_expr(e),
@@ -260,7 +261,10 @@ impl Checker {
             Expr::Number(_) => Ok(()),
             Expr::ConstString(_) => Ok(()),
 
-            Expr::Name(n) => self.lookup_local(n),
+            Expr::Name(n) => {
+                self.lookup_local(n);
+                Ok(())
+            }
 
             Expr::Binary(op, a, b) => {
                 self.visit_expr(a)?;

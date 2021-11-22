@@ -1,6 +1,8 @@
 use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, Value, ValueBox};
+use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::{Chunk, Opcode};
+use std::collections::HashMap;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
@@ -8,6 +10,7 @@ const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<Stac
 pub struct VM {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
+    pub(super) globals: HashMap<String, Value>,
     locals_offset: usize,
     stack_max_size: usize,
     pub gc: GC,
@@ -41,6 +44,8 @@ pub enum InterpretErrorKind {
     StackOverflow,
     TypeError { message: String },
     MissedReturn,
+    NameError { name: String },
+    NativeError { message: String },
 }
 
 impl VM {
@@ -48,6 +53,7 @@ impl VM {
         VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
+            globals: HashMap::new(),
             locals_offset: 0,
             gc: GC::default_gc(),
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
@@ -217,11 +223,18 @@ impl VM {
                 }
 
                 Opcode::LoadGlobal(idx) => {
-                    let value = self
-                        .stack
+                    let key = current_chunk
+                        .global_names
                         .get(idx as usize)
-                        .cloned()
                         .ok_or(runtime_error!(OperandIndexing))?;
+                    let value = self
+                        .globals
+                        .get(key)
+                        .cloned()
+                        .or_else(|| get_builtin(key))
+                        .ok_or(runtime_error!(InterpretErrorKind::NameError {
+                            name: key.clone()
+                        }))?;
 
                     self.stack.push(value);
                     ip += 1;
@@ -319,34 +332,50 @@ impl VM {
                         .get(self.stack.len() - 1 - arity)
                         .cloned()
                         .unwrap();
-                    let chunk_id = match object {
-                        Value::Function { chunk_id } => Ok(chunk_id),
-                        Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().chunk_id),
-                        _ => Err(runtime_error!(TypeError {
-                            message: format!("expected function but got {}", object.type_string())
-                        })),
-                    }?;
 
-                    self.call_stack.push(CallStackValue {
-                        return_chunk: current_chunk_id,
-                        return_ip: ip + 1,
-                        return_locals_offset: self.locals_offset,
-                        return_stack_size: self.stack.len() - 1 - arity,
-                    });
+                    if let Value::Builtin(name) = object {
+                        let final_length = self.stack.len().saturating_sub(arity);
+                        let args = self.stack.split_off(final_length);
+                        self.stack.pop(); //remove builtin
+                        let result = apply_builtin(name, &args);
+                        let result = result.map_err(|e| {
+                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                        })?;
+                        self.stack.push(result);
+                        ip += 1;
+                    } else {
+                        let chunk_id = match object {
+                            Value::Function { chunk_id } => Ok(chunk_id),
+                            Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().chunk_id),
+                            _ => Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "expected function but got {}",
+                                    object.type_string()
+                                )
+                            })),
+                        }?;
 
-                    self.locals_offset = self.stack.len() - 1 - arity;
+                        self.call_stack.push(CallStackValue {
+                            return_chunk: current_chunk_id,
+                            return_ip: ip + 1,
+                            return_locals_offset: self.locals_offset,
+                            return_stack_size: self.stack.len() - 1 - arity,
+                        });
 
-                    current_chunk_id = chunk_id;
-                    ip = 0;
-                    current_chunk = program.get(current_chunk_id).unwrap();
+                        self.locals_offset = self.stack.len() - 1 - arity;
 
-                    if arity as usize != current_chunk.arity {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "mismatched arguments: expected {} but got {}",
-                                current_chunk.arity, arity
-                            )
-                        }));
+                        current_chunk_id = chunk_id;
+                        ip = 0;
+                        current_chunk = program.get(current_chunk_id).unwrap();
+
+                        if arity as usize != current_chunk.arity {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "mismatched arguments: expected {} but got {}",
+                                    current_chunk.arity, arity
+                                )
+                            }));
+                        }
                     }
                 }
 
@@ -510,5 +539,11 @@ impl VM {
         }
 
         Ok(())
+    }
+}
+
+impl Default for VM {
+    fn default() -> Self {
+        Self::new()
     }
 }
