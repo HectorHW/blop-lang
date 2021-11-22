@@ -18,7 +18,6 @@ pub fn apply_builtin(builtin_name: &str, args: &[Value]) -> Result<Value, String
             if args[0].unwrap_any_str().is_none() {
                 return Err("expected string-like in int".to_string());
             }
-            println!("int got {:?}", args[0].unwrap_any_str());
             Ok(StackObject::Int(
                 args[0]
                     .unwrap_any_str()
