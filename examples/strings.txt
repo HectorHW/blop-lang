@@ -1,3 +1,8 @@
 var s1 = "abcd" # creation of strings
-var s2 = "abcd" # constant strings are internalized, s1 and s2 point to same object
+var s2 = "efg" # constant strings are internalized, s1 and s2 point to same object
 print s1
+
+var s3 = s1 + " " + s2 # can concatenate strings
+# string concatenation always results in mut_str
+#in some cases (if there are no other pointers to str) its buffer can be reused
+print s3
