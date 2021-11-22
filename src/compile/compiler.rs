@@ -812,10 +812,9 @@ impl<'gc> Compiler<'gc> {
             }
 
             Expr::SingleStatement(s) => {
-                self.require_value();
+                //propagate requirement
                 let (sub_indices, body) = self.visit_stmt(s)?;
 
-                self.pop_requirement();
                 result = body;
                 source_indices = sub_indices;
             }
