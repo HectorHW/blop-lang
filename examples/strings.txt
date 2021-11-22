@@ -19,3 +19,6 @@ if s1?=s2 # strings are compared for equality by content
     print "equal"
 else
     print "not equal"
+
+var n = int("2")
+print n

@@ -5,6 +5,7 @@ use std::ops::AddAssign;
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub constants: Vec<Value>,
+    pub global_names: Vec<String>,
     pub code: Vec<Opcode>,
     pub name: String,
     pub arity: usize,
@@ -98,6 +99,7 @@ impl Chunk {
     pub fn new(name: String, arity: usize) -> Chunk {
         Chunk {
             constants: Vec::new(),
+            global_names: Vec::new(),
             code: Vec::new(),
             name,
             arity,
@@ -153,6 +155,14 @@ mod chunk_pretty_printer {
                             "{:<21} (value {})",
                             format!("{}", Opcode::LoadConst(*idx)),
                             (chunk.constants[(*idx) as usize])
+                        )
+                    }
+
+                    Opcode::LoadGlobal(idx) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", Opcode::LoadGlobal(*idx)),
+                            chunk.global_names[(*idx) as usize]
                         )
                     }
 

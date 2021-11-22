@@ -67,6 +67,7 @@ impl Clone for StackObject {
                 gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::Closure(*gc_ptr, *obj_ptr)
             }
+            StackObject::Builtin(s) => StackObject::Builtin(s),
         }
     }
 }
@@ -90,6 +91,7 @@ impl Drop for StackObject {
                     gc_ptr.unwrap_ref().marker.counter()
                 );
             }
+            StackObject::Builtin(..) => {}
         }
     }
 }
@@ -514,6 +516,8 @@ impl GC {
 
                 OwnedObject::make_stack_object(mut_ref)
             }
+
+            StackObject::Builtin(s) => StackObject::Builtin(s),
         }
     }
 

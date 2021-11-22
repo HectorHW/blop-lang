@@ -18,6 +18,7 @@ pub enum StackObject {
     ConstantString(PrivatePtr<OwnedObject>, PrivatePtr<String>),
     Box(PrivatePtr<OwnedObject>, PrivatePtr<ValueBox>),
     Closure(PrivatePtr<OwnedObject>, PrivatePtr<Closure>),
+    Builtin(&'static str),
 }
 
 #[derive(Clone, Debug)]
@@ -136,6 +137,9 @@ impl Display for StackObject {
                     closure.chunk_id
                 )
             }
+            StackObject::Builtin(s) => {
+                write!(f, "builtin<{}>", s)
+            }
         }
     }
 }
@@ -155,7 +159,7 @@ impl StackObject {
                 object.0.can_hash()
             }
 
-            Map(..) | Vector(..) | Function { .. } | Closure(..) => false,
+            Map(..) | Vector(..) | Function { .. } | Closure(..) | Builtin(..) => false,
         }
     }
 
@@ -206,6 +210,7 @@ impl StackObject {
 
             StackObject::Int(_) => None,
             StackObject::Function { .. } => None,
+            StackObject::Builtin(..) => None,
         }
     }
 
@@ -227,6 +232,7 @@ impl StackObject {
             StackObject::ConstantString(_, _) => "ConstantString".to_string(),
             StackObject::Box(_, _) => "Box".to_string(),
             StackObject::Closure(_, _) => "Closure".to_string(),
+            StackObject::Builtin(_) => "Builtin".to_string(),
         }
     }
 }
@@ -252,6 +258,7 @@ impl PartialEq for StackObject {
             (StackObject::Vector(_, ptr1), StackObject::Vector(_, ptr2)) => {
                 std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
             }
+            (StackObject::Builtin(s1), StackObject::Builtin(s2)) => s1 == s2,
             _ => panic!("eq: same discriminant, not string, unhandled case"),
         }
     }
@@ -272,6 +279,7 @@ impl Hash for StackObject {
             }
             StackObject::Box(..) => panic!("cannot hash box"),
             StackObject::Closure(..) => panic!("cannot hash closure"),
+            StackObject::Builtin(..) => panic!("cannot hash builtin"),
         }
     }
 }
