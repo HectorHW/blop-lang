@@ -568,6 +568,75 @@ impl GC {
 
         self.store(_ConstHeapString(s.to_string()))
     }
+
+    pub fn try_inplace_string_concat(
+        &mut self,
+        mut s1: StackObject,
+        mut s2: StackObject,
+    ) -> Result<StackObject, String> {
+        if s1.unwrap_any_str().is_none() {
+            return Err(format!(
+                "first argument of string concatenation is not string-like (got {})",
+                s1.type_string()
+            ));
+        }
+
+        if s2.unwrap_any_str().is_none() {
+            return Err(format!(
+                "second argument of string concatenation is not string-like (got {})",
+                s2.type_string()
+            ));
+        }
+
+        #[cfg(feature = "debug-gc")]
+        println!("try_inplace_string_concat");
+
+        match (&mut s1, &mut s2) {
+            (StackObject::MutableString(gc_ptr, obj_ptr), s2)
+                if gc_ptr.unwrap_ref_mut().marker.counter() == 1 =>
+            {
+                #[cfg(feature = "debug-gc")]
+                println!("RC of s1[{:p}] is 1, reusing it", gc_ptr.unwrap_ref_mut());
+                obj_ptr
+                    .unwrap_ref_mut()
+                    .push_str(s2.unwrap_any_str().unwrap());
+                return Ok(s1);
+            }
+            (s1, StackObject::MutableString(gc_ptr, obj_ptr))
+                if gc_ptr.unwrap_ref_mut().marker.counter() == 1 =>
+            {
+                #[cfg(feature = "debug-gc")]
+                println!("RC of s2[{:p}] is 1, reusing it", gc_ptr.unwrap_ref_mut());
+                let mut part_1 = s1.unwrap_any_str().unwrap().to_string();
+                std::mem::swap(&mut part_1, obj_ptr.unwrap_ref_mut());
+                obj_ptr.unwrap_ref_mut().push_str(&part_1);
+                return Ok(s2);
+            }
+            (_, _) => {}
+        };
+        #[cfg(feature = "debug-gc")]
+        println!(
+            "RC(s1[{:p}])={}, RC(s2[{:p}])={}, creating new",
+            s1.unwrap_traceable().unwrap(),
+            s1.unwrap_traceable().unwrap().marker.counter(),
+            s2.unwrap_traceable().unwrap(),
+            s2.unwrap_traceable().unwrap().marker.counter()
+        );
+
+        let mut result_string = self.allocate_new::<String>();
+
+        result_string
+            .unwrap_mutable_string()
+            .unwrap()
+            .push_str(s1.unwrap_any_str().unwrap());
+
+        result_string
+            .unwrap_mutable_string()
+            .unwrap()
+            .push_str(s2.unwrap_any_str().unwrap());
+
+        Ok(result_string)
+    }
 }
 
 impl Drop for GC {

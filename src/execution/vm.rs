@@ -139,10 +139,36 @@ impl VM {
 
                 Opcode::Add => {
                     //let second_operand = checked_stack_pop!()
-                    let second_operand = as_int!(checked_stack_pop!()?)?;
+                    let second_operand = checked_stack_pop!()?;
+                    let first_operand = checked_stack_pop!()?;
 
-                    let first_operand = as_int!(checked_stack_pop!()?)?;
-                    self.stack.push(Value::Int(first_operand + second_operand));
+                    match (&first_operand, &second_operand) {
+                        (s1, s2)
+                            if s1.unwrap_any_str().is_some() && s2.unwrap_any_str().is_some() =>
+                        {
+                            let resulting_string = self
+                                .gc
+                                .try_inplace_string_concat(first_operand, second_operand)
+                                .map_err(|o| {
+                                    runtime_error!(InterpretErrorKind::TypeError { message: o })
+                                })?;
+                            self.stack.push(resulting_string);
+                        }
+
+                        (StackObject::Int(n1), StackObject::Int(n2)) => {
+                            self.stack.push(Value::Int(*n1 + *n2));
+                        }
+                        (other_1, other_2) => {
+                            return Err(runtime_error!(InterpretErrorKind::TypeError {
+                                message: format!(
+                                    "uncompatible types in Add (got {} and {})",
+                                    other_1.type_string(),
+                                    other_2.type_string()
+                                )
+                            }));
+                        }
+                    }
+
                     ip += 1;
                 }
 
