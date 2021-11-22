@@ -6,3 +6,16 @@ var s3 = s1 + " " + s2 # can concatenate strings
 # string concatenation always results in mut_str
 #in some cases (if there are no other pointers to str) its buffer can be reused
 print s3
+
+var s11 = "a"
+var s12 = "b"
+s1 = s11 + s12
+
+var s21 = "a"
+var s22 = "b"
+s2 = s21 + s22
+
+if s1?=s2 # strings are compared for equality by content
+    print "equal"
+else
+    print "not equal"
