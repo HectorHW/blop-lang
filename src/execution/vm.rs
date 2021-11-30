@@ -2,6 +2,7 @@ use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, Value, ValueBox};
 use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::{Chunk, Opcode};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
@@ -117,6 +118,27 @@ impl VM {
                     })),
                 })
             };
+        }
+
+        macro_rules! comparison_operator {
+            ($pat:pat, $code: expr) => {{
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
+                let value = match first_operand.partial_cmp(&second_operand) {
+                    $pat => Ok(1),
+                    Some(_) => Ok(0),
+                    None => Err(runtime_error!(InterpretErrorKind::TypeError {
+                        message: format!(
+                            "got unsupported arguments in {} ({} and {})",
+                            $code,
+                            first_operand.type_string(),
+                            second_operand.type_string()
+                        )
+                    })),
+                }?;
+                self.stack.push(Value::Int(value));
+                ip += 1;
+            }};
         }
 
         while ip < current_chunk.code.len() {
@@ -286,6 +308,22 @@ impl VM {
                     self.stack.push(Value::Int(value));
                     ip += 1;
                 }
+
+                Opcode::TestGreater => {
+                    comparison_operator!(Some(Ordering::Greater), Opcode::TestGreater)
+                }
+
+                Opcode::TestGreaterEqual => comparison_operator!(
+                    Some(Ordering::Equal | Ordering::Greater),
+                    Opcode::TestGreaterEqual
+                ),
+
+                Opcode::TestLess => comparison_operator!(Some(Ordering::Less), Opcode::TestLess),
+
+                Opcode::TestLessEqual => comparison_operator!(
+                    Some(Ordering::Equal | Ordering::Less),
+                    Opcode::TestLessEqual
+                ),
 
                 Opcode::JumpIfFalse(delta) => {
                     let value_to_test = as_int!(checked_stack_pop!()?)?;

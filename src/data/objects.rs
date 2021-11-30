@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use crate::data::marked_counter::MarkedCounter;
 use crate::data::objects::StackObject::Function;
 use std::collections::HashMap;
@@ -192,9 +193,9 @@ impl StackObject {
         }
     }
 
-    pub fn unwrap_int(self) -> Option<i64> {
+    pub fn unwrap_int(&self) -> Option<i64> {
         match self {
-            StackObject::Int(n) => Some(n),
+            StackObject::Int(n) => Some(*n),
             _ => None,
         }
     }
@@ -234,6 +235,27 @@ impl StackObject {
             StackObject::Closure(_, _) => "Closure".to_string(),
             StackObject::Builtin(_) => "Builtin".to_string(),
         }
+    }
+    
+    fn cmp_any_strings(obj1: &StackObject, obj2: &StackObject) -> Option<Ordering> {
+        match (obj1.unwrap_any_str(), obj2.unwrap_any_str()) {
+            (Some(s1), Some(s2)) => Some(s1.cmp(s2)),
+            _ => None
+        }
+    }
+    
+    fn cmp_ints(obj1: &StackObject, obj2: &StackObject) -> Option<Ordering> {
+        match (obj1.unwrap_int(), obj2.unwrap_int()) {
+            (Some(n1), Some(n2)) => Some(n1.cmp(&n2)),
+            _ => None
+        }
+    }
+}
+
+impl PartialOrd for StackObject {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        StackObject::cmp_any_strings(self, other)
+            .or_else(|| {StackObject::cmp_ints(self, other)})
     }
 }
 

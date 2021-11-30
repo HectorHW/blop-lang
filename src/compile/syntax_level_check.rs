@@ -270,8 +270,9 @@ impl Checker {
                 self.visit_expr(b)?;
                 use crate::parsing::lexer::TokenKind::*;
                 match &op.kind {
-                    Plus | Minus | Star | Slash | CompareEquals | CompareNotEquals | Mod
-                    | Power => Ok(()),
+                    Plus | Minus | Star | Slash | CompareEquals | CompareNotEquals
+                    | CompareGreater | CompareGreaterEqual | CompareLess | CompareLessEqual
+                    | Mod | Power => Ok(()),
                     _ => Err(format!("cannot compile operator {:?}", op)),
                 }
             }

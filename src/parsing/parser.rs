@@ -107,6 +107,16 @@ peg::parser! {
             x: (@) [op@t!(CompareNotEquals)] y:@
                 {Box::new(Expr::Binary(op, x, y))}
             --
+            x: (@) [op@t!(CompareGreater)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(CompareGreaterEqual)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(CompareLess)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(CompareLessEqual)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+
+            --
             x: (@) [op@t!(Plus)] y:@
                 {Box::new(Expr::Binary(op, x, y))}
             x: (@) [op@t!(Minus)] y:@

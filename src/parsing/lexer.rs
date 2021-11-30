@@ -410,6 +410,36 @@ impl<'input> Lexer<'input> {
                     }
                 }
 
+                '<' => {
+                    let possible_token_index = self.compute_index();
+                    self.input_iterator.next(); //skip <
+                    match self.input_iterator.peek().copied() {
+                        Some((_, '=')) => {
+                            // <=
+                            result.push(token!(possible_token_index, CompareLessEqual));
+                            self.input_iterator.next(); //skip =
+                        }
+                        _ => {
+                            result.push(token!(possible_token_index, CompareLess));
+                        }
+                    }
+                }
+
+                '>' => {
+                    let possible_token_index = self.compute_index();
+                    self.input_iterator.next(); //skip >
+                    match self.input_iterator.peek().copied() {
+                        Some((_, '=')) => {
+                            // >=
+                            result.push(token!(possible_token_index, CompareGreaterEqual));
+                            self.input_iterator.next(); //skip =
+                        }
+                        _ => {
+                            result.push(token!(possible_token_index, CompareGreater));
+                        }
+                    }
+                }
+
                 any_other => {
                     return Err(format!(
                         "unexpected character {} at {}",

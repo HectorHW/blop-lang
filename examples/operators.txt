@@ -1,2 +1,21 @@
-assert 1==1
-assert 1!=1+1
+assert 1 == 1 # equality
+
+assert 1 != 1 + 1 # priority
+
+assert "abc" == "ab"+"c" #string equality
+assert "abc" != "abcd"
+
+assert 2 > 1 #ordering
+assert 2>=1
+assert 1>=1
+assert 1<2
+assert 1<=2
+assert 1<=1
+
+assert "b" > "a" #string ordering
+assert "aa" > "a" #uses lexicographic ordering
+assert "a" < "b"
+assert "a" <= "b"
+assert "a" <= "a"
+
+
