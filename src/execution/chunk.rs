@@ -165,7 +165,7 @@ mod chunk_pretty_printer {
                 match opcode {
                     Opcode::LoadConst(idx) => {
                         format!(
-                            "{:<21} (value {})",
+                            "{:<21} (value {:?})",
                             format!("{}", Opcode::LoadConst(*idx)),
                             (chunk.constants[(*idx) as usize])
                         )
