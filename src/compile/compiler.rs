@@ -634,6 +634,7 @@ impl<'gc> Compiler<'gc> {
                     TokenKind::Plus => Opcode::Add,
                     TokenKind::Minus => Opcode::Sub,
                     TokenKind::CompareEquals => Opcode::TestEquals,
+                    TokenKind::CompareNotEquals => Opcode::TestNotEquals,
                     TokenKind::Mod => Opcode::Mod,
                     TokenKind::Power => Opcode::Power,
                     other => panic!("unimplemented binary operator {} [{}]", other, op.position),

@@ -388,6 +388,28 @@ impl<'input> Lexer<'input> {
                     }
                 }
 
+                '!' => {
+                    let possible_token_index = self.compute_index();
+                    self.input_iterator.next(); //skip first !
+                    match self.input_iterator.peek().copied() {
+                        Some((_, '=')) => {
+                            //reading !=
+                            result.push(token!(possible_token_index, CompareNotEquals));
+                            self.input_iterator.next(); //skip =
+                        }
+                        Some((_, any_other)) => {
+                            return Err(format!(
+                                "unexpected character {} at {}",
+                                any_other,
+                                self.compute_index()
+                            ))
+                        }
+                        _ => {
+                            return Err("unexpected end after reading !".to_string());
+                        }
+                    }
+                }
+
                 any_other => {
                     return Err(format!(
                         "unexpected character {} at {}",

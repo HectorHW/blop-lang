@@ -38,6 +38,7 @@ pub enum Opcode {
     Power,
 
     TestEquals,
+    TestNotEquals,
 
     JumpIfFalse(u16),
     JumpRelative(u16),
@@ -72,6 +73,7 @@ impl Display for Opcode {
                 //Opcode::ExtendArg1(e) => format!("Extend[{}]", e),
                 //Opcode::ExtendDouble(a, b) => format!("Extend[{}, {}]", a, b)
                 TestEquals => "TestEquals".to_string(),
+                TestNotEquals => "TestNotEquals".to_string(),
                 JumpIfFalse(delta) => format!("JumpIfFalse[{}]", delta),
                 JumpRelative(delta) => format!("Jump[{}]", delta),
                 Pop(n) => format!("Pop[{}]", n),

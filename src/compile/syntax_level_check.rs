@@ -100,11 +100,9 @@ impl Checker {
 
         for (scope_type, scope_identifier, scope_map) in self.names.iter_mut().rev() {
             if passed_function_scope {
-                match scope_map.entry(name.get_string().unwrap().clone()) {
-                    Entry::Occupied(_entry) => {
-                        found_uninit = Some(scope_identifier.clone());
-                    }
-                    _ => {}
+                if let Entry::Occupied(_entry) = scope_map.entry(name.get_string().unwrap().clone())
+                {
+                    found_uninit = Some(scope_identifier.clone());
                 }
                 break; //we only look in one scope
             }
@@ -262,7 +260,8 @@ impl Checker {
             Expr::ConstString(_) => Ok(()),
 
             Expr::Name(n) => {
-                self.lookup_local(n);
+                let _ = self.lookup_local(n);
+                //if we fail to lookup a name then treat it as global
                 Ok(())
             }
 
@@ -271,7 +270,8 @@ impl Checker {
                 self.visit_expr(b)?;
                 use crate::parsing::lexer::TokenKind::*;
                 match &op.kind {
-                    Plus | Minus | Star | Slash | CompareEquals | Mod | Power => Ok(()),
+                    Plus | Minus | Star | Slash | CompareEquals | CompareNotEquals | Mod
+                    | Power => Ok(()),
                     _ => Err(format!("cannot compile operator {:?}", op)),
                 }
             }

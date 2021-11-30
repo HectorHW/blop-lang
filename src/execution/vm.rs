@@ -274,6 +274,19 @@ impl VM {
                     self.stack.push(Value::Int(value));
                     ip += 1;
                 }
+
+                Opcode::TestNotEquals => {
+                    let second_operand = checked_stack_pop!()?;
+                    let first_operand = checked_stack_pop!()?;
+                    let value = if second_operand != first_operand {
+                        1
+                    } else {
+                        0
+                    };
+                    self.stack.push(Value::Int(value));
+                    ip += 1;
+                }
+
                 Opcode::JumpIfFalse(delta) => {
                     let value_to_test = as_int!(checked_stack_pop!()?)?;
                     if value_to_test == 0 {
