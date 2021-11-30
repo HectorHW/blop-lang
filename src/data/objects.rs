@@ -69,7 +69,7 @@ impl<T> PrivatePtr<T> {
         unsafe { self.ptr.as_ref() }
     }
 
-    #[deny(clippy::mut_from_ref)]
+    #[allow(clippy::mut_from_ref)]
     pub fn unwrap_ref_mut(&self) -> &mut T {
         unsafe {
             self.ptr
