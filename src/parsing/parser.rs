@@ -102,7 +102,7 @@ peg::parser! {
             arithmetic()
 
         rule arithmetic() -> Box<Expr> = precedence! {
-            x: (@) [op@t!(TestEquals)] y:@
+            x: (@) [op@t!(CompareEquals)] y:@
                 {Box::new(Expr::Binary(op, x, y))}
             --
             x: (@) [op@t!(Plus)] y:@

@@ -38,7 +38,12 @@ pub enum TokenKind {
 
     Comma,
 
-    TestEquals,
+    CompareEquals,
+    CompareNotEquals,
+    CompareGreater,
+    CompareGreaterEqual,
+    CompareLess,
+    CompareLessEqual,
 
     Equals,
 
@@ -77,7 +82,12 @@ impl Display for TokenKind {
                 TokenKind::RParen => "<)>".to_string(),
                 TokenKind::Var => "(VAR)".to_string(),
                 TokenKind::Equals => "(=)".to_string(),
-                TokenKind::TestEquals => "(?=)".to_string(),
+                TokenKind::CompareEquals => "(?=)".to_string(),
+                TokenKind::CompareNotEquals => "!=".to_string(),
+                TokenKind::CompareGreater => ">".to_string(),
+                TokenKind::CompareGreaterEqual => ">=".to_string(),
+                TokenKind::CompareLess => "<".to_string(),
+                TokenKind::CompareLessEqual => "<=".to_string(),
                 TokenKind::If => "(if)".to_string(),
                 TokenKind::Else => "(else)".to_string(),
                 TokenKind::Assert => "(assert)".to_string(),
@@ -364,29 +374,16 @@ impl<'input> Lexer<'input> {
                 }
 
                 '=' => {
-                    result.push(token!(Equals));
-                    self.input_iterator.next();
-                }
-
-                '?' => {
                     let possible_token_index = self.compute_index();
-                    self.input_iterator.next(); //skip ?
-                    let next_pair = self.input_iterator.peek().copied();
-                    match next_pair {
+                    self.input_iterator.next(); //skip first =
+                    match self.input_iterator.peek().copied() {
                         Some((_, '=')) => {
-                            result.push(token!(possible_token_index, TestEquals));
-                            self.input_iterator.next();
+                            //==
+                            result.push(token!(possible_token_index, CompareEquals));
+                            self.input_iterator.next(); //skip second =
                         }
-                        Some((_, c)) => {
-                            return Err(format!(
-                                "unexpected character {} at {}",
-                                c,
-                                self.compute_index()
-                            ));
-                        }
-
-                        None => {
-                            return Err(format!("unexpected end at {}", self.compute_index()));
+                        _ => {
+                            result.push(token!(possible_token_index, Equals));
                         }
                     }
                 }

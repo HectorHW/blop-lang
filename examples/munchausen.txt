@@ -1,22 +1,22 @@
 def find_munchausen(start, stop) =
     def find_munchausen(start, stop, total) =
-        if start ?= stop+1
+        if start == stop+1
             total
         else
             def is_munchausen(n) =
                 def munbody(n, sum) =
-                    if n?=0
+                    if n==0
                         sum
                     else
                         var p = n mod 10
                         p = p**p
                         munbody(n/10, sum+p)
 
-                munbody(n, 0)?=n
+                munbody(n, 0)==n
             if is_munchausen(start)
                 total = total+1
             find_munchausen(start+1, stop, total)
     find_munchausen(start, stop, 0)
 var total = find_munchausen(1, 5000)
 print total
-assert total?=2
+assert total==2

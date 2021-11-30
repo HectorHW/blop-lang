@@ -125,7 +125,7 @@ impl Optimizer {
                                 position: token_a.position,
                                 kind: TokenKind::Number(na - nb),
                             }),
-                            TokenKind::TestEquals => Expr::Number(Token {
+                            TokenKind::CompareEquals => Expr::Number(Token {
                                 position: token_a.position,
                                 kind: TokenKind::Number(if na == nb { 1 } else { 0 }),
                             }),

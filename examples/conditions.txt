@@ -1,29 +1,29 @@
 var a = 1
 def F =
-    if a?=1
+    if a==1
         1
-    elif a?=2
+    elif a==2
         2
-    elif a?=3
+    elif a==3
         3
     else
         0
 
-assert F()?=1
+assert F()==1
 a = 2
-assert F()?=2
+assert F()==2
 a = 3
-assert F()?=3
+assert F()==3
 a = 5
-assert F()?=0
+assert F()==0
 
 def G(x) =
-    if x?=1
+    if x==1
         1
-    elif x?=2
+    elif x==2
         2
     #implicit 0
 
-assert G(1)?=1
-assert G(2)?=2
-assert G(3)?=0
+assert G(1)==1
+assert G(2)==2
+assert G(3)==0
