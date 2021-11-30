@@ -17,5 +17,6 @@ assert "aa" > "a" #uses lexicographic ordering
 assert "a" < "b"
 assert "a" <= "b"
 assert "a" <= "a"
+var s = "a"<=1
 
 

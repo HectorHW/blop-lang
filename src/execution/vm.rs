@@ -121,7 +121,7 @@ impl VM {
         }
 
         macro_rules! comparison_operator {
-            ($pat:pat, $code: expr) => {{
+            ($pat:pat) => {{
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
                 let value = match first_operand.partial_cmp(&second_operand) {
@@ -129,8 +129,7 @@ impl VM {
                     Some(_) => Ok(0),
                     None => Err(runtime_error!(InterpretErrorKind::TypeError {
                         message: format!(
-                            "got unsupported arguments in {} ({} and {})",
-                            $code,
+                            "got unsupported argument types ({} and {})",
                             first_operand.type_string(),
                             second_operand.type_string()
                         )
@@ -310,20 +309,18 @@ impl VM {
                 }
 
                 Opcode::TestGreater => {
-                    comparison_operator!(Some(Ordering::Greater), Opcode::TestGreater)
+                    comparison_operator!(Some(Ordering::Greater))
                 }
 
-                Opcode::TestGreaterEqual => comparison_operator!(
-                    Some(Ordering::Equal | Ordering::Greater),
-                    Opcode::TestGreaterEqual
-                ),
+                Opcode::TestGreaterEqual => {
+                    comparison_operator!(Some(Ordering::Equal | Ordering::Greater))
+                }
 
-                Opcode::TestLess => comparison_operator!(Some(Ordering::Less), Opcode::TestLess),
+                Opcode::TestLess => comparison_operator!(Some(Ordering::Less)),
 
-                Opcode::TestLessEqual => comparison_operator!(
-                    Some(Ordering::Equal | Ordering::Less),
-                    Opcode::TestLessEqual
-                ),
+                Opcode::TestLessEqual => {
+                    comparison_operator!(Some(Ordering::Equal | Ordering::Less))
+                }
 
                 Opcode::JumpIfFalse(delta) => {
                     let value_to_test = as_int!(checked_stack_pop!()?)?;
