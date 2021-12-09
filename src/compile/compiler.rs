@@ -645,6 +645,29 @@ impl<'gc> Compiler<'gc> {
                     //eval(B)
                     result.append(&mut b);
                     source_indices.append(&mut indices_b);
+                } else if let TokenKind::And = op.kind {
+                    /*
+                    evaluation scheme:
+                    eval(A)
+                    JumpIfFalse end_and
+                    pop(1)
+                    eval(B)
+                    eval(B)
+                    end_or:
+                     */
+
+                    //eval (A)
+                    result.append(&mut a);
+                    source_indices.append(&mut indices_a);
+                    //jump PAST (POP eval(B))
+                    result.push(Opcode::JumpIfFalse((b.len() + 1 + 1) as u16));
+                    source_indices.push(op.position.0);
+                    //pop
+                    result.push(Opcode::Pop(1));
+                    source_indices.push(op.position.0);
+                    //eval(B)
+                    result.append(&mut b);
+                    source_indices.append(&mut indices_b);
                 } else {
                     result.append(&mut a);
                     source_indices.append(&mut indices_a);
@@ -760,15 +783,21 @@ impl<'gc> Compiler<'gc> {
                 let then_body_size = then_body.len();
                 let else_body_size = else_body.len();
 
-                result.push(Opcode::JumpIfFalse((then_body_size + 1 + 1) as u16));
+                result.push(Opcode::JumpIfFalse((then_body_size + 1 + 1 + 1) as u16));
                 source_indices.push(*source_indices.last().unwrap());
-                //instruction AFTER then_body and jump
+                //instruction AFTER POP then_body and jump
+                result.push(Opcode::Pop(1));
+                source_indices.push(then_indices[0]);
 
                 result.append(&mut then_body);
                 source_indices.append(&mut then_indices);
 
-                result.push(Opcode::JumpRelative((else_body_size + 1) as u16));
+                result.push(Opcode::JumpRelative((1 + else_body_size + 1) as u16));
+                //jump PAST POP else_body
                 source_indices.push(*source_indices.last().unwrap());
+
+                result.push(Opcode::Pop(1));
+                source_indices.push(else_indices[0]);
 
                 result.append(&mut else_body);
                 source_indices.append(&mut else_indices);

@@ -36,6 +36,7 @@ pub enum TokenKind {
     Mod,
     Power,
 
+    And,
     Or,
 
     Comma,
@@ -100,6 +101,7 @@ impl Display for TokenKind {
                 TokenKind::Power => "(**)".to_string(),
                 TokenKind::Pass => "(pass)".to_string(),
                 TokenKind::Or => "(or)".to_string(),
+                TokenKind::And => "(and)".to_string(),
             }
         )
     }
@@ -151,6 +153,7 @@ impl<'input> Lexer<'input> {
             ("mod", Mod),
             ("pass", Pass),
             ("or", Or),
+            ("and", And),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

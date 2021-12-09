@@ -272,7 +272,7 @@ impl Checker {
                 match &op.kind {
                     Plus | Minus | Star | Slash | CompareEquals | CompareNotEquals
                     | CompareGreater | CompareGreaterEqual | CompareLess | CompareLessEqual
-                    | Mod | Power | Or => Ok(()),
+                    | Mod | Power | Or | And => Ok(()),
                     _ => Err(format!("cannot compile operator {:?}", op)),
                 }
             }

@@ -20,5 +20,6 @@ assert "a" <= "a"
 
 # or clause
 assert (1<2 or 1==2) == (1<=2)
-
+# and clause
+assert 1==1 and 1<=2
 

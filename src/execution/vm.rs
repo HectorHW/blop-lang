@@ -333,6 +333,7 @@ impl VM {
                     } else {
                         ip += 1;
                     }
+                    self.stack.push(StackObject::Int(value_to_test));
                 }
 
                 Opcode::JumpIfTrue(delta) => {

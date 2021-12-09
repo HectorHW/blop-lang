@@ -104,7 +104,9 @@ peg::parser! {
         rule arithmetic() -> Box<Expr> = precedence! {
             x: (@) [op@t!(Or)] y:@
                 {Box::new(Expr::Binary(op, x, y))}
-            //TODO and
+            --
+            x: (@) [op@t!(And)] y: @
+                {Box::new(Expr::Binary(op, x, y))}
             --
             x: (@) [op@t!(CompareEquals)] y:@
                 {Box::new(Expr::Binary(op, x, y))}
