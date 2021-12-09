@@ -1,5 +1,5 @@
 use crate::parsing::ast::{Expr, Program, Stmt};
-use crate::parsing::lexer::Token;
+use crate::parsing::lexer::{Token, TokenKind};
 use indexmap::{IndexMap, IndexSet};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -263,6 +263,14 @@ impl Checker {
                 let _ = self.lookup_local(n);
                 //if we fail to lookup a name then treat it as global
                 Ok(())
+            }
+
+            Expr::Unary(op, v) => {
+                self.visit_expr(v)?;
+                match &op.kind {
+                    TokenKind::Not => Ok(()),
+                    _ => Err(format!("cannot compile unary operator {:?}", op)),
+                }
             }
 
             Expr::Binary(op, a, b) => {

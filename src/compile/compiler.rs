@@ -617,6 +617,28 @@ impl<'gc> Compiler<'gc> {
                 }
             }
 
+            Expr::Unary(op, a) => {
+                self.require_value();
+                let (mut indices_a, mut a) = self.visit_expr(a)?;
+                self.pop_requirement();
+                
+                result.append(&mut a);
+                source_indices.append(&mut indices_a);
+                
+                result.push(match &op.kind {
+                    TokenKind::Not => Opcode::LogicalNot,
+                    other => {
+                        panic!("unimplemented unary operator {} [{}]", other, op.position)
+                    }
+                });
+                source_indices.push(op.position.0);
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1));
+                    source_indices.push(op.position.0);
+                }
+            }
+
             Expr::Binary(op, a, b) => {
                 self.require_value();
                 let (mut indices_a, mut a) = self.visit_expr(a)?;

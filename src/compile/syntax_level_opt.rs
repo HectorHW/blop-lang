@@ -83,6 +83,11 @@ impl Optimizer {
 
             na @ Expr::Name(..) => na,
 
+            Expr::Unary(op, a) => {
+                let a = self.visit_expr(a);
+                Expr::Unary(op, a)
+            }
+
             Expr::Binary(op, a, b) => {
                 let a = self.visit_expr(a);
                 let b = self.visit_expr(b);

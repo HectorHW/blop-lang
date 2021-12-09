@@ -44,6 +44,8 @@ pub enum Opcode {
     TestGreaterEqual,
     TestLess,
     TestLessEqual,
+    
+    LogicalNot,
 
     JumpIfFalse(u16),
     JumpIfTrue(u16),
@@ -105,6 +107,7 @@ impl Display for Opcode {
                 JumpAbsolute(idx) => format!("JumpAbsolute[{}]", idx),
                 Mod => "Mod".to_string(),
                 Power => "Power".to_string(),
+                LogicalNot => "Not".to_string(),
             }
         )
     }

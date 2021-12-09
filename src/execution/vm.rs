@@ -374,6 +374,13 @@ impl VM {
                     self.stack.truncate(new_stack_size);
                     ip += 1;
                 }
+
+                Opcode::LogicalNot => {
+                    let value_to_test = as_int!(checked_stack_pop!()?)?;
+                    self.stack.push(StackObject::Int(1 - value_to_test));
+                    ip += 1;
+                }
+
                 Opcode::Nop => {
                     ip += 1;
                 }

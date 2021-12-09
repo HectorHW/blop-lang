@@ -38,6 +38,7 @@ pub enum TokenKind {
 
     And,
     Or,
+    Not,
 
     Comma,
 
@@ -102,6 +103,7 @@ impl Display for TokenKind {
                 TokenKind::Pass => "(pass)".to_string(),
                 TokenKind::Or => "(or)".to_string(),
                 TokenKind::And => "(and)".to_string(),
+                TokenKind::Not => "(not)".to_string(),
             }
         )
     }
@@ -154,6 +156,7 @@ impl<'input> Lexer<'input> {
             ("pass", Pass),
             ("or", Or),
             ("and", And),
+            ("not", Not),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
