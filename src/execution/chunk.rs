@@ -46,6 +46,7 @@ pub enum Opcode {
     TestLessEqual,
 
     JumpIfFalse(u16),
+    JumpIfTrue(u16),
     JumpRelative(u16),
     JumpAbsolute(u16),
     Pop(u16),
@@ -86,6 +87,7 @@ impl Display for Opcode {
                 TestLessEqual => "TestLessEqual".to_string(),
 
                 JumpIfFalse(delta) => format!("JumpIfFalse[{}]", delta),
+                JumpIfTrue(delta) => format!("JumpIfTrue[{}]", delta),
                 JumpRelative(delta) => format!("Jump[{}]", delta),
                 Pop(n) => format!("Pop[{}]", n),
                 Nop => "Nop".to_string(),
@@ -190,6 +192,15 @@ mod chunk_pretty_printer {
                             i + *delta as usize
                         )
                     }
+
+                    Opcode::JumpIfTrue(delta) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", Opcode::JumpIfTrue(*delta)),
+                            i + *delta as usize
+                        )
+                    }
+
                     Opcode::JumpRelative(delta) => {
                         format!(
                             "{:<21} ({})",
@@ -231,11 +242,14 @@ mod chunk_pretty_printer {
             .iter()
             .enumerate()
             .filter_map(|(pos, opcode)| match opcode {
-                Opcode::JumpIfFalse(delta) | Opcode::JumpRelative(delta) => {
+                Opcode::JumpIfFalse(delta)
+                | Opcode::JumpIfTrue(delta)
+                | Opcode::JumpRelative(delta) => {
                     let start = pos;
                     let end = start + *delta as usize;
                     Some((start, end))
                 }
+
                 Opcode::JumpAbsolute(idx) => {
                     let start = pos;
                     let end = *idx as usize;

@@ -623,27 +623,54 @@ impl<'gc> Compiler<'gc> {
                 let (mut indices_b, mut b) = self.visit_expr(b)?;
                 self.pop_requirement();
 
-                result.append(&mut a);
-                source_indices.append(&mut indices_a);
-                result.append(&mut b);
-                source_indices.append(&mut indices_b);
+                if let TokenKind::Or = op.kind {
+                    /*
+                    evaluation scheme:
+                    eval(A)
+                    JumpIfTrue end_or
+                    pop(1)
+                    eval(B)
+                    end_or:
+                     */
 
-                result.push(match &op.kind {
-                    TokenKind::Star => Opcode::Mul,
-                    TokenKind::Slash => Opcode::Div,
-                    TokenKind::Plus => Opcode::Add,
-                    TokenKind::Minus => Opcode::Sub,
-                    TokenKind::CompareEquals => Opcode::TestEquals,
-                    TokenKind::CompareNotEquals => Opcode::TestNotEquals,
-                    TokenKind::CompareGreater => Opcode::TestGreater,
-                    TokenKind::CompareGreaterEqual => Opcode::TestGreaterEqual,
-                    TokenKind::CompareLess => Opcode::TestLess,
-                    TokenKind::CompareLessEqual => Opcode::TestLessEqual,
-                    TokenKind::Mod => Opcode::Mod,
-                    TokenKind::Power => Opcode::Power,
-                    other => panic!("unimplemented binary operator {} [{}]", other, op.position),
-                });
-                source_indices.push(op.position.0);
+                    //eval (A)
+                    result.append(&mut a);
+                    source_indices.append(&mut indices_a);
+                    //jump PAST (POP eval(B))
+                    result.push(Opcode::JumpIfTrue((b.len() + 1 + 1) as u16));
+                    source_indices.push(op.position.0);
+                    //pop
+                    result.push(Opcode::Pop(1));
+                    source_indices.push(op.position.0);
+                    //eval(B)
+                    result.append(&mut b);
+                    source_indices.append(&mut indices_b);
+                } else {
+                    result.append(&mut a);
+                    source_indices.append(&mut indices_a);
+                    result.append(&mut b);
+                    source_indices.append(&mut indices_b);
+
+                    result.push(match &op.kind {
+                        TokenKind::Star => Opcode::Mul,
+                        TokenKind::Slash => Opcode::Div,
+                        TokenKind::Plus => Opcode::Add,
+                        TokenKind::Minus => Opcode::Sub,
+                        TokenKind::CompareEquals => Opcode::TestEquals,
+                        TokenKind::CompareNotEquals => Opcode::TestNotEquals,
+                        TokenKind::CompareGreater => Opcode::TestGreater,
+                        TokenKind::CompareGreaterEqual => Opcode::TestGreaterEqual,
+                        TokenKind::CompareLess => Opcode::TestLess,
+                        TokenKind::CompareLessEqual => Opcode::TestLessEqual,
+                        TokenKind::Mod => Opcode::Mod,
+                        TokenKind::Power => Opcode::Power,
+                        other => {
+                            panic!("unimplemented binary operator {} [{}]", other, op.position)
+                        }
+                    });
+                    source_indices.push(op.position.0);
+                }
+
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1));
                     source_indices.push(op.position.0);

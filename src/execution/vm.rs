@@ -334,6 +334,21 @@ impl VM {
                         ip += 1;
                     }
                 }
+
+                Opcode::JumpIfTrue(delta) => {
+                    let value_to_test = as_int!(checked_stack_pop!()?)?;
+                    if value_to_test == 1 {
+                        let new_ip = ip + delta as usize;
+                        if new_ip >= current_chunk.code.len() {
+                            return Err(runtime_error!(JumpBounds));
+                        }
+                        ip = new_ip;
+                    } else {
+                        ip += 1;
+                    }
+                    self.stack.push(StackObject::Int(value_to_test));
+                }
+
                 Opcode::JumpRelative(delta) => {
                     let new_ip = ip + delta as usize;
                     if new_ip >= current_chunk.code.len() {
