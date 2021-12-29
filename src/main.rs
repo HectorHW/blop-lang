@@ -70,8 +70,7 @@ fn main() {
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
     let mut vm = VM::new();
-    let (per_chunk_indices, chunks) =
-        Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
+    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
 
     #[cfg(feature = "print-chunk")]
     for chunk in &chunks {
@@ -88,7 +87,7 @@ fn main() {
             "error {:?} at instruction {}\nat line {}",
             error,
             chunks[error.chunk_index].code[error.opcode_index],
-            per_chunk_indices[error.chunk_index][error.opcode_index],
+            chunks[error.chunk_index].opcode_to_line[error.opcode_index],
         );
     }); /**/
     #[cfg(feature = "bench")]
@@ -103,21 +102,21 @@ fn normalize_string(s: String) -> String {
 }
 
 pub fn run_file(filename: &str) -> Result<(), String> {
-    let (per_chunk_indices, chunks, mut vm) = compile_file(filename)?;
+    let (chunks, mut vm) = compile_file(filename)?;
 
     vm.run(&chunks).map_err(|error| {
         format!(
             "error {:?} at instruction {}\nat line {}",
             error,
             chunks[error.chunk_index].code[error.opcode_index],
-            per_chunk_indices[error.chunk_index][error.opcode_index],
+            chunks[error.chunk_index].opcode_to_line[error.opcode_index],
         )
     })?;
 
     Ok(())
 }
 
-type CompilationResult = (Vec<Vec<usize>>, Vec<Chunk>, VM);
+type CompilationResult = (Vec<Chunk>, VM);
 
 pub fn compile_file(filename: &str) -> Result<CompilationResult, String> {
     let file_content = std::fs::read_to_string(filename)
@@ -132,11 +131,10 @@ pub fn compile_file(filename: &str) -> Result<CompilationResult, String> {
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
     let statements = compile::syntax_level_opt::optimize(statements);
     let mut vm = VM::new();
-    let (per_chunk_indices, chunks) =
-        Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc)?;
+    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc)?;
     #[cfg(debug_assertions)]
     for idx in 0..chunks.len() {
-        assert_eq!(per_chunk_indices[idx].len(), chunks[idx].code.len());
+        assert_eq!(chunks[idx].opcode_to_line.len(), chunks[idx].code.len());
     }
-    Ok((per_chunk_indices, chunks, vm))
+    Ok((chunks, vm))
 }
