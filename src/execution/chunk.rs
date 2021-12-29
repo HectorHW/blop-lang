@@ -1,4 +1,5 @@
 use crate::data::objects::Value;
+use crate::parsing::lexer::{Token, TokenKind};
 use std::fmt::{Display, Formatter};
 use std::ops::AddAssign;
 
@@ -7,7 +8,7 @@ pub struct Chunk {
     pub constants: Vec<Value>,
     pub global_names: Vec<String>,
     pub code: Vec<Opcode>,
-    pub name: String,
+    pub name: Token,
     pub arity: usize,
     pub opcode_to_line: Vec<usize>,
 }
@@ -115,7 +116,7 @@ impl Display for Opcode {
 }
 
 impl Chunk {
-    pub fn new(name: String, arity: usize) -> Chunk {
+    pub fn new(name: Token, arity: usize) -> Chunk {
         Chunk {
             constants: Vec::new(),
             global_names: Vec::new(),
@@ -141,7 +142,18 @@ impl AddAssign<(Opcode, usize)> for Chunk {
 
 impl Display for Chunk {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{:-^40}", format!("chunk {}", self.name))?;
+        writeln!(
+            f,
+            "{:-^40}",
+            format!(
+                "chunk '{}' at {}",
+                match &self.name.kind {
+                    TokenKind::Name(..) => self.name.get_string().unwrap(),
+                    _ => panic!(),
+                },
+                self.name.position
+            )
+        )?;
         writeln!(f, "constants: {:?}", self.constants)?;
         let strings = chunk_pretty_printer::draw_chunk(self);
         for s in &strings {
