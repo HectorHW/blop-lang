@@ -28,7 +28,7 @@ impl Optimizer {
         self.names
             .last_mut()
             .unwrap()
-            .insert(variable_name.get_string().unwrap().clone());
+            .insert(variable_name.get_string().unwrap().to_string());
     }
 
     fn new_scope(&mut self) {
@@ -213,6 +213,8 @@ impl Optimizer {
 
                 p @ Stmt::Pass(..) => Expr::SingleStatement(p),
             },
+
+            anon @ Expr::AnonFunction(..) => anon,
         };
         Box::new(expr)
     }

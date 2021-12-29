@@ -149,6 +149,7 @@ impl Display for Chunk {
                 "chunk '{}' at {}",
                 match &self.name.kind {
                     TokenKind::Name(..) => self.name.get_string().unwrap(),
+                    TokenKind::Arrow => "<anon function>",
                     _ => panic!(),
                 },
                 self.name.position

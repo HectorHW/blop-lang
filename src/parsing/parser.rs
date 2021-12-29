@@ -40,8 +40,11 @@ peg::parser! {
                 Stmt::FunctionDeclaration{name:n, args, body}
             }
 
+        rule paren_name_list() -> Vec<Token> =
+            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {n}
+
         rule maybe_arguments_and_equals() -> Vec<Token> =
-            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] [t!(Equals)] {
+            n:paren_name_list() [t!(Equals)] {
                 n
             }
             / [t!(Equals)] {Vec::new()}
@@ -99,7 +102,14 @@ peg::parser! {
             b:block() {Box::new(Expr::Block(b.0, b.1, b.2))}
 
         rule simple_expr() -> Box<Expr> =
+            arrow() /
+
             arithmetic()
+
+        rule arrow() -> Box<Expr> =
+            p:paren_name_list() [t@t!(Arrow)] b:simple_expr() {
+            Box::new(Expr::AnonFunction(p, t, b))
+        }
 
         rule arithmetic() -> Box<Expr> = precedence! {
             x: (@) [op@t!(Or)] y:@

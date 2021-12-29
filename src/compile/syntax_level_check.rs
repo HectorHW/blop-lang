@@ -56,7 +56,7 @@ impl Checker {
         let mut found_init = None;
         //try to lookup initialized value
         for (_scope_type, scope_identifier, scope_map) in self.names.iter_mut().rev() {
-            match scope_map.entry(name.get_string().unwrap().clone()) {
+            match scope_map.entry(name.get_string().unwrap().to_string()) {
                 Entry::Occupied(entry) if *entry.get() => {
                     found_init = Some(scope_identifier.clone());
                     break;
@@ -76,7 +76,7 @@ impl Checker {
                         self.variable_types
                             .get_mut(scope_identifier)
                             .unwrap()
-                            .insert(name.get_string().unwrap().clone(), VariableType::Boxed);
+                            .insert(name.get_string().unwrap().to_string(), VariableType::Boxed);
                     }
 
                     return Ok(());
@@ -87,7 +87,7 @@ impl Checker {
                     self.closed_names
                         .get_mut(scope_identifier)
                         .unwrap()
-                        .insert(name.get_string().unwrap().clone());
+                        .insert(name.get_string().unwrap().to_string());
                     passed_function_scope = true;
                 }
             }
@@ -100,7 +100,8 @@ impl Checker {
 
         for (scope_type, scope_identifier, scope_map) in self.names.iter_mut().rev() {
             if passed_function_scope {
-                if let Entry::Occupied(_entry) = scope_map.entry(name.get_string().unwrap().clone())
+                if let Entry::Occupied(_entry) =
+                    scope_map.entry(name.get_string().unwrap().to_string())
                 {
                     found_uninit = Some(scope_identifier.clone());
                 }
@@ -123,7 +124,7 @@ impl Checker {
                     self.variable_types
                         .get_mut(&scope_identifier.clone())
                         .unwrap()
-                        .insert(name.get_string().unwrap().clone(), VariableType::Boxed);
+                        .insert(name.get_string().unwrap().to_string(), VariableType::Boxed);
                     return Ok(());
                 }
 
@@ -132,7 +133,7 @@ impl Checker {
                     self.closed_names
                         .get_mut(scope_identifier)
                         .unwrap()
-                        .insert(name.get_string().unwrap().clone());
+                        .insert(name.get_string().unwrap().to_string());
                 }
             }
         }
@@ -149,7 +150,7 @@ impl Checker {
             .last_mut()
             .unwrap()
             .2
-            .entry(variable_name.get_string().unwrap().clone())
+            .entry(variable_name.get_string().unwrap().to_string())
         {
             Entry::Occupied(mut is_defined) => {
                 if *is_defined.get() {
@@ -192,7 +193,7 @@ impl Checker {
             .last_mut()
             .unwrap()
             .2
-            .insert(variable_name.get_string().unwrap().clone(), false);
+            .insert(variable_name.get_string().unwrap().to_string(), false);
 
         let map: &mut IndexMap<String, VariableType> = self
             .variable_types
@@ -200,7 +201,7 @@ impl Checker {
             .unwrap();
 
         map.insert(
-            variable_name.get_string().unwrap().clone(),
+            variable_name.get_string().unwrap().to_string(),
             VariableType::Normal,
         );
         Ok(())
@@ -301,6 +302,7 @@ impl Checker {
                 Ok(())
             }
             Expr::SingleStatement(s) => self.visit_stmt(s),
+            Expr::AnonFunction(args, name, body) => self.check_function(name, args, body),
         }
     }
 
