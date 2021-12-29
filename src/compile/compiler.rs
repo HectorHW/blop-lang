@@ -22,7 +22,7 @@ pub struct Compiler<'gc> {
     total_closed_variables: usize,
     current_chunk_idx: Vec<usize>,
     current_block: Vec<Token>,
-    current_function: Vec<Token>,
+    _current_function: Vec<FunctionCompilationContext>,
     variable_types: BlockNameMap,
     closed_names: ClosedNamesMap,
     current_function_was_possibly_overwritten: Vec<bool>,
@@ -33,6 +33,11 @@ struct FunctionCompilerState {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     total_variables: usize,
     total_closed_variables: usize,
+}
+
+struct FunctionCompilationContext {
+    function_name: Token,
+    arity: usize,
 }
 
 impl<'gc> Compiler<'gc> {
@@ -50,7 +55,7 @@ impl<'gc> Compiler<'gc> {
             total_closed_variables: 0,
             current_chunk_idx: vec![0],
             current_block: vec![],
-            current_function: vec![],
+            _current_function: vec![],
             variable_types,
             closed_names,
             current_function_was_possibly_overwritten: vec![],
@@ -121,6 +126,10 @@ impl<'gc> Compiler<'gc> {
         self.chunks
             .get_mut(*self.current_chunk_idx.last().unwrap())
             .unwrap()
+    }
+
+    fn current_function(&self) -> Option<&FunctionCompilationContext> {
+        self._current_function.last()
     }
 
     fn current_indices(&mut self) -> &mut Vec<usize> {
@@ -235,6 +244,11 @@ impl<'gc> Compiler<'gc> {
         self.total_variables = 0;
         self.total_closed_variables = 0;
 
+        self._current_function.push(FunctionCompilationContext {
+            function_name: name.clone(),
+            arity,
+        });
+
         previous_state
     }
 
@@ -245,6 +259,7 @@ impl<'gc> Compiler<'gc> {
         self.total_variables = state.total_variables;
         self.total_closed_variables = state.total_closed_variables;
         self.current_function_was_possibly_overwritten.pop();
+        self._current_function.pop();
         idx
     }
 
@@ -621,10 +636,10 @@ impl<'gc> Compiler<'gc> {
                 self.require_value();
                 let (mut indices_a, mut a) = self.visit_expr(a)?;
                 self.pop_requirement();
-                
+
                 result.append(&mut a);
                 source_indices.append(&mut indices_a);
-                
+
                 result.push(match &op.kind {
                     TokenKind::Not => Opcode::LogicalNot,
                     other => {
@@ -845,9 +860,18 @@ impl<'gc> Compiler<'gc> {
                     && target.last().unwrap().eq(&Opcode::LoadLocal(0)) //we load current function
                     && self.needs_return_value()
                 //we will return after that
+                    && self.current_function().unwrap().arity <= args.len()
                 {
+                    if args.len() > self.current_function().unwrap().arity {
+                        return Err(format!("compile error: arity mismatch when performing tail call: expected <={} but got {} args", 
+                                           self.current_function().unwrap().arity,
+                                           args.len()
+                        ));
+                    }
+
                     let mut argument_indices = vec![];
                     //compute all arguments
+
                     for (i, arg) in args.iter().enumerate() {
                         self.require_value();
                         let (mut arg_indices, mut arg_code) = self.visit_expr(arg)?;
