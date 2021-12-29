@@ -3,5 +3,5 @@ def x =
     a
 
 var value = x()
-assert value?=1
+assert value==1
 print value

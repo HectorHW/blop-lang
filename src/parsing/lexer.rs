@@ -36,9 +36,18 @@ pub enum TokenKind {
     Mod,
     Power,
 
+    And,
+    Or,
+    Not,
+
     Comma,
 
-    TestEquals,
+    CompareEquals,
+    CompareNotEquals,
+    CompareGreater,
+    CompareGreaterEqual,
+    CompareLess,
+    CompareLessEqual,
 
     Equals,
 
@@ -77,7 +86,12 @@ impl Display for TokenKind {
                 TokenKind::RParen => "<)>".to_string(),
                 TokenKind::Var => "(VAR)".to_string(),
                 TokenKind::Equals => "(=)".to_string(),
-                TokenKind::TestEquals => "(?=)".to_string(),
+                TokenKind::CompareEquals => "(?=)".to_string(),
+                TokenKind::CompareNotEquals => "!=".to_string(),
+                TokenKind::CompareGreater => ">".to_string(),
+                TokenKind::CompareGreaterEqual => ">=".to_string(),
+                TokenKind::CompareLess => "<".to_string(),
+                TokenKind::CompareLessEqual => "<=".to_string(),
                 TokenKind::If => "(if)".to_string(),
                 TokenKind::Else => "(else)".to_string(),
                 TokenKind::Assert => "(assert)".to_string(),
@@ -87,6 +101,9 @@ impl Display for TokenKind {
                 TokenKind::Mod => "(mod)".to_string(),
                 TokenKind::Power => "(**)".to_string(),
                 TokenKind::Pass => "(pass)".to_string(),
+                TokenKind::Or => "(or)".to_string(),
+                TokenKind::And => "(and)".to_string(),
+                TokenKind::Not => "(not)".to_string(),
             }
         )
     }
@@ -137,6 +154,9 @@ impl<'input> Lexer<'input> {
             ("def", Def),
             ("mod", Mod),
             ("pass", Pass),
+            ("or", Or),
+            ("and", And),
+            ("not", Not),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -364,29 +384,68 @@ impl<'input> Lexer<'input> {
                 }
 
                 '=' => {
-                    result.push(token!(Equals));
-                    self.input_iterator.next();
+                    let possible_token_index = self.compute_index();
+                    self.input_iterator.next(); //skip first =
+                    match self.input_iterator.peek().copied() {
+                        Some((_, '=')) => {
+                            //==
+                            result.push(token!(possible_token_index, CompareEquals));
+                            self.input_iterator.next(); //skip second =
+                        }
+                        _ => {
+                            result.push(token!(possible_token_index, Equals));
+                        }
+                    }
                 }
 
-                '?' => {
+                '!' => {
                     let possible_token_index = self.compute_index();
-                    self.input_iterator.next(); //skip ?
-                    let next_pair = self.input_iterator.peek().copied();
-                    match next_pair {
+                    self.input_iterator.next(); //skip first !
+                    match self.input_iterator.peek().copied() {
                         Some((_, '=')) => {
-                            result.push(token!(possible_token_index, TestEquals));
-                            self.input_iterator.next();
+                            //reading !=
+                            result.push(token!(possible_token_index, CompareNotEquals));
+                            self.input_iterator.next(); //skip =
                         }
-                        Some((_, c)) => {
+                        Some((_, any_other)) => {
                             return Err(format!(
                                 "unexpected character {} at {}",
-                                c,
+                                any_other,
                                 self.compute_index()
-                            ));
+                            ))
                         }
+                        _ => {
+                            return Err("unexpected end after reading !".to_string());
+                        }
+                    }
+                }
 
-                        None => {
-                            return Err(format!("unexpected end at {}", self.compute_index()));
+                '<' => {
+                    let possible_token_index = self.compute_index();
+                    self.input_iterator.next(); //skip <
+                    match self.input_iterator.peek().copied() {
+                        Some((_, '=')) => {
+                            // <=
+                            result.push(token!(possible_token_index, CompareLessEqual));
+                            self.input_iterator.next(); //skip =
+                        }
+                        _ => {
+                            result.push(token!(possible_token_index, CompareLess));
+                        }
+                    }
+                }
+
+                '>' => {
+                    let possible_token_index = self.compute_index();
+                    self.input_iterator.next(); //skip >
+                    match self.input_iterator.peek().copied() {
+                        Some((_, '=')) => {
+                            // >=
+                            result.push(token!(possible_token_index, CompareGreaterEqual));
+                            self.input_iterator.next(); //skip =
+                        }
+                        _ => {
+                            result.push(token!(possible_token_index, CompareGreater));
                         }
                     }
                 }

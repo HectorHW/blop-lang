@@ -4,5 +4,5 @@ def a() =
     b
 
 var value = a()(4)
-assert value?=5
+assert value==5
 print value

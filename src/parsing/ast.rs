@@ -21,6 +21,7 @@ pub enum Expr {
     Name(Token),
     ConstString(Token),
     Binary(Token, Box<Expr>, Box<Expr>),
+    Unary(Token, Box<Expr>),
     IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Block(Token, Token, Vec<Stmt>),
     SingleStatement(Stmt),

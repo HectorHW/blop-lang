@@ -1,0 +1,37 @@
+assert 1 == 1 # equality
+
+assert 1 != 1 + 1 # priority
+
+assert "abc" == "ab"+"c" #string equality
+assert "abc" != "abcd"
+
+assert 2 > 1 #ordering
+assert 2>=1
+assert 1>=1
+assert 1<2
+assert 1<=2
+assert 1<=1
+
+assert "b" > "a" #string ordering
+assert "aa" > "a" #uses lexicographic ordering
+assert "a" < "b"
+assert "a" <= "b"
+assert "a" <= "a"
+
+def should_not_execute =
+    assert 5==4
+
+# or clause
+assert (1<2 or 1==2) == (1<=2)
+# and clause
+assert 1==1 and 1<=2
+
+# not operator
+assert not 1>2
+
+#or shortcircuited
+assert 1<2 or should_not_execute()
+
+#and shortcircuited
+assert not (1==2 and should_not_execute())
+

@@ -2,6 +2,7 @@ use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, Value, ValueBox};
 use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::{Chunk, Opcode};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
@@ -117,6 +118,26 @@ impl VM {
                     })),
                 })
             };
+        }
+
+        macro_rules! comparison_operator {
+            ($pat:pat) => {{
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
+                let value = match first_operand.partial_cmp(&second_operand) {
+                    $pat => Ok(1),
+                    Some(_) => Ok(0),
+                    None => Err(runtime_error!(InterpretErrorKind::TypeError {
+                        message: format!(
+                            "got unsupported argument types ({} and {})",
+                            first_operand.type_string(),
+                            second_operand.type_string()
+                        )
+                    })),
+                }?;
+                self.stack.push(Value::Int(value));
+                ip += 1;
+            }};
         }
 
         while ip < current_chunk.code.len() {
@@ -274,6 +295,33 @@ impl VM {
                     self.stack.push(Value::Int(value));
                     ip += 1;
                 }
+
+                Opcode::TestNotEquals => {
+                    let second_operand = checked_stack_pop!()?;
+                    let first_operand = checked_stack_pop!()?;
+                    let value = if second_operand != first_operand {
+                        1
+                    } else {
+                        0
+                    };
+                    self.stack.push(Value::Int(value));
+                    ip += 1;
+                }
+
+                Opcode::TestGreater => {
+                    comparison_operator!(Some(Ordering::Greater))
+                }
+
+                Opcode::TestGreaterEqual => {
+                    comparison_operator!(Some(Ordering::Equal | Ordering::Greater))
+                }
+
+                Opcode::TestLess => comparison_operator!(Some(Ordering::Less)),
+
+                Opcode::TestLessEqual => {
+                    comparison_operator!(Some(Ordering::Equal | Ordering::Less))
+                }
+
                 Opcode::JumpIfFalse(delta) => {
                     let value_to_test = as_int!(checked_stack_pop!()?)?;
                     if value_to_test == 0 {
@@ -285,7 +333,23 @@ impl VM {
                     } else {
                         ip += 1;
                     }
+                    self.stack.push(StackObject::Int(value_to_test));
                 }
+
+                Opcode::JumpIfTrue(delta) => {
+                    let value_to_test = as_int!(checked_stack_pop!()?)?;
+                    if value_to_test == 1 {
+                        let new_ip = ip + delta as usize;
+                        if new_ip >= current_chunk.code.len() {
+                            return Err(runtime_error!(JumpBounds));
+                        }
+                        ip = new_ip;
+                    } else {
+                        ip += 1;
+                    }
+                    self.stack.push(StackObject::Int(value_to_test));
+                }
+
                 Opcode::JumpRelative(delta) => {
                     let new_ip = ip + delta as usize;
                     if new_ip >= current_chunk.code.len() {
@@ -310,6 +374,13 @@ impl VM {
                     self.stack.truncate(new_stack_size);
                     ip += 1;
                 }
+
+                Opcode::LogicalNot => {
+                    let value_to_test = as_int!(checked_stack_pop!()?)?;
+                    self.stack.push(StackObject::Int(1 - value_to_test));
+                    ip += 1;
+                }
+
                 Opcode::Nop => {
                     ip += 1;
                 }

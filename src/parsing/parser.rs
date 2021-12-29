@@ -102,8 +102,32 @@ peg::parser! {
             arithmetic()
 
         rule arithmetic() -> Box<Expr> = precedence! {
-            x: (@) [op@t!(TestEquals)] y:@
+            x: (@) [op@t!(Or)] y:@
                 {Box::new(Expr::Binary(op, x, y))}
+            --
+            x: (@) [op@t!(And)] y: @
+                {Box::new(Expr::Binary(op, x, y))}
+            --
+            [op@t!(Not)] x: @
+                {
+                    Box::new(Expr::Unary(op, x))
+                }
+
+            --
+            x: (@) [op@t!(CompareEquals)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(CompareNotEquals)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            --
+            x: (@) [op@t!(CompareGreater)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(CompareGreaterEqual)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(CompareLess)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+            x: (@) [op@t!(CompareLessEqual)] y:@
+                {Box::new(Expr::Binary(op, x, y))}
+
             --
             x: (@) [op@t!(Plus)] y:@
                 {Box::new(Expr::Binary(op, x, y))}

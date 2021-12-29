@@ -3,10 +3,10 @@ def f =
 var a = 2
 
 var value = f()
-assert value ?= 2
+assert value == 2
 print value
 
 a = 3
 value = f()
-assert value ?= 3
+assert value == 3
 print value
