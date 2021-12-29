@@ -104,3 +104,5 @@ test_file! {munchausen}
 test_fail_compile! {fail_prohibit_assignment_to_function_inside_itself}
 
 test_file! {operators}
+
+test_file! {lambdas}

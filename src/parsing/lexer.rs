@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{format, Debug, Display, Formatter};
 use std::iter::Peekable;
 use std::mem;
 use std::str::CharIndices;
@@ -49,6 +49,8 @@ pub enum TokenKind {
     CompareLess,
     CompareLessEqual,
 
+    Arrow,
+
     Equals,
 
     Number(i64),
@@ -86,12 +88,12 @@ impl Display for TokenKind {
                 TokenKind::RParen => "<)>".to_string(),
                 TokenKind::Var => "(VAR)".to_string(),
                 TokenKind::Equals => "(=)".to_string(),
-                TokenKind::CompareEquals => "(?=)".to_string(),
-                TokenKind::CompareNotEquals => "!=".to_string(),
-                TokenKind::CompareGreater => ">".to_string(),
-                TokenKind::CompareGreaterEqual => ">=".to_string(),
-                TokenKind::CompareLess => "<".to_string(),
-                TokenKind::CompareLessEqual => "<=".to_string(),
+                TokenKind::CompareEquals => "(==)".to_string(),
+                TokenKind::CompareNotEquals => "(!=)".to_string(),
+                TokenKind::CompareGreater => "(>)".to_string(),
+                TokenKind::CompareGreaterEqual => "(>=)".to_string(),
+                TokenKind::CompareLess => "(<)".to_string(),
+                TokenKind::CompareLessEqual => "(<=)".to_string(),
                 TokenKind::If => "(if)".to_string(),
                 TokenKind::Else => "(else)".to_string(),
                 TokenKind::Assert => "(assert)".to_string(),
@@ -104,16 +106,18 @@ impl Display for TokenKind {
                 TokenKind::Or => "(or)".to_string(),
                 TokenKind::And => "(and)".to_string(),
                 TokenKind::Not => "(not)".to_string(),
+                TokenKind::Arrow => "(=>)".to_string(),
             }
         )
     }
 }
 
 impl Token {
-    pub fn get_string(&self) -> Option<&String> {
+    pub fn get_string(&self) -> Option<&str> {
         match &self.kind {
             TokenKind::Name(n) => Some(n),
             TokenKind::ConstString(s) => Some(s),
+            TokenKind::Arrow => Some("anon function"),
             _ => None,
         }
     }
@@ -391,6 +395,11 @@ impl<'input> Lexer<'input> {
                             //==
                             result.push(token!(possible_token_index, CompareEquals));
                             self.input_iterator.next(); //skip second =
+                        }
+                        Some((_, '>')) => {
+                            //=>
+                            result.push(token!(possible_token_index, Arrow));
+                            self.input_iterator.next();
                         }
                         _ => {
                             result.push(token!(possible_token_index, Equals));
