@@ -40,7 +40,7 @@ struct FunctionCompilationContext {
 }
 
 impl<'gc> Compiler<'gc> {
-    pub fn new(
+    fn new(
         variable_types: BlockNameMap,
         closed_names: ClosedNamesMap,
         gc: &'gc mut GC,
@@ -69,7 +69,13 @@ impl<'gc> Compiler<'gc> {
     ) -> Result<Vec<Chunk>, String> {
         let mut compiler = Compiler::new(variable_types, closed_names, gc);
 
-        compiler.chunks = vec![Chunk::new("<script>".to_string(), 0)];
+        compiler.chunks = vec![Chunk::new(
+            Token {
+                kind: TokenKind::Name("<script>".to_string()),
+                position: Index(0, 0),
+            },
+            0,
+        )];
         let block_identifier = match program.as_ref() {
             Expr::Block(bb, _be, _) => bb,
             _ => &Token {
@@ -80,7 +86,7 @@ impl<'gc> Compiler<'gc> {
         compiler.new_scope(block_identifier);
 
         compiler.require_nothing();
-        let (mut indices, code) = compiler.visit_expr(program)?;
+        let (indices, code) = compiler.visit_expr(program)?;
         compiler.current_chunk().append(code, indices);
         compiler.pop_requirement();
         *compiler.current_chunk() += (Opcode::Return, 0);
@@ -227,10 +233,7 @@ impl<'gc> Compiler<'gc> {
         };
 
         let new_chunk_idx = self.chunks.len();
-        self.chunks.push(Chunk::new(
-            format!("{} [{}]", name.get_string().unwrap(), name.position),
-            arity,
-        ));
+        self.chunks.push(Chunk::new(name.clone(), arity));
         self.current_chunk_idx.push(new_chunk_idx);
         self.current_function_was_possibly_overwritten.push(false);
         self.total_variables = 0;
