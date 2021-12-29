@@ -93,8 +93,7 @@ fn test_tail_call_optimization_application() {
         crate::compile::syntax_level_check::check(&statements).unwrap();
     let statements = crate::compile::syntax_level_opt::optimize(statements);
     let mut vm = VM::new();
-    let (_, chunks) =
-        Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
+    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
 
     vm.override_stack_limit(20); //should be just fine (and is definetly <1000)
     vm.run(&chunks).unwrap();

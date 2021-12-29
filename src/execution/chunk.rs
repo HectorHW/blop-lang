@@ -9,6 +9,7 @@ pub struct Chunk {
     pub code: Vec<Opcode>,
     pub name: String,
     pub arity: usize,
+    pub opcode_to_line: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -44,7 +45,7 @@ pub enum Opcode {
     TestGreaterEqual,
     TestLess,
     TestLessEqual,
-    
+
     LogicalNot,
 
     JumpIfFalse(u16),
@@ -121,18 +122,20 @@ impl Chunk {
             code: Vec::new(),
             name,
             arity,
+            opcode_to_line: vec![],
         }
     }
 
-    pub fn append(&mut self, values: Vec<Opcode>) {
-        let mut values = values;
-        self.code.append(&mut values)
+    pub fn append(&mut self, mut values: Vec<Opcode>, mut indices: Vec<usize>) {
+        self.code.append(&mut values);
+        self.opcode_to_line.append(&mut indices)
     }
 }
 
-impl AddAssign<Opcode> for Chunk {
-    fn add_assign(&mut self, rhs: Opcode) {
-        self.code.push(rhs)
+impl AddAssign<(Opcode, usize)> for Chunk {
+    fn add_assign(&mut self, rhs: (Opcode, usize)) {
+        self.code.push(rhs.0);
+        self.opcode_to_line.push(rhs.1);
     }
 }
 

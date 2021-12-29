@@ -17,7 +17,6 @@ pub struct Compiler<'gc> {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
     chunks: Vec<Chunk>,
-    per_chunk_indices: Vec<Vec<usize>>,
     total_variables: usize,
     total_closed_variables: usize,
     current_chunk_idx: Vec<usize>,
@@ -50,7 +49,6 @@ impl<'gc> Compiler<'gc> {
             names: vec![],
             value_requirements: vec![],
             chunks: vec![],
-            per_chunk_indices: vec![],
             total_variables: 0,
             total_closed_variables: 0,
             current_chunk_idx: vec![0],
@@ -68,11 +66,10 @@ impl<'gc> Compiler<'gc> {
         variable_types: BlockNameMap,
         closed_names: ClosedNamesMap,
         gc: &'gc mut GC,
-    ) -> Result<(Vec<Vec<usize>>, Vec<Chunk>), String> {
+    ) -> Result<Vec<Chunk>, String> {
         let mut compiler = Compiler::new(variable_types, closed_names, gc);
 
         compiler.chunks = vec![Chunk::new("<script>".to_string(), 0)];
-        compiler.per_chunk_indices = vec![vec![]];
         let block_identifier = match program.as_ref() {
             Expr::Block(bb, _be, _) => bb,
             _ => &Token {
@@ -84,12 +81,10 @@ impl<'gc> Compiler<'gc> {
 
         compiler.require_nothing();
         let (mut indices, code) = compiler.visit_expr(program)?;
-        compiler.current_chunk().append(code);
-        compiler.current_indices().append(&mut indices);
+        compiler.current_chunk().append(code, indices);
         compiler.pop_requirement();
-        *compiler.current_chunk() += Opcode::Return;
-        compiler.current_indices().push(0);
-        Ok((compiler.per_chunk_indices, compiler.chunks))
+        *compiler.current_chunk() += (Opcode::Return, 0);
+        Ok(compiler.chunks)
     }
 
     fn require_value(&mut self) {
@@ -133,9 +128,7 @@ impl<'gc> Compiler<'gc> {
     }
 
     fn current_indices(&mut self) -> &mut Vec<usize> {
-        self.per_chunk_indices
-            .get_mut(*self.current_chunk_idx.last().unwrap())
-            .unwrap()
+        &mut self.current_chunk().opcode_to_line
     }
 
     fn lookup_local(&self, name: &str) -> Option<(VariableType, usize)> {
@@ -238,7 +231,6 @@ impl<'gc> Compiler<'gc> {
             format!("{} [{}]", name.get_string().unwrap(), name.position),
             arity,
         ));
-        self.per_chunk_indices.push(vec![]);
         self.current_chunk_idx.push(new_chunk_idx);
         self.current_function_was_possibly_overwritten.push(false);
         self.total_variables = 0;
@@ -321,16 +313,10 @@ impl<'gc> Compiler<'gc> {
                 .unwrap()
             {
                 let (_, real_idx) = self.lookup_local(arg.get_string().unwrap()).unwrap();
-                *self.current_chunk() += Opcode::NewBox;
-                *self.current_chunk() += Opcode::Duplicate;
-                *self.current_chunk() += Opcode::LoadLocal(real_idx as u16);
-                *self.current_chunk() += Opcode::StoreBox;
-
-                self.current_indices().push(name.position.0);
-                self.current_indices().push(name.position.0);
-                self.current_indices().push(name.position.0);
-                self.current_indices().push(name.position.0);
-
+                *self.current_chunk() += (Opcode::NewBox, name.position.0);
+                *self.current_chunk() += (Opcode::Duplicate, name.position.0);
+                *self.current_chunk() += (Opcode::LoadLocal(real_idx as u16), name.position.0);
+                *self.current_chunk() += (Opcode::StoreBox, name.position.0);
                 self.declare_local(arg.get_string().unwrap(), VariableType::Boxed);
                 self.define_local(arg.get_string().unwrap());
                 closed_arguments += 1;
@@ -342,16 +328,13 @@ impl<'gc> Compiler<'gc> {
         }
 
         self.require_return_value();
-        let (mut code_indices, code) = self.visit_expr(body)?;
+        let (code_indices, code) = self.visit_expr(body)?;
         self.pop_requirement();
-        self.current_chunk().append(code);
-        self.current_indices().append(&mut code_indices);
+        self.current_chunk().append(code, code_indices);
 
-        *self.current_chunk() += Opcode::Return;
-        {
-            let last = *self.current_indices().last().unwrap();
-            self.current_indices().push(last);
-        }
+        let return_index = *self.current_indices().last().unwrap();
+
+        *self.current_chunk() += (Opcode::Return, return_index);
 
         //load current compiler
         let new_chunk_idx = self.pop_function_compilation_state(prev_state);
