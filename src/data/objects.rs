@@ -1,14 +1,14 @@
 use crate::data::marked_counter::MarkedCounter;
 use crate::data::objects::StackObject::Function;
+use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{write, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
 pub type Value = StackObject;
 
-#[derive(Debug)]
 pub enum StackObject {
     Int(i64),
     Function { chunk_id: usize },
@@ -144,6 +144,50 @@ impl Display for StackObject {
     }
 }
 
+impl Debug for StackObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StackObject::Int(i) => write!(f, "Int {}", i),
+            StackObject::Function { chunk_id } => write!(f, "Function {}", chunk_id),
+            StackObject::Map(gc_ptr, ptr) => {
+                write!(f, "Map {:?} at {:p}", ptr.unwrap_ref(), gc_ptr.unwrap_ref())
+            }
+            StackObject::Vector(gc_ptr, ptr) => write!(
+                f,
+                "Vector {:?} at {:p}",
+                ptr.unwrap_ref(),
+                gc_ptr.unwrap_ref()
+            ),
+            StackObject::MutableString(gc_ptr, ptr) => write!(
+                f,
+                "MutStr \"{:?}\" at {:p}",
+                ptr.unwrap_ref(),
+                gc_ptr.unwrap_ref()
+            ),
+            StackObject::ConstantString(gc_ptr, ptr) => write!(
+                f,
+                "ConstStr {:?} at {:p}",
+                ptr.unwrap_ref(),
+                gc_ptr.unwrap_ref()
+            ),
+            StackObject::Box(gc_ptr, ptr) => write!(
+                f,
+                "Box [{:?}] at {:p}",
+                ptr.unwrap_ref(),
+                gc_ptr.unwrap_ref()
+            ),
+            StackObject::Closure(gc_ptr, ptr) => write!(
+                f,
+                "Closure (Function {}, values: {:?}) at {:p}",
+                ptr.unwrap_ref().chunk_id,
+                ptr.unwrap_ref().closed_values,
+                gc_ptr.unwrap_ref()
+            ),
+            StackObject::Builtin(name) => write!(f, "Builtin[{}]", name),
+        }
+    }
+}
+
 #[allow(dead_code)]
 impl StackObject {
     pub fn wrap_from_int(x: i64) -> StackObject {
@@ -192,9 +236,9 @@ impl StackObject {
         }
     }
 
-    pub fn unwrap_int(self) -> Option<i64> {
+    pub fn unwrap_int(&self) -> Option<i64> {
         match self {
-            StackObject::Int(n) => Some(n),
+            StackObject::Int(n) => Some(*n),
             _ => None,
         }
     }
@@ -234,6 +278,26 @@ impl StackObject {
             StackObject::Closure(_, _) => "Closure".to_string(),
             StackObject::Builtin(_) => "Builtin".to_string(),
         }
+    }
+
+    fn cmp_any_strings(obj1: &StackObject, obj2: &StackObject) -> Option<Ordering> {
+        match (obj1.unwrap_any_str(), obj2.unwrap_any_str()) {
+            (Some(s1), Some(s2)) => Some(s1.cmp(s2)),
+            _ => None,
+        }
+    }
+
+    fn cmp_ints(obj1: &StackObject, obj2: &StackObject) -> Option<Ordering> {
+        match (obj1.unwrap_int(), obj2.unwrap_int()) {
+            (Some(n1), Some(n2)) => Some(n1.cmp(&n2)),
+            _ => None,
+        }
+    }
+}
+
+impl PartialOrd for StackObject {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        StackObject::cmp_any_strings(self, other).or_else(|| StackObject::cmp_ints(self, other))
     }
 }
 

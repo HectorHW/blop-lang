@@ -1,6 +1,6 @@
 def sum(a, b) =
     def sum(a, b, acc) =
-        if a?=b
+        if a==b
             acc+a
         else
             sum(a+1, b, acc+a)
@@ -8,4 +8,4 @@ def sum(a, b) =
 
 var result = sum(1, 1000)
 print result
-assert result ?= 500500
+assert result == 500500

@@ -1,14 +1,14 @@
 def a(x) =
-    if x?=0
+    if x==0
         3
     else
         b(x-1)
 def b(x) =
-    if x?=0
+    if x==0
         3
     else
         a(x-1)
 
 var value = a(4)
-assert value ?=3
+assert value ==3
 print value

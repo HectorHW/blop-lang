@@ -83,6 +83,11 @@ impl Optimizer {
 
             na @ Expr::Name(..) => na,
 
+            Expr::Unary(op, a) => {
+                let a = self.visit_expr(a);
+                Expr::Unary(op, a)
+            }
+
             Expr::Binary(op, a, b) => {
                 let a = self.visit_expr(a);
                 let b = self.visit_expr(b);
@@ -125,7 +130,7 @@ impl Optimizer {
                                 position: token_a.position,
                                 kind: TokenKind::Number(na - nb),
                             }),
-                            TokenKind::TestEquals => Expr::Number(Token {
+                            TokenKind::CompareEquals => Expr::Number(Token {
                                 position: token_a.position,
                                 kind: TokenKind::Number(if na == nb { 1 } else { 0 }),
                             }),
