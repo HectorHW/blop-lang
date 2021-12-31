@@ -303,6 +303,15 @@ impl Checker {
             }
             Expr::SingleStatement(s) => self.visit_stmt(s),
             Expr::AnonFunction(args, name, body) => self.check_function(name, args, body),
+            Expr::PartialCall(target, args) => {
+                self.visit_expr(target)?;
+                for arg in args {
+                    if let Some(arg) = arg {
+                        self.visit_expr(arg)?;
+                    }
+                }
+                Ok(())
+            }
         }
     }
 

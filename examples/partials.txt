@@ -1,0 +1,40 @@
+def adder(arg1, arg2) =
+    arg1 + arg2
+
+# partials can be defined using underscore
+var add2 = adder(2, _)
+
+assert add2(1) == 3
+print add2(1)
+
+# you can use multiple underscores, turning function of N args into function of K args for K<N
+
+def asserter(arg1, arg2, arg3, arg4) =
+    assert arg1 == 1
+    assert arg2 == 2
+    assert arg3 == 3
+    assert arg4 == 4
+
+var partly_filled_asserter = asserter(_, 2, _, 4)
+partly_filled_asserter(1, 3) # replace 1st and 3rd args
+
+# it is also possible to chain partials
+var asserter_with_missing_arg1 = partly_filled_asserter(_, 3) # substitute 3rd arg, leave 1st blank
+
+asserter_with_missing_arg1(1)
+
+# it should be fine to use partials with closures (and other callables)
+
+var heap_stored = 1
+
+def closing(x, y) =
+    # y is not used
+    x * heap_stored
+
+var partial_closing = closing(_, 0)
+
+assert partial_closing(4) == 4
+
+heap_stored = 2
+
+assert partial_closing(4) == 8

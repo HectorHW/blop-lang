@@ -168,6 +168,15 @@ impl Optimizer {
                 Expr::Call(target, args)
             }
 
+            Expr::PartialCall(target, args) => {
+                let target = self.visit_expr(target);
+                let args = args
+                    .into_iter()
+                    .map(|a| a.map(|a| self.visit_expr(a)))
+                    .collect();
+                Expr::PartialCall(target, args)
+            }
+
             Expr::SingleStatement(s) => match s {
                 //singleStatement is artificial node representing block wit single statement
                 Stmt::Print(t, p) => Expr::SingleStatement(Stmt::Print(t, p)),

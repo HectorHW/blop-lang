@@ -920,6 +920,37 @@ impl<'gc> Compiler<'gc> {
                 }
             }
 
+            Expr::PartialCall(target, args) => {
+                self.require_value();
+                let (mut target_indices, mut target) = self.visit_expr(target)?;
+                self.pop_requirement();
+                let target_indices_copy = target_indices.clone();
+
+                result.append(&mut target);
+                source_indices.append(&mut target_indices);
+
+                for arg in args {
+                    if arg.is_none() {
+                        result.push(Opcode::LoadBlank);
+                        source_indices.push(*source_indices.last().unwrap());
+                        continue;
+                    }
+                    self.require_value();
+                    let (mut arg_indices, mut arg_code) = self.visit_expr(arg.as_ref().unwrap())?;
+                    result.append(&mut arg_code);
+                    source_indices.append(&mut arg_indices);
+                    self.pop_requirement();
+                }
+
+                result.push(Opcode::CallPartial(args.len() as u16));
+                source_indices.push(*target_indices_copy.last().unwrap());
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1));
+                    source_indices.push(*source_indices.last().unwrap());
+                }
+            }
+
             Expr::SingleStatement(s) => {
                 //propagate requirement
                 let (sub_indices, body) = self.visit_stmt(s)?;
