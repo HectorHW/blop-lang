@@ -2,7 +2,7 @@
 
 use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
 use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
-use crate::data::objects::{Closure, ValueBox};
+use crate::data::objects::{Closure, Partial, Value, ValueBox};
 use crate::execution::chunk::Chunk;
 use std::pin::Pin;
 
@@ -67,7 +67,13 @@ impl Clone for StackObject {
                 gc_ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::Closure(*gc_ptr, *obj_ptr)
             }
+            StackObject::Partial(gc_ptr, obj_ptr) => {
+                gc_ptr.unwrap_ref_mut().inc_gc_counter();
+                StackObject::Partial(*gc_ptr, *obj_ptr)
+            }
+
             StackObject::Builtin(s) => StackObject::Builtin(s),
+            StackObject::Blank => StackObject::Blank,
         }
     }
 }
@@ -82,7 +88,8 @@ impl Drop for StackObject {
             | StackObject::MutableString(gc_ptr, _)
             | StackObject::ConstantString(gc_ptr, _)
             | StackObject::Box(gc_ptr, _)
-            | StackObject::Closure(gc_ptr, _) => {
+            | StackObject::Closure(gc_ptr, _)
+            | StackObject::Partial(gc_ptr, _) => {
                 gc_ptr.unwrap_ref_mut().dec_gc_counter();
                 #[cfg(feature = "debug-gc")]
                 println!(
@@ -91,7 +98,7 @@ impl Drop for StackObject {
                     gc_ptr.unwrap_ref().marker.counter()
                 );
             }
-            StackObject::Builtin(..) => {}
+            StackObject::Builtin(..) | StackObject::Blank => {}
         }
     }
 }
@@ -127,6 +134,11 @@ impl OwnedObject {
                 let object_ptr = ptr.wrap_private();
                 StackObject::Closure(trace_ptr, object_ptr)
             }
+
+            OwnedObjectItem::Partial(ptr) => {
+                let object_ptr = ptr.wrap_private();
+                StackObject::Partial(trace_ptr, object_ptr)
+            }
         }
     }
 
@@ -160,6 +172,13 @@ impl OwnedObject {
                     closed_element.mark(value);
                 }
             }
+
+            OwnedObjectItem::Partial(ref partial) => {
+                partial.target.mark(value);
+                for stored_arg in &partial.args {
+                    stored_arg.mark(value);
+                }
+            }
         }
     }
 
@@ -188,6 +207,23 @@ impl OwnedObject {
             OwnedObjectItem::Closure(c) => {
                 let f = !c.closed_values.is_empty();
                 c.closed_values.clear();
+                f
+            }
+
+            OwnedObjectItem::Partial(partial) => {
+                let mut f = false;
+                if let StackObject::Blank = partial.target {
+                } else {
+                    let mut value = StackObject::Blank;
+                    std::mem::swap(&mut partial.target, &mut value);
+                    drop(value);
+                    f = true;
+                }
+
+                if !partial.args.is_empty() {
+                    f = true;
+                    partial.args.clear();
+                }
                 f
             }
         }
@@ -326,6 +362,19 @@ impl GCAlloc for Closure {
     fn store(_obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Closure(_obj),
+            marker: UNMARKED_ONE,
+        }
+    }
+}
+
+impl GCAlloc for Partial {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(_obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::Partial(_obj),
             marker: UNMARKED_ONE,
         }
     }
@@ -506,7 +555,8 @@ impl GC {
             | StackObject::Vector(..)
             | StackObject::Map(..)
             | StackObject::Closure(..)
-            | StackObject::Box(..) => {
+            | StackObject::Box(..)
+            | StackObject::Partial(..) => {
                 let owned_ref = obj.unwrap_traceable().expect("null ptr in clone");
                 let new_obj = owned_ref.clone();
                 let obj_boxed = Box::new(new_obj);
@@ -518,6 +568,7 @@ impl GC {
             }
 
             StackObject::Builtin(s) => StackObject::Builtin(s),
+            StackObject::Blank => StackObject::Blank,
         }
     }
 
@@ -571,6 +622,10 @@ impl GC {
         }
 
         self.store(_ConstHeapString(s.to_string()))
+    }
+
+    pub(crate) fn new_partial(&mut self, target: Value, args: Vec<Value>) -> StackObject {
+        self.store(Partial::new(target, args))
     }
 
     pub fn try_inplace_string_concat(

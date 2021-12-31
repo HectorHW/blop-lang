@@ -26,6 +26,7 @@ pub enum Expr {
     Block(Token, Token, Vec<Stmt>),
     SingleStatement(Stmt),
     Call(Box<Expr>, Vec<Box<Expr>>),
+    PartialCall(Box<Expr>, Vec<Option<Box<Expr>>>),
     AnonFunction(Vec<Token>, Token, Box<Expr>),
 }
 

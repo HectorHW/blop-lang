@@ -19,6 +19,8 @@ pub enum StackObject {
     Box(PrivatePtr<OwnedObject>, PrivatePtr<ValueBox>),
     Closure(PrivatePtr<OwnedObject>, PrivatePtr<Closure>),
     Builtin(&'static str),
+    Blank,
+    Partial(PrivatePtr<OwnedObject>, PrivatePtr<Partial>),
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +45,55 @@ pub struct Closure {
 }
 
 #[derive(Clone, Debug)]
+pub struct Partial {
+    pub target: Value,
+    pub args: Vec<Value>,
+}
+
+impl Partial {
+    pub fn new(target: Value, args: Vec<Value>) -> Self {
+        Partial { target, args }
+    }
+
+    pub fn count_blanks(&self) -> usize {
+        self.args
+            .iter()
+            .filter(|value| {
+                if let StackObject::Blank = value {
+                    true
+                } else {
+                    false
+                }
+            })
+            .count()
+    }
+
+    pub fn substitute(&self, values: VVec) -> Self {
+        let mut subs = values.into_iter();
+
+        let args = self
+            .args
+            .iter()
+            .map(|value| match value {
+                Value::Blank => {
+                    if let Some(substitute) = subs.next() {
+                        substitute
+                    } else {
+                        StackObject::Blank
+                    }
+                }
+                other => other.clone(),
+            })
+            .collect();
+
+        Partial {
+            target: self.target.clone(),
+            args,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum OwnedObjectItem {
     ConstantString(String),
     MutableString(String),
@@ -50,6 +101,7 @@ pub enum OwnedObjectItem {
     Map(VMap),
     Box(ValueBox),
     Closure(Closure),
+    Partial(Partial),
 }
 
 pub type VVec = Vec<StackObject>;
@@ -111,6 +163,8 @@ impl PtrWrapper for ValueBox {}
 
 impl PtrWrapper for Closure {}
 
+impl PtrWrapper for Partial {}
+
 impl Display for StackObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -140,6 +194,15 @@ impl Display for StackObject {
             StackObject::Builtin(s) => {
                 write!(f, "builtin<{}>", s)
             }
+            StackObject::Blank => {
+                write!(f, "Blank")
+            }
+            StackObject::Partial(_, ptr) => write!(
+                f,
+                "partial[{}] over {}",
+                ptr.unwrap_ref().args.len(),
+                ptr.unwrap_ref().target
+            ),
         }
     }
 }
@@ -184,6 +247,16 @@ impl Debug for StackObject {
                 gc_ptr.unwrap_ref()
             ),
             StackObject::Builtin(name) => write!(f, "Builtin[{}]", name),
+            StackObject::Blank => {
+                write!(f, "Blank")
+            }
+            StackObject::Partial(gc_ptr, ptr) => write!(
+                f,
+                "Partial over {} with args {:?} at {:p}",
+                ptr.unwrap_ref().target,
+                ptr.unwrap_ref().args,
+                gc_ptr.unwrap_ref()
+            ),
         }
     }
 }
@@ -203,7 +276,13 @@ impl StackObject {
                 object.0.can_hash()
             }
 
-            Map(..) | Vector(..) | Function { .. } | Closure(..) | Builtin(..) => false,
+            Map(..)
+            | Vector(..)
+            | Function { .. }
+            | Closure(..)
+            | Builtin(..)
+            | Blank
+            | Partial(..) => false,
         }
     }
 
@@ -243,6 +322,13 @@ impl StackObject {
         }
     }
 
+    pub fn unwrap_partial(&mut self) -> Option<&mut Partial> {
+        match self {
+            StackObject::Partial(_, ptr) => Some(ptr.unwrap_ref_mut()),
+            _ => None,
+        }
+    }
+
     pub(super) fn unwrap_traceable(&self) -> Option<&mut OwnedObject> {
         match self {
             StackObject::MutableString(trace_ptr, _)
@@ -251,10 +337,12 @@ impl StackObject {
             | StackObject::Box(trace_ptr, _)
             | StackObject::Closure(trace_ptr, _)
             | StackObject::ConstantString(trace_ptr, _) => Some(trace_ptr.unwrap_ref_mut()),
+            StackObject::Partial(trace_ptr, _) => Some(trace_ptr.unwrap_ref_mut()),
 
             StackObject::Int(_) => None,
             StackObject::Function { .. } => None,
             StackObject::Builtin(..) => None,
+            StackObject::Blank => None,
         }
     }
 
@@ -277,6 +365,8 @@ impl StackObject {
             StackObject::Box(_, _) => "Box".to_string(),
             StackObject::Closure(_, _) => "Closure".to_string(),
             StackObject::Builtin(_) => "Builtin".to_string(),
+            StackObject::Blank => "Blank".to_string(),
+            StackObject::Partial(..) => "Partial".to_string(),
         }
     }
 
@@ -344,6 +434,8 @@ impl Hash for StackObject {
             StackObject::Box(..) => panic!("cannot hash box"),
             StackObject::Closure(..) => panic!("cannot hash closure"),
             StackObject::Builtin(..) => panic!("cannot hash builtin"),
+            StackObject::Blank => panic!("cannot hash blank"),
+            StackObject::Partial(..) => panic!("cannot hash partial"),
         }
     }
 }

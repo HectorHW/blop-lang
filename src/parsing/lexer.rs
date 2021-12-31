@@ -50,6 +50,7 @@ pub enum TokenKind {
     CompareLessEqual,
 
     Arrow,
+    Blank,
 
     Equals,
 
@@ -107,6 +108,7 @@ impl Display for TokenKind {
                 TokenKind::And => "(and)".to_string(),
                 TokenKind::Not => "(not)".to_string(),
                 TokenKind::Arrow => "(=>)".to_string(),
+                TokenKind::Blank => "(_)".to_string(),
             }
         )
     }
@@ -161,6 +163,7 @@ impl<'input> Lexer<'input> {
             ("or", Or),
             ("and", And),
             ("not", Not),
+            ("_", Blank),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -321,7 +324,7 @@ impl<'input> Lexer<'input> {
                     result.push(token!(token_index, Number(number)));
                 }
 
-                x if x.is_alphabetic() => {
+                x if x.is_alphabetic() || x == '_' => {
                     let start_idx = self.compute_input_shift();
                     let token_index = self.compute_index();
 

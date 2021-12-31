@@ -4,6 +4,7 @@ use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::{Chunk, Opcode};
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::fmt::format;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
@@ -393,16 +394,51 @@ impl VM {
                 }
                 Opcode::Call(arity) => {
                     //check stack
-                    let arity = arity as usize;
-                    if self.stack.len() < arity + 1 {
-                        return Err(runtime_error!(StackUnderflow));
-                    }
+                    let mut arity = arity as usize;
 
-                    let object = self
+                    self.check_underflow(arity + 1)
+                        .map_err(|_e| runtime_error!(StackUnderflow))?;
+
+                    let mut object = self
                         .stack
                         .get(self.stack.len() - 1 - arity)
                         .cloned()
                         .unwrap();
+
+                    if object.unwrap_partial().is_some() {
+                        let final_length = self.stack.len().saturating_sub(arity);
+                        let args = self.stack.split_off(final_length);
+                        let mut target = checked_stack_pop!()?;
+                        
+                        //check that all blanks are filled for fully defined call
+                        if args.len() != target.unwrap_partial().unwrap().count_blanks() {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "expected {} args when calling partial but got {}",
+                                    target.unwrap_partial().unwrap().count_blanks(),
+                                    args.len()
+                                )
+                            }));
+                        }
+                        let mut supplied_partial =
+                            target.unwrap_partial().unwrap().substitute(args);
+                        //setup stack for defined call
+                        self.stack.push(supplied_partial.target);
+                        //we can no longer use arity from Call[N] as it applies to partial ant not
+                        //underlying function
+                        //
+                        //instead, get new arity from created functional args
+                        //(they are checked at CallPartial)
+                        arity = supplied_partial.args.len();
+                        self.stack.append(&mut supplied_partial.args);
+                        
+                        //rewrite reference to called object to newly pushed callable
+                        object = self
+                            .stack
+                            .get(self.stack.len() - 1 - arity)
+                            .cloned()
+                            .unwrap();
+                    }
 
                     if let Value::Builtin(name) = object {
                         let final_length = self.stack.len().saturating_sub(arity);
@@ -448,6 +484,38 @@ impl VM {
                             }));
                         }
                     }
+                }
+
+                Opcode::CallPartial(arity) => {
+                    let arity = arity as usize;
+
+                    self.check_underflow(arity + 1)
+                        .map_err(|_e| runtime_error!(StackUnderflow))?;
+                    /*right now we have on stack:
+                        1. some (probably) callable object
+                        2. arguments mixed with at least one blank, total of `arity`
+                    */
+                    let final_length = self.stack.len().saturating_sub(arity);
+                    let args = self.stack.split_off(final_length);
+                    let mut target = checked_stack_pop!()?;
+                    if !VM::is_callable(&target) {
+                        return Err(runtime_error!(TypeError {
+                            message: format!(
+                                "expected callable when performing partial call but got {}",
+                                target.type_string()
+                            )
+                        }));
+                    }
+
+                    let value = if let Some(partial) = target.unwrap_partial() {
+                        let subs_partial = partial.substitute(args);
+                        self.gc.store(subs_partial)
+                    } else {
+                        self.gc.new_partial(target, args)
+                    };
+
+                    self.stack.push(value);
+                    ip += 1;
                 }
 
                 Opcode::Return => {
@@ -576,6 +644,10 @@ impl VM {
                     self.stack.push(value);
                     ip += 1;
                 }
+                Opcode::LoadBlank => {
+                    self.stack.push(StackObject::Blank);
+                    ip += 1;
+                }
             }
             #[cfg(feature = "print-execution")]
             {
@@ -610,6 +682,23 @@ impl VM {
         }
 
         Ok(())
+    }
+
+    fn check_underflow(&self, needed_args: usize) -> std::result::Result<(), ()> {
+        if self.stack.len() < needed_args {
+            return Err(());
+        }
+        Ok(())
+    }
+
+    fn is_callable(value: &StackObject) -> bool {
+        matches!(
+            value,
+            StackObject::Function { .. }
+                | StackObject::Closure(_, _)
+                | StackObject::Builtin(_)
+                | StackObject::Partial(..)
+        )
     }
 }
 

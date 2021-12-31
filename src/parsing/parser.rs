@@ -7,6 +7,11 @@ macro_rules! t {
     };
 }
 
+enum CallVariant {
+    Normal(Vec<Box<Expr>>),
+    Partial(Vec<Option<Box<Expr>>>),
+}
+
 peg::parser! {
     pub grammar program_parser() for [Token] {
         use TokenKind::*;
@@ -161,14 +166,28 @@ peg::parser! {
             target:term() calls:call_parens()* {
                 let mut res = target;
                 for parens in calls {
-                res = Box::new(Expr::Call(res, parens))
+                match parens {
+                    CallVariant::Normal(args) => {
+                        res = Box::new(Expr::Call(res, args))
+                    }
+                    CallVariant::Partial(args) => {
+                        res = Box::new(Expr::PartialCall(res, args))
+                    }
+                }
             }
                 res
             }
             / term()
 
-        rule call_parens() -> Vec<Box<Expr>> =
-            [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {args}
+        rule call_parens() -> CallVariant =
+            [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {CallVariant::Normal(args)}
+        / [t!(LParen)] args:maybe_argument()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {
+            CallVariant::Partial(args)
+        }
+
+        rule maybe_argument() -> Option<Box<Expr>> =
+            e:simple_expr() {Some(e)}
+        / [t!(Blank)] {None}
 
         rule term() -> Box<Expr>
             = [num@t!(Number(..))] { Box::new(Expr::Number(num))}
