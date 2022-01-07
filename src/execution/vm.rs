@@ -4,7 +4,6 @@ use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::{Chunk, Opcode};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::format;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
@@ -50,6 +49,14 @@ pub enum InterpretErrorKind {
     NativeError { message: String },
 }
 
+enum InstructionExecution {
+    NextInstruction,
+    LocalJump(usize),
+    EnterChunk(usize),
+    CrossChunkJump { new_chunk_id: usize, new_ip: usize },
+    Termination,
+}
+
 impl VM {
     pub fn new() -> VM {
         VM {
@@ -73,6 +80,94 @@ impl VM {
         let mut ip = 0;
         let mut current_chunk_id = 0;
         let mut current_chunk = program.get(current_chunk_id).unwrap();
+
+        macro_rules! runtime_error {
+            ($e:expr) => {
+                InterpretError {
+                    opcode_index: ip,
+                    chunk_index: current_chunk_id,
+                    kind: $e,
+                }
+            };
+        }
+
+        while ip < current_chunk.code.len() {
+            #[cfg(feature = "print-execution")]
+            print!("{} => ", current_chunk.code[ip]);
+
+            let jump = self.execute_instruction(ip, current_chunk_id, program)?;
+
+            #[cfg(feature = "print-execution")]
+            {
+                print!("[");
+                for item in &self.stack[..self.locals_offset] {
+                    print!("{} ", item);
+                }
+                print!("| ");
+                for item in &self.stack[self.locals_offset..] {
+                    print!("{} ", item);
+                }
+                println!("]");
+            }
+
+            match jump {
+                InstructionExecution::NextInstruction => {
+                    ip += 1;
+                }
+
+                InstructionExecution::LocalJump(idx) => {
+                    ip = idx;
+                }
+
+                InstructionExecution::EnterChunk(chunk_id) => {
+                    ip = 0;
+                    current_chunk_id = chunk_id;
+                    current_chunk = &program[current_chunk_id];
+                }
+
+                InstructionExecution::CrossChunkJump {
+                    new_chunk_id,
+                    new_ip,
+                } => {
+                    ip = new_ip;
+                    current_chunk_id = new_chunk_id;
+                    current_chunk = &program[current_chunk_id];
+                }
+
+                InstructionExecution::Termination => return Ok(()),
+            }
+
+            if self.stack.len() > self.stack_max_size || self.call_stack.len() > self.stack_max_size
+            {
+                return Err(runtime_error!(StackOverflow));
+                //TODO include last stack frame?
+            }
+
+            unsafe {
+                self.gc.mark_and_sweep(self.stack.iter(), program);
+            }
+        }
+
+        if ip == current_chunk.code.len() {
+            return Err(InterpretError {
+                opcode_index: ip - 1,
+                chunk_index: current_chunk_id,
+                kind: InterpretErrorKind::MissedReturn,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn execute_instruction(
+        &mut self,
+        ip: usize,
+        current_chunk_id: usize,
+        chunks: &[Chunk],
+    ) -> Result<InstructionExecution> {
+        use InterpretErrorKind::*;
+
+        let current_chunk = &chunks[current_chunk_id];
 
         macro_rules! checked_stack_pop {
             () => {{
@@ -137,551 +232,511 @@ impl VM {
                     })),
                 }?;
                 self.stack.push(Value::Int(value));
-                ip += 1;
+                InstructionExecution::NextInstruction
             }};
         }
 
-        while ip < current_chunk.code.len() {
-            #[cfg(feature = "print-execution")]
-            print!("{} => ", current_chunk.code[ip]);
-            match current_chunk.code[ip] {
-                Opcode::Print => {
-                    let result = checked_stack_pop!()?;
-                    println!("{}", result);
-                    ip += 1;
-                }
-                Opcode::LoadConst(idx) => {
-                    let idx = idx as usize;
-                    let value = current_chunk
-                        .constants
-                        .get(idx)
-                        .cloned()
-                        .ok_or(runtime_error!(OperandIndexing))?;
-                    self.stack.push(value);
-                    ip += 1;
-                }
-                Opcode::LoadImmediateInt(i) => {
-                    self.stack.push(Value::Int(i as i64));
-                    ip += 1;
-                }
+        let jump = match current_chunk.code[ip] {
+            Opcode::Print => {
+                let result = checked_stack_pop!()?;
+                println!("{}", result);
+                InstructionExecution::NextInstruction
+            }
+            Opcode::LoadConst(idx) => {
+                let idx = idx as usize;
+                let value = current_chunk
+                    .constants
+                    .get(idx)
+                    .cloned()
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+            Opcode::LoadImmediateInt(i) => {
+                self.stack.push(Value::Int(i as i64));
+                InstructionExecution::NextInstruction
+            }
 
-                Opcode::Add => {
-                    //let second_operand = checked_stack_pop!()
-                    let second_operand = checked_stack_pop!()?;
-                    let first_operand = checked_stack_pop!()?;
+            Opcode::Add => {
+                //let second_operand = checked_stack_pop!()
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
 
-                    match (&first_operand, &second_operand) {
-                        (s1, s2)
-                            if s1.unwrap_any_str().is_some() && s2.unwrap_any_str().is_some() =>
-                        {
-                            let resulting_string = self
-                                .gc
-                                .try_inplace_string_concat(first_operand, second_operand)
-                                .map_err(|o| {
-                                    runtime_error!(InterpretErrorKind::TypeError { message: o })
-                                })?;
-                            self.stack.push(resulting_string);
-                        }
-
-                        (StackObject::Int(n1), StackObject::Int(n2)) => {
-                            self.stack.push(Value::Int(*n1 + *n2));
-                        }
-                        (other_1, other_2) => {
-                            return Err(runtime_error!(InterpretErrorKind::TypeError {
-                                message: format!(
-                                    "uncompatible types in Add (got {} and {})",
-                                    other_1.type_string(),
-                                    other_2.type_string()
-                                )
-                            }));
-                        }
+                match (&first_operand, &second_operand) {
+                    (s1, s2) if s1.unwrap_any_str().is_some() && s2.unwrap_any_str().is_some() => {
+                        let resulting_string = self
+                            .gc
+                            .try_inplace_string_concat(first_operand, second_operand)
+                            .map_err(|o| {
+                                runtime_error!(InterpretErrorKind::TypeError { message: o })
+                            })?;
+                        self.stack.push(resulting_string);
                     }
 
-                    ip += 1;
-                }
-
-                Opcode::Sub => {
-                    let second_operand = as_int!(checked_stack_pop!()?)?;
-                    let first_operand = as_int!(checked_stack_pop!()?)?;
-                    self.stack.push(Value::Int(first_operand - second_operand));
-                    ip += 1;
-                }
-
-                Opcode::Mul => {
-                    let second_operand = as_int!(checked_stack_pop!()?)?;
-                    let first_operand = as_int!(checked_stack_pop!()?)?;
-                    self.stack.push(Value::Int(first_operand * second_operand));
-                    ip += 1;
-                }
-
-                Opcode::Div => {
-                    let second_operand = as_int!(checked_stack_pop!()?)?;
-                    let first_operand = as_int!(checked_stack_pop!()?)?;
-
-                    let value = first_operand
-                        .checked_div(second_operand)
-                        .ok_or(runtime_error!(ZeroDivision))?;
-                    self.stack.push(Value::Int(value));
-                    ip += 1;
-                }
-
-                Opcode::Mod => {
-                    let second_operand = as_int!(checked_stack_pop!()?)?;
-                    let first_operand = as_int!(checked_stack_pop!()?)?;
-
-                    let value = first_operand
-                        .checked_rem(second_operand)
-                        .ok_or(runtime_error!(ZeroDivision))?;
-                    self.stack.push(Value::Int(value));
-                    ip += 1;
-                }
-
-                Opcode::Power => {
-                    let second_operand = as_int!(checked_stack_pop!()?)?;
-                    let first_operand = as_int!(checked_stack_pop!()?)?;
-                    let value = first_operand.pow(second_operand as u64 as u32);
-                    self.stack.push(Value::Int(value));
-                    ip += 1;
-                }
-
-                Opcode::LoadGlobal(idx) => {
-                    let key = current_chunk
-                        .global_names
-                        .get(idx as usize)
-                        .ok_or(runtime_error!(OperandIndexing))?;
-                    let value = self
-                        .globals
-                        .get(key)
-                        .cloned()
-                        .or_else(|| get_builtin(key))
-                        .ok_or(runtime_error!(InterpretErrorKind::NameError {
-                            name: key.clone()
-                        }))?;
-
-                    self.stack.push(value);
-                    ip += 1;
-                }
-
-                Opcode::LoadLocal(idx) => {
-                    let absolute_pos = self.locals_offset + idx as usize;
-                    let value = self
-                        .stack
-                        .get(absolute_pos)
-                        .cloned()
-                        .ok_or(runtime_error!(OperandIndexing))?;
-                    self.stack.push(value);
-                    ip += 1;
-                }
-
-                Opcode::StoreLocal(idx) => {
-                    let value = self.stack.pop().ok_or(runtime_error!(StackUnderflow))?;
-
-                    let absolute_pos = self.locals_offset + idx as usize;
-
-                    let addr = self
-                        .stack
-                        .get_mut(absolute_pos)
-                        .ok_or(runtime_error!(OperandIndexing))?;
-                    *addr = value;
-                    ip += 1;
-                }
-                Opcode::TestEquals => {
-                    let second_operand = checked_stack_pop!()?;
-                    let first_operand = checked_stack_pop!()?;
-                    let value = if second_operand == first_operand {
-                        1
-                    } else {
-                        0
-                    };
-                    self.stack.push(Value::Int(value));
-                    ip += 1;
-                }
-
-                Opcode::TestNotEquals => {
-                    let second_operand = checked_stack_pop!()?;
-                    let first_operand = checked_stack_pop!()?;
-                    let value = if second_operand != first_operand {
-                        1
-                    } else {
-                        0
-                    };
-                    self.stack.push(Value::Int(value));
-                    ip += 1;
-                }
-
-                Opcode::TestGreater => {
-                    comparison_operator!(Some(Ordering::Greater))
-                }
-
-                Opcode::TestGreaterEqual => {
-                    comparison_operator!(Some(Ordering::Equal | Ordering::Greater))
-                }
-
-                Opcode::TestLess => comparison_operator!(Some(Ordering::Less)),
-
-                Opcode::TestLessEqual => {
-                    comparison_operator!(Some(Ordering::Equal | Ordering::Less))
-                }
-
-                Opcode::JumpIfFalse(delta) => {
-                    let value_to_test = as_int!(checked_stack_pop!()?)?;
-                    if value_to_test == 0 {
-                        let new_ip = ip + delta as usize;
-                        if new_ip >= current_chunk.code.len() {
-                            return Err(runtime_error!(JumpBounds));
-                        }
-                        ip = new_ip;
-                    } else {
-                        ip += 1;
+                    (StackObject::Int(n1), StackObject::Int(n2)) => {
+                        self.stack.push(Value::Int(*n1 + *n2));
                     }
-                    self.stack.push(StackObject::Int(value_to_test));
-                }
-
-                Opcode::JumpIfTrue(delta) => {
-                    let value_to_test = as_int!(checked_stack_pop!()?)?;
-                    if value_to_test == 1 {
-                        let new_ip = ip + delta as usize;
-                        if new_ip >= current_chunk.code.len() {
-                            return Err(runtime_error!(JumpBounds));
-                        }
-                        ip = new_ip;
-                    } else {
-                        ip += 1;
+                    (other_1, other_2) => {
+                        return Err(runtime_error!(InterpretErrorKind::TypeError {
+                            message: format!(
+                                "uncompatible types in Add (got {} and {})",
+                                other_1.type_string(),
+                                other_2.type_string()
+                            )
+                        }));
                     }
-                    self.stack.push(StackObject::Int(value_to_test));
                 }
 
-                Opcode::JumpRelative(delta) => {
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Sub => {
+                let second_operand = as_int!(checked_stack_pop!()?)?;
+                let first_operand = as_int!(checked_stack_pop!()?)?;
+                self.stack.push(Value::Int(first_operand - second_operand));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Mul => {
+                let second_operand = as_int!(checked_stack_pop!()?)?;
+                let first_operand = as_int!(checked_stack_pop!()?)?;
+                self.stack.push(Value::Int(first_operand * second_operand));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Div => {
+                let second_operand = as_int!(checked_stack_pop!()?)?;
+                let first_operand = as_int!(checked_stack_pop!()?)?;
+
+                let value = first_operand
+                    .checked_div(second_operand)
+                    .ok_or(runtime_error!(ZeroDivision))?;
+                self.stack.push(Value::Int(value));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Mod => {
+                let second_operand = as_int!(checked_stack_pop!()?)?;
+                let first_operand = as_int!(checked_stack_pop!()?)?;
+
+                let value = first_operand
+                    .checked_rem(second_operand)
+                    .ok_or(runtime_error!(ZeroDivision))?;
+                self.stack.push(Value::Int(value));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Power => {
+                let second_operand = as_int!(checked_stack_pop!()?)?;
+                let first_operand = as_int!(checked_stack_pop!()?)?;
+                let value = first_operand.pow(second_operand as u64 as u32);
+                self.stack.push(Value::Int(value));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::LoadGlobal(idx) => {
+                let key = current_chunk
+                    .global_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                let value = self
+                    .globals
+                    .get(key)
+                    .cloned()
+                    .or_else(|| get_builtin(key))
+                    .ok_or(runtime_error!(InterpretErrorKind::NameError {
+                        name: key.clone()
+                    }))?;
+
+                self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::LoadLocal(idx) => {
+                let absolute_pos = self.locals_offset + idx as usize;
+                let value = self
+                    .stack
+                    .get(absolute_pos)
+                    .cloned()
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::StoreLocal(idx) => {
+                let value = self.stack.pop().ok_or(runtime_error!(StackUnderflow))?;
+
+                let absolute_pos = self.locals_offset + idx as usize;
+
+                let addr = self
+                    .stack
+                    .get_mut(absolute_pos)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                *addr = value;
+                InstructionExecution::NextInstruction
+            }
+            Opcode::TestEquals => {
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
+                let value = if second_operand == first_operand {
+                    1
+                } else {
+                    0
+                };
+                self.stack.push(Value::Int(value));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::TestNotEquals => {
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
+                let value = if second_operand != first_operand {
+                    1
+                } else {
+                    0
+                };
+                self.stack.push(Value::Int(value));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::TestGreater => {
+                comparison_operator!(Some(Ordering::Greater))
+            }
+
+            Opcode::TestGreaterEqual => {
+                comparison_operator!(Some(Ordering::Equal | Ordering::Greater))
+            }
+
+            Opcode::TestLess => comparison_operator!(Some(Ordering::Less)),
+
+            Opcode::TestLessEqual => {
+                comparison_operator!(Some(Ordering::Equal | Ordering::Less))
+            }
+
+            Opcode::JumpIfFalse(delta) => {
+                let value_to_test = as_int!(checked_stack_pop!()?)?;
+                let result = if value_to_test == 0 {
                     let new_ip = ip + delta as usize;
                     if new_ip >= current_chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
-                    ip = new_ip;
-                }
+                    InstructionExecution::LocalJump(new_ip)
+                } else {
+                    InstructionExecution::NextInstruction
+                };
+                self.stack.push(StackObject::Int(value_to_test));
+                result
+            }
 
-                Opcode::JumpAbsolute(idx) => {
-                    let new_ip = idx as usize;
+            Opcode::JumpIfTrue(delta) => {
+                let value_to_test = as_int!(checked_stack_pop!()?)?;
+                self.stack.push(StackObject::Int(value_to_test));
+                if value_to_test == 1 {
+                    let new_ip = ip + delta as usize;
                     if new_ip >= current_chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
-                    ip = new_ip;
+                    InstructionExecution::LocalJump(new_ip)
+                } else {
+                    InstructionExecution::NextInstruction
                 }
+            }
 
-                Opcode::Pop(n) => {
-                    if self.stack.len() < n as usize {
-                        return Err(runtime_error!(StackUnderflow));
+            Opcode::JumpRelative(delta) => {
+                let new_ip = ip + delta as usize;
+                if new_ip >= current_chunk.code.len() {
+                    return Err(runtime_error!(JumpBounds));
+                }
+                InstructionExecution::LocalJump(new_ip)
+            }
+
+            Opcode::JumpAbsolute(idx) => {
+                let new_ip = idx as usize;
+                if new_ip >= current_chunk.code.len() {
+                    return Err(runtime_error!(JumpBounds));
+                }
+                InstructionExecution::LocalJump(new_ip)
+            }
+
+            Opcode::Pop(n) => {
+                if self.stack.len() < n as usize {
+                    return Err(runtime_error!(StackUnderflow));
+                }
+                let new_stack_size = self.stack.len() - n as usize;
+                self.stack.truncate(new_stack_size);
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::LogicalNot => {
+                let value_to_test = as_int!(checked_stack_pop!()?)?;
+                self.stack.push(StackObject::Int(1 - value_to_test));
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Nop => InstructionExecution::NextInstruction,
+            Opcode::Assert => {
+                let value = as_int!(checked_stack_pop!()?)?;
+                if value == 0 {
+                    return Err(runtime_error!(AssertionFailure));
+                }
+                InstructionExecution::NextInstruction
+            }
+            Opcode::Call(arity) => {
+                //check stack
+                let mut arity = arity as usize;
+
+                self.check_underflow(arity + 1)
+                    .map_err(|_e| runtime_error!(StackUnderflow))?;
+
+                let mut object = self
+                    .stack
+                    .get(self.stack.len() - 1 - arity)
+                    .cloned()
+                    .unwrap();
+
+                if object.unwrap_partial().is_some() {
+                    let final_length = self.stack.len().saturating_sub(arity);
+                    let args = self.stack.split_off(final_length);
+                    let mut target = checked_stack_pop!()?;
+
+                    //check that all blanks are filled for fully defined call
+                    if args.len() != target.unwrap_partial().unwrap().count_blanks() {
+                        return Err(runtime_error!(TypeError {
+                            message: format!(
+                                "expected {} args when calling partial but got {}",
+                                target.unwrap_partial().unwrap().count_blanks(),
+                                args.len()
+                            )
+                        }));
                     }
-                    let new_stack_size = self.stack.len() - n as usize;
-                    self.stack.truncate(new_stack_size);
-                    ip += 1;
-                }
+                    let mut supplied_partial = target.unwrap_partial().unwrap().substitute(args);
+                    //setup stack for defined call
+                    self.stack.push(supplied_partial.target);
+                    //we can no longer use arity from Call[N] as it applies to partial ant not
+                    //underlying function
+                    //
+                    //instead, get new arity from created functional args
+                    //(they are checked at CallPartial)
+                    arity = supplied_partial.args.len();
+                    self.stack.append(&mut supplied_partial.args);
 
-                Opcode::LogicalNot => {
-                    let value_to_test = as_int!(checked_stack_pop!()?)?;
-                    self.stack.push(StackObject::Int(1 - value_to_test));
-                    ip += 1;
-                }
-
-                Opcode::Nop => {
-                    ip += 1;
-                }
-                Opcode::Assert => {
-                    let value = as_int!(checked_stack_pop!()?)?;
-                    if value == 0 {
-                        return Err(runtime_error!(AssertionFailure));
-                    }
-                    ip += 1;
-                }
-                Opcode::Call(arity) => {
-                    //check stack
-                    let mut arity = arity as usize;
-
-                    self.check_underflow(arity + 1)
-                        .map_err(|_e| runtime_error!(StackUnderflow))?;
-
-                    let mut object = self
+                    //rewrite reference to called object to newly pushed callable
+                    object = self
                         .stack
                         .get(self.stack.len() - 1 - arity)
                         .cloned()
                         .unwrap();
-
-                    if object.unwrap_partial().is_some() {
-                        let final_length = self.stack.len().saturating_sub(arity);
-                        let args = self.stack.split_off(final_length);
-                        let mut target = checked_stack_pop!()?;
-                        
-                        //check that all blanks are filled for fully defined call
-                        if args.len() != target.unwrap_partial().unwrap().count_blanks() {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "expected {} args when calling partial but got {}",
-                                    target.unwrap_partial().unwrap().count_blanks(),
-                                    args.len()
-                                )
-                            }));
-                        }
-                        let mut supplied_partial =
-                            target.unwrap_partial().unwrap().substitute(args);
-                        //setup stack for defined call
-                        self.stack.push(supplied_partial.target);
-                        //we can no longer use arity from Call[N] as it applies to partial ant not
-                        //underlying function
-                        //
-                        //instead, get new arity from created functional args
-                        //(they are checked at CallPartial)
-                        arity = supplied_partial.args.len();
-                        self.stack.append(&mut supplied_partial.args);
-                        
-                        //rewrite reference to called object to newly pushed callable
-                        object = self
-                            .stack
-                            .get(self.stack.len() - 1 - arity)
-                            .cloned()
-                            .unwrap();
-                    }
-
-                    if let Value::Builtin(name) = object {
-                        let final_length = self.stack.len().saturating_sub(arity);
-                        let args = self.stack.split_off(final_length);
-                        self.stack.pop(); //remove builtin
-                        let result = apply_builtin(name, &args);
-                        let result = result.map_err(|e| {
-                            runtime_error!(InterpretErrorKind::NativeError { message: e })
-                        })?;
-                        self.stack.push(result);
-                        ip += 1;
-                    } else {
-                        let chunk_id = match object {
-                            Value::Function { chunk_id } => Ok(chunk_id),
-                            Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().chunk_id),
-                            _ => Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "expected function but got {}",
-                                    object.type_string()
-                                )
-                            })),
-                        }?;
-
-                        self.call_stack.push(CallStackValue {
-                            return_chunk: current_chunk_id,
-                            return_ip: ip + 1,
-                            return_locals_offset: self.locals_offset,
-                            return_stack_size: self.stack.len() - 1 - arity,
-                        });
-
-                        self.locals_offset = self.stack.len() - 1 - arity;
-
-                        current_chunk_id = chunk_id;
-                        ip = 0;
-                        current_chunk = program.get(current_chunk_id).unwrap();
-
-                        if arity as usize != current_chunk.arity {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "mismatched arguments: expected {} but got {}",
-                                    current_chunk.arity, arity
-                                )
-                            }));
-                        }
-                    }
                 }
 
-                Opcode::CallPartial(arity) => {
-                    let arity = arity as usize;
-
-                    self.check_underflow(arity + 1)
-                        .map_err(|_e| runtime_error!(StackUnderflow))?;
-                    /*right now we have on stack:
-                        1. some (probably) callable object
-                        2. arguments mixed with at least one blank, total of `arity`
-                    */
+                if let Value::Builtin(name) = object {
                     let final_length = self.stack.len().saturating_sub(arity);
                     let args = self.stack.split_off(final_length);
-                    let mut target = checked_stack_pop!()?;
-                    if !VM::is_callable(&target) {
+                    self.stack.pop(); //remove builtin
+                    let result = apply_builtin(name, &args);
+                    let result = result.map_err(|e| {
+                        runtime_error!(InterpretErrorKind::NativeError { message: e })
+                    })?;
+                    self.stack.push(result);
+                    InstructionExecution::NextInstruction
+                } else {
+                    let chunk_id = match object {
+                        Value::Function { chunk_id } => Ok(chunk_id),
+                        Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().chunk_id),
+                        _ => Err(runtime_error!(TypeError {
+                            message: format!("expected function but got {}", object.type_string())
+                        })),
+                    }?;
+
+                    self.call_stack.push(CallStackValue {
+                        return_chunk: current_chunk_id,
+                        return_ip: ip + 1,
+                        return_locals_offset: self.locals_offset,
+                        return_stack_size: self.stack.len() - 1 - arity,
+                    });
+
+                    self.locals_offset = self.stack.len() - 1 - arity;
+
+                    let current_chunk_id = chunk_id;
+                    let current_chunk = chunks.get(current_chunk_id).unwrap();
+
+                    if arity as usize != chunks.get(chunk_id).unwrap().arity {
                         return Err(runtime_error!(TypeError {
                             message: format!(
-                                "expected callable when performing partial call but got {}",
-                                target.type_string()
+                                "mismatched arguments: expected {} but got {}",
+                                current_chunk.arity, arity
                             )
                         }));
-                    }
-
-                    let value = if let Some(partial) = target.unwrap_partial() {
-                        let subs_partial = partial.substitute(args);
-                        self.gc.store(subs_partial)
                     } else {
-                        self.gc.new_partial(target, args)
-                    };
-
-                    self.stack.push(value);
-                    ip += 1;
-                }
-
-                Opcode::Return => {
-                    if self.call_stack.is_empty() {
-                        return Ok(());
+                        InstructionExecution::EnterChunk(chunk_id)
                     }
-                    let return_info = self.call_stack.pop().unwrap();
+                }
+            }
 
-                    ip = return_info.return_ip;
-                    current_chunk_id = return_info.return_chunk;
-                    current_chunk = program.get(current_chunk_id).unwrap();
-                    self.locals_offset = return_info.return_locals_offset;
+            Opcode::CallPartial(arity) => {
+                let arity = arity as usize;
 
-                    let ret_value = checked_stack_pop!()?;
-                    if self.stack.len() < return_info.return_stack_size {
-                        return Err(runtime_error!(StackUnderflow));
+                self.check_underflow(arity + 1)
+                    .map_err(|_e| runtime_error!(StackUnderflow))?;
+                /*right now we have on stack:
+                    1. some (probably) callable object
+                    2. arguments mixed with at least one blank, total of `arity`
+                */
+                let final_length = self.stack.len().saturating_sub(arity);
+                let args = self.stack.split_off(final_length);
+                let mut target = checked_stack_pop!()?;
+                if !VM::is_callable(&target) {
+                    return Err(runtime_error!(TypeError {
+                        message: format!(
+                            "expected callable when performing partial call but got {}",
+                            target.type_string()
+                        )
+                    }));
+                }
+
+                let value = if let Some(partial) = target.unwrap_partial() {
+                    let subs_partial = partial.substitute(args);
+                    self.gc.store(subs_partial)
+                } else {
+                    self.gc.new_partial(target, args)
+                };
+
+                self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Return => {
+                if self.call_stack.is_empty() {
+                    return Ok(InstructionExecution::Termination);
+                }
+                let return_info = self.call_stack.pop().unwrap();
+
+                self.locals_offset = return_info.return_locals_offset;
+
+                let ret_value = checked_stack_pop!()?;
+                if self.stack.len() < return_info.return_stack_size {
+                    return Err(runtime_error!(StackUnderflow));
+                }
+
+                let new_stack_size = return_info.return_stack_size;
+                self.stack.truncate(new_stack_size);
+                self.stack.push(ret_value);
+                InstructionExecution::CrossChunkJump {
+                    new_chunk_id: return_info.return_chunk,
+                    new_ip: return_info.return_ip,
+                }
+            }
+            Opcode::NewBox => {
+                let box_ref = self.gc.allocate_new::<ValueBox>();
+                self.stack.push(box_ref);
+                InstructionExecution::NextInstruction
+            }
+            Opcode::LoadBox => {
+                match checked_stack_pop!()? {
+                    Value::Box(_gc, _obj) => {
+                        let box_obj = _obj.unwrap_ref_mut();
+                        self.stack.push(box_obj.0.clone());
                     }
-
-                    let new_stack_size = return_info.return_stack_size;
-                    self.stack.truncate(new_stack_size);
-                    self.stack.push(ret_value);
-                }
-                Opcode::NewBox => {
-                    let box_ref = self.gc.allocate_new::<ValueBox>();
-                    self.stack.push(box_ref);
-                    ip += 1;
-                }
-                Opcode::LoadBox => {
-                    match checked_stack_pop!()? {
-                        Value::Box(_gc, _obj) => {
-                            let box_obj = _obj.unwrap_ref_mut();
-                            self.stack.push(box_obj.0.clone());
-                        }
-                        _any_other => {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "expected {} but got {}",
-                                    "box",
-                                    _any_other.type_string()
-                                ),
-                            }))
-                        }
-                    };
-                    ip += 1;
-                }
-
-                Opcode::StoreBox => {
-                    let value = checked_stack_pop!()?;
-                    let addr = checked_stack_pop!()?;
-
-                    match addr {
-                        Value::Box(_gc, _obj) => {
-                            let box_obj = _obj.unwrap_ref_mut();
-                            box_obj.0 = value;
-                        }
-                        _any_other => {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "expected {} but got {}",
-                                    "box",
-                                    _any_other.type_string()
-                                ),
-                            }))
-                        }
-                    };
-                    ip += 1;
-                }
-
-                Opcode::NewClosure => {
-                    let value = checked_stack_pop!()?;
-                    let chunk_id = match value {
-                        Value::Function { chunk_id } => chunk_id,
-                        other => {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "expected {} but got {}",
-                                    "function",
-                                    other.type_string()
-                                )
-                            }))
-                        }
-                    };
-
-                    let ptr = self.gc.store(Closure {
-                        closed_values: vec![],
-                        chunk_id,
-                    });
-                    self.stack.push(ptr);
-                    ip += 1;
-                }
-
-                Opcode::AddClosedValue => {
-                    let value = checked_stack_pop!()?;
-                    let closure = checked_stack_pop!()?;
-
-                    match &closure {
-                        Value::Closure(_gc_ptr, closure_ptr) => {
-                            closure_ptr.unwrap_ref_mut().closed_values.push(value);
-                        }
-                        other => {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "expected {} but got {}",
-                                    "function",
-                                    other.type_string()
-                                )
-                            }))
-                        }
+                    _any_other => {
+                        return Err(runtime_error!(TypeError {
+                            message: format!(
+                                "expected {} but got {}",
+                                "box",
+                                _any_other.type_string()
+                            ),
+                        }))
                     }
-                    self.stack.push(closure);
-                    ip += 1;
-                }
-                Opcode::LoadClosureValue(idx) => {
-                    let closure = as_closure!(self.stack.get(self.locals_offset).unwrap())?;
-                    let value = closure
-                        .closed_values
-                        .get(idx as usize)
-                        .cloned()
-                        .ok_or(runtime_error!(OperandIndexing))?;
-                    self.stack.push(value);
-                    ip += 1;
-                }
-                Opcode::Duplicate => {
-                    let value = checked_stack_pop!()?;
-                    self.stack.push(value.clone());
-                    self.stack.push(value);
-                    ip += 1;
-                }
-                Opcode::LoadBlank => {
-                    self.stack.push(StackObject::Blank);
-                    ip += 1;
-                }
-            }
-            #[cfg(feature = "print-execution")]
-            {
-                print!("[");
-                for item in &self.stack[..self.locals_offset] {
-                    print!("{} ", item);
-                }
-                print!("| ");
-                for item in &self.stack[self.locals_offset..] {
-                    print!("{} ", item);
-                }
-                println!("]");
+                };
+                InstructionExecution::NextInstruction
             }
 
-            if self.stack.len() > self.stack_max_size || self.call_stack.len() > self.stack_max_size
-            {
-                return Err(runtime_error!(StackOverflow));
-                //TODO include last stack frame?
+            Opcode::StoreBox => {
+                let value = checked_stack_pop!()?;
+                let addr = checked_stack_pop!()?;
+
+                match addr {
+                    Value::Box(_gc, _obj) => {
+                        let box_obj = _obj.unwrap_ref_mut();
+                        box_obj.0 = value;
+                    }
+                    _any_other => {
+                        return Err(runtime_error!(TypeError {
+                            message: format!(
+                                "expected {} but got {}",
+                                "box",
+                                _any_other.type_string()
+                            ),
+                        }))
+                    }
+                };
+                InstructionExecution::NextInstruction
             }
 
-            unsafe {
-                self.gc.mark_and_sweep(self.stack.iter(), program);
+            Opcode::NewClosure => {
+                let value = checked_stack_pop!()?;
+                let chunk_id = match value {
+                    Value::Function { chunk_id } => chunk_id,
+                    other => {
+                        return Err(runtime_error!(TypeError {
+                            message: format!(
+                                "expected {} but got {}",
+                                "function",
+                                other.type_string()
+                            )
+                        }))
+                    }
+                };
+
+                let ptr = self.gc.store(Closure {
+                    closed_values: vec![],
+                    chunk_id,
+                });
+                self.stack.push(ptr);
+                InstructionExecution::NextInstruction
             }
-        }
 
-        if ip == current_chunk.code.len() {
-            return Err(InterpretError {
-                opcode_index: ip - 1,
-                chunk_index: current_chunk_id,
-                kind: InterpretErrorKind::MissedReturn,
-            });
-        }
+            Opcode::AddClosedValue => {
+                let value = checked_stack_pop!()?;
+                let closure = checked_stack_pop!()?;
 
-        Ok(())
+                match &closure {
+                    Value::Closure(_gc_ptr, closure_ptr) => {
+                        closure_ptr.unwrap_ref_mut().closed_values.push(value);
+                    }
+                    other => {
+                        return Err(runtime_error!(TypeError {
+                            message: format!(
+                                "expected {} but got {}",
+                                "function",
+                                other.type_string()
+                            )
+                        }))
+                    }
+                }
+                self.stack.push(closure);
+                InstructionExecution::NextInstruction
+            }
+            Opcode::LoadClosureValue(idx) => {
+                let closure = as_closure!(self.stack.get(self.locals_offset).unwrap())?;
+                let value = closure
+                    .closed_values
+                    .get(idx as usize)
+                    .cloned()
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+            Opcode::Duplicate => {
+                let value = checked_stack_pop!()?;
+                self.stack.push(value.clone());
+                self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+            Opcode::LoadBlank => {
+                self.stack.push(StackObject::Blank);
+                InstructionExecution::NextInstruction
+            }
+        };
+        Ok(jump)
     }
 
     fn check_underflow(&self, needed_args: usize) -> std::result::Result<(), ()> {
