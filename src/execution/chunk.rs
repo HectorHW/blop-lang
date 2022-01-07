@@ -29,6 +29,9 @@ pub enum Opcode {
     AddClosedValue,
     LoadClosureValue(u16),
 
+    LoadBlank,
+    CallPartial(u16),
+
     Duplicate,
 
     LoadImmediateInt(i16),
@@ -110,6 +113,10 @@ impl Display for Opcode {
                 Mod => "Mod".to_string(),
                 Power => "Power".to_string(),
                 LogicalNot => "Not".to_string(),
+                LoadBlank => {
+                    "LoadBlank".to_string()
+                }
+                CallPartial(idx) => format!("CallPartial[{}]", idx),
             }
         )
     }
@@ -149,6 +156,7 @@ impl Display for Chunk {
                 "chunk '{}' at {}",
                 match &self.name.kind {
                     TokenKind::Name(..) => self.name.get_string().unwrap(),
+                    TokenKind::Arrow => "<anon function>",
                     _ => panic!(),
                 },
                 self.name.position

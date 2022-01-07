@@ -7,6 +7,11 @@ macro_rules! t {
     };
 }
 
+enum CallVariant {
+    Normal(Vec<Box<Expr>>),
+    Partial(Vec<Option<Box<Expr>>>),
+}
+
 peg::parser! {
     pub grammar program_parser() for [Token] {
         use TokenKind::*;
@@ -40,8 +45,11 @@ peg::parser! {
                 Stmt::FunctionDeclaration{name:n, args, body}
             }
 
+        rule paren_name_list() -> Vec<Token> =
+            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {n}
+
         rule maybe_arguments_and_equals() -> Vec<Token> =
-            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] [t!(Equals)] {
+            n:paren_name_list() [t!(Equals)] {
                 n
             }
             / [t!(Equals)] {Vec::new()}
@@ -99,7 +107,14 @@ peg::parser! {
             b:block() {Box::new(Expr::Block(b.0, b.1, b.2))}
 
         rule simple_expr() -> Box<Expr> =
+            arrow() /
+
             arithmetic()
+
+        rule arrow() -> Box<Expr> =
+            p:paren_name_list() [t@t!(Arrow)] b:simple_expr() {
+            Box::new(Expr::AnonFunction(p, t, b))
+        }
 
         rule arithmetic() -> Box<Expr> = precedence! {
             x: (@) [op@t!(Or)] y:@
@@ -151,14 +166,28 @@ peg::parser! {
             target:term() calls:call_parens()* {
                 let mut res = target;
                 for parens in calls {
-                res = Box::new(Expr::Call(res, parens))
+                match parens {
+                    CallVariant::Normal(args) => {
+                        res = Box::new(Expr::Call(res, args))
+                    }
+                    CallVariant::Partial(args) => {
+                        res = Box::new(Expr::PartialCall(res, args))
+                    }
+                }
             }
                 res
             }
             / term()
 
-        rule call_parens() -> Vec<Box<Expr>> =
-            [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {args}
+        rule call_parens() -> CallVariant =
+            [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {CallVariant::Normal(args)}
+        / [t!(LParen)] args:maybe_argument()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {
+            CallVariant::Partial(args)
+        }
+
+        rule maybe_argument() -> Option<Box<Expr>> =
+            e:simple_expr() {Some(e)}
+        / [t!(Blank)] {None}
 
         rule term() -> Box<Expr>
             = [num@t!(Number(..))] { Box::new(Expr::Number(num))}

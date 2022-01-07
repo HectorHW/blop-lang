@@ -28,7 +28,7 @@ impl Optimizer {
         self.names
             .last_mut()
             .unwrap()
-            .insert(variable_name.get_string().unwrap().clone());
+            .insert(variable_name.get_string().unwrap().to_string());
     }
 
     fn new_scope(&mut self) {
@@ -168,6 +168,15 @@ impl Optimizer {
                 Expr::Call(target, args)
             }
 
+            Expr::PartialCall(target, args) => {
+                let target = self.visit_expr(target);
+                let args = args
+                    .into_iter()
+                    .map(|a| a.map(|a| self.visit_expr(a)))
+                    .collect();
+                Expr::PartialCall(target, args)
+            }
+
             Expr::SingleStatement(s) => match s {
                 //singleStatement is artificial node representing block wit single statement
                 Stmt::Print(t, p) => Expr::SingleStatement(Stmt::Print(t, p)),
@@ -213,6 +222,8 @@ impl Optimizer {
 
                 p @ Stmt::Pass(..) => Expr::SingleStatement(p),
             },
+
+            anon @ Expr::AnonFunction(..) => anon,
         };
         Box::new(expr)
     }

@@ -345,6 +345,48 @@ impl<'gc> Compiler<'gc> {
         Ok(new_chunk_idx)
     }
 
+    fn close_function(
+        &mut self,
+        function_name: &Token,
+    ) -> Result<(Vec<usize>, Vec<Opcode>), String> {
+        let mut result = vec![];
+        let mut source_indices = vec![];
+        if self.closed_names.get(function_name).unwrap().is_empty() {
+            return Ok((source_indices, result));
+        }
+
+        result.push(Opcode::NewClosure);
+        source_indices.push(function_name.position.0);
+
+        let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
+            .closed_names
+            .get(function_name)
+            .unwrap();
+
+        for closed_over_value in map_iter {
+            let name = self.lookup_uninit_local(closed_over_value).unwrap();
+
+            match name {
+                (VariableType::Normal, var_idx) => {
+                    result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
+                    source_indices.push(function_name.position.0);
+                }
+                (VariableType::Boxed, var_idx) => {
+                    result.push(Opcode::LoadLocal(var_idx as u16));
+                    source_indices.push(function_name.position.0);
+                }
+                (VariableType::Closed, idx) => {
+                    result.push(Opcode::LoadClosureValue(idx as u16));
+                    source_indices.push(function_name.position.0);
+                }
+            };
+            result.push(Opcode::AddClosedValue);
+            source_indices.push(function_name.position.0);
+        }
+
+        Ok((source_indices, result))
+    }
+
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<(Vec<usize>, Vec<Opcode>), String> {
         let mut result = vec![];
         let mut source_indices = vec![];
@@ -514,36 +556,10 @@ impl<'gc> Compiler<'gc> {
                 result.push(Opcode::LoadConst(const_idx as u16)); //code block
                 source_indices.push(function_name.position.0);
 
-                if !self.closed_names.get(function_name).unwrap().is_empty() {
-                    result.push(Opcode::NewClosure);
-                    source_indices.push(function_name.position.0);
-                }
+                let (mut indices, mut code) = self.close_function(function_name)?;
 
-                let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-                    .closed_names
-                    .get(function_name)
-                    .unwrap();
-
-                for closed_over_value in map_iter {
-                    let name = self.lookup_uninit_local(closed_over_value).unwrap();
-
-                    match name {
-                        (VariableType::Normal, var_idx) => {
-                            result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
-                            source_indices.push(function_name.position.0);
-                        }
-                        (VariableType::Boxed, var_idx) => {
-                            result.push(Opcode::LoadLocal(var_idx as u16));
-                            source_indices.push(function_name.position.0);
-                        }
-                        (VariableType::Closed, idx) => {
-                            result.push(Opcode::LoadClosureValue(idx as u16));
-                            source_indices.push(function_name.position.0);
-                        }
-                    };
-                    result.push(Opcode::AddClosedValue);
-                    source_indices.push(function_name.position.0);
-                }
+                result.append(&mut code);
+                source_indices.append(&mut indices);
 
                 //match self.lookup_local()
 
@@ -607,7 +623,7 @@ impl<'gc> Compiler<'gc> {
                 }
             }
             Expr::ConstString(s) => {
-                let obj_ptr = self.gc.new_const_string(s.get_string().unwrap().as_str());
+                let obj_ptr = self.gc.new_const_string(s.get_string().unwrap());
                 let constant_index = self.current_chunk().constants.len();
                 self.current_chunk().constants.push(obj_ptr);
                 result.push(Opcode::LoadConst(constant_index as u16));
@@ -766,7 +782,7 @@ impl<'gc> Compiler<'gc> {
                         let idx = self.current_chunk().global_names.len();
                         self.current_chunk()
                             .global_names
-                            .push(n.get_string().unwrap().clone());
+                            .push(n.get_string().unwrap().to_string());
                         idx
                     });
                     result.push(Opcode::LoadGlobal(idx as u16));
@@ -904,12 +920,64 @@ impl<'gc> Compiler<'gc> {
                 }
             }
 
+            Expr::PartialCall(target, args) => {
+                self.require_value();
+                let (mut target_indices, mut target) = self.visit_expr(target)?;
+                self.pop_requirement();
+                let target_indices_copy = target_indices.clone();
+
+                result.append(&mut target);
+                source_indices.append(&mut target_indices);
+
+                for arg in args {
+                    if arg.is_none() {
+                        result.push(Opcode::LoadBlank);
+                        source_indices.push(*source_indices.last().unwrap());
+                        continue;
+                    }
+                    self.require_value();
+                    let (mut arg_indices, mut arg_code) = self.visit_expr(arg.as_ref().unwrap())?;
+                    result.append(&mut arg_code);
+                    source_indices.append(&mut arg_indices);
+                    self.pop_requirement();
+                }
+
+                result.push(Opcode::CallPartial(args.len() as u16));
+                source_indices.push(*target_indices_copy.last().unwrap());
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1));
+                    source_indices.push(*source_indices.last().unwrap());
+                }
+            }
+
             Expr::SingleStatement(s) => {
                 //propagate requirement
                 let (sub_indices, body) = self.visit_stmt(s)?;
 
                 result = body;
                 source_indices = sub_indices;
+            }
+            Expr::AnonFunction(args, name, body) => {
+                let new_chunk_idx = self.compile_function(name, args, body)?;
+
+                let const_idx = self.current_chunk().constants.len();
+                self.current_chunk().constants.push(Value::Function {
+                    chunk_id: new_chunk_idx,
+                });
+
+                result.push(Opcode::LoadConst(const_idx as u16)); //code block
+                source_indices.push(name.position.0);
+
+                let (mut indices, mut code) = self.close_function(name)?;
+
+                result.append(&mut code);
+                source_indices.append(&mut indices);
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1));
+                    source_indices.push(name.position.0);
+                }
             }
         }
 
