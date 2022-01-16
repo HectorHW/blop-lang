@@ -6,6 +6,7 @@ use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::TokenKind::BeginBlock;
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use std::collections::HashMap;
+use std::ops::AddAssign;
 
 enum ValueRequirement {
     Nothing,
@@ -86,8 +87,8 @@ impl<'gc> Compiler<'gc> {
         compiler.new_scope(block_identifier);
 
         compiler.require_nothing();
-        let (indices, code) = compiler.visit_expr(program)?;
-        compiler.current_chunk().append(code, indices);
+        let blob = compiler.visit_expr(program)?;
+        compiler.current_chunk().append(blob.code, blob.indices);
         compiler.pop_requirement();
         *compiler.current_chunk() += (Opcode::Return, 0);
         Ok(compiler.chunks)
@@ -331,9 +332,9 @@ impl<'gc> Compiler<'gc> {
         }
 
         self.require_return_value();
-        let (code_indices, code) = self.visit_expr(body)?;
+        let AnnotatedCodeBlob { code, indices } = self.visit_expr(body)?;
         self.pop_requirement();
-        self.current_chunk().append(code, code_indices);
+        self.current_chunk().append(code, indices);
 
         let return_index = *self.current_indices().last().unwrap();
 
@@ -345,18 +346,13 @@ impl<'gc> Compiler<'gc> {
         Ok(new_chunk_idx)
     }
 
-    fn close_function(
-        &mut self,
-        function_name: &Token,
-    ) -> Result<(Vec<usize>, Vec<Opcode>), String> {
-        let mut result = vec![];
-        let mut source_indices = vec![];
+    fn close_function(&mut self, function_name: &Token) -> Result<AnnotatedCodeBlob, String> {
+        let mut result = AnnotatedCodeBlob::new();
         if self.closed_names.get(function_name).unwrap().is_empty() {
-            return Ok((source_indices, result));
+            return Ok(result);
         }
 
-        result.push(Opcode::NewClosure);
-        source_indices.push(function_name.position.0);
+        result.push(Opcode::NewClosure, function_name.position.0);
 
         let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
             .closed_names
@@ -368,76 +364,64 @@ impl<'gc> Compiler<'gc> {
 
             match name {
                 (VariableType::Normal, var_idx) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
-                    source_indices.push(function_name.position.0);
+                    result.push(Opcode::LoadLocal(var_idx as u16), function_name.position.0);
+                    //TODO extension
                 }
                 (VariableType::Boxed, var_idx) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16));
-                    source_indices.push(function_name.position.0);
+                    result.push(Opcode::LoadLocal(var_idx as u16), function_name.position.0);
                 }
                 (VariableType::Closed, idx) => {
-                    result.push(Opcode::LoadClosureValue(idx as u16));
-                    source_indices.push(function_name.position.0);
+                    result.push(
+                        Opcode::LoadClosureValue(idx as u16),
+                        function_name.position.0,
+                    );
                 }
             };
-            result.push(Opcode::AddClosedValue);
-            source_indices.push(function_name.position.0);
+            result.push(Opcode::AddClosedValue, function_name.position.0);
         }
 
-        Ok((source_indices, result))
+        Ok(result)
     }
 
-    fn visit_stmt(&mut self, stmt: &Stmt) -> Result<(Vec<usize>, Vec<Opcode>), String> {
-        let mut result = vec![];
-        let mut source_indices = vec![];
+    fn visit_stmt(&mut self, stmt: &Stmt) -> Result<AnnotatedCodeBlob, String> {
+        let mut result = AnnotatedCodeBlob::new();
         match stmt {
             Stmt::Print(t, e) => {
                 self.require_value();
-                let (mut indices, mut compiled_expression) = self.visit_expr(e)?;
+                let compiled_expression = self.visit_expr(e)?;
                 self.pop_requirement();
-                result.append(&mut compiled_expression);
-                source_indices.append(&mut indices);
-                result.push(Opcode::Print);
-                source_indices.push(t.position.0);
+                result.append(compiled_expression);
+                result.push(Opcode::Print, t.position.0);
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0));
-                    source_indices.push(t.position.0);
+                    result.push(Opcode::LoadImmediateInt(0), t.position.0);
                 }
             }
 
             Stmt::VarDeclaration(n, e) => {
                 match self.lookup_block(n.get_string().unwrap()) {
                     Some((VariableType::Boxed, idx)) => {
-                        result.push(Opcode::LoadLocal(idx as u16)); //load box
-                        source_indices.push(n.position.0);
+                        result.push(Opcode::LoadLocal(idx as u16), n.position.0); //load box
                         if e.is_none() {
-                            result.push(Opcode::LoadImmediateInt(0));
-                            source_indices.push(n.position.0);
+                            result.push(Opcode::LoadImmediateInt(0), n.position.0);
                         } else {
                             self.require_value();
-                            let (mut indices, mut assignment_body) =
-                                self.visit_expr(e.as_ref().unwrap())?;
+                            let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
                             self.pop_requirement();
-                            result.append(&mut assignment_body);
-                            source_indices.append(&mut indices);
+                            result.append(assignment_body);
                         }
-                        result.push(Opcode::StoreBox);
-                        source_indices.push(n.position.0);
+                        result.push(Opcode::StoreBox, n.position.0);
                     }
 
                     None => {
                         //variable is not forward-declared => not present on stack yet
                         if e.is_none() {
-                            result.push(Opcode::LoadImmediateInt(0));
-                            source_indices.push(n.position.0);
+                            result.push(Opcode::LoadImmediateInt(0), n.position.0);
                         } else {
                             self.require_value();
-                            let (mut indices, mut assignment_body) =
-                                self.visit_expr(e.as_ref().unwrap())?;
+                            let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
                             self.pop_requirement();
-                            result.append(&mut assignment_body);
-                            source_indices.append(&mut indices);
+                            result.append(assignment_body);
                         }
                         let varname = n.get_string().unwrap();
                         let _ = self
@@ -449,8 +433,8 @@ impl<'gc> Compiler<'gc> {
                 self.define_local(n.get_string().unwrap());
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0)); //TODO dup?
-                    source_indices.push(*source_indices.last().unwrap());
+                    result.push(Opcode::LoadImmediateInt(0), result.last_index().unwrap());
+                    //TODO dup?
                 }
             }
 
@@ -475,12 +459,10 @@ impl<'gc> Compiler<'gc> {
                 //maybe we need to load pointer
                 match var_type {
                     VariableType::Boxed => {
-                        result.push(Opcode::LoadLocal(var_idx as u16));
-                        source_indices.push(target.position.0);
+                        result.push(Opcode::LoadLocal(var_idx as u16), target.position.0);
                     }
                     VariableType::Closed => {
-                        result.push(Opcode::LoadClosureValue(var_idx as u16));
-                        source_indices.push(target.position.0);
+                        result.push(Opcode::LoadClosureValue(var_idx as u16), target.position.0);
                     }
                     VariableType::Normal => {
                         //nothing
@@ -488,50 +470,42 @@ impl<'gc> Compiler<'gc> {
                 }
 
                 self.require_value();
-                let (mut indices, mut expr_body) = self.visit_expr(expr)?;
+                let expr_body = self.visit_expr(expr)?;
                 self.pop_requirement();
 
-                result.append(&mut expr_body);
-                source_indices.append(&mut indices);
+                result.append(expr_body);
 
                 match var_type {
                     VariableType::Normal => {
-                        result.push(Opcode::StoreLocal(var_idx as u16)); //TODO extension
-                        source_indices.push(target.position.0);
+                        result.push(Opcode::StoreLocal(var_idx as u16), target.position.0);
+                        //TODO extension
                     }
                     VariableType::Boxed => {
-                        result.push(Opcode::StoreBox);
-                        source_indices.push(target.position.0);
+                        result.push(Opcode::StoreBox, target.position.0);
                     }
                     VariableType::Closed => {
-                        result.push(Opcode::StoreBox);
-                        source_indices.push(target.position.0);
+                        result.push(Opcode::StoreBox, target.position.0);
                     }
                 }
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0));
-                    source_indices.push(target.position.0);
+                    result.push(Opcode::LoadImmediateInt(0), target.position.0);
                 }
             }
 
             Stmt::Expression(e) => {
-                let (mut indices, mut body) = self.visit_expr(e)?;
-                result.append(&mut body);
-                source_indices.append(&mut indices);
+                let body = self.visit_expr(e)?;
+                result.append(body);
             }
 
             Stmt::Assert(token, expr) => {
                 self.require_value();
-                let (mut indices, mut body) = self.visit_expr(expr)?;
+                let body = self.visit_expr(expr)?;
                 self.pop_requirement();
-                result.append(&mut body);
-                source_indices.append(&mut indices);
-                result.push(Opcode::Assert);
-                source_indices.push(token.position.0);
+                result.append(body);
+                result.push(Opcode::Assert, token.position.0);
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0));
-                    source_indices.push(token.position.0);
+                    result.push(Opcode::LoadImmediateInt(0), token.position.0);
                 }
             }
 
@@ -549,25 +523,24 @@ impl<'gc> Compiler<'gc> {
 
                 if let Some((_, idx)) = self.lookup_block(function_name.get_string().unwrap()) {
                     //load pointer
-                    result.push(Opcode::LoadLocal(idx as u16));
-                    source_indices.push(function_name.position.0);
+                    result.push(Opcode::LoadLocal(idx as u16), function_name.position.0);
                 }
 
-                result.push(Opcode::LoadConst(const_idx as u16)); //code block
-                source_indices.push(function_name.position.0);
+                result.push(
+                    Opcode::LoadConst(const_idx as u16),
+                    function_name.position.0,
+                ); //code block
 
-                let (mut indices, mut code) = self.close_function(function_name)?;
+                let code = self.close_function(function_name)?;
 
-                result.append(&mut code);
-                source_indices.append(&mut indices);
+                result.append(code);
 
                 //match self.lookup_local()
 
                 match self.lookup_block(function_name.get_string().unwrap()) {
                     Some((VariableType::Boxed, _)) => {
                         //pointer is on stack
-                        result.push(Opcode::StoreBox);
-                        source_indices.push(function_name.position.0);
+                        result.push(Opcode::StoreBox, function_name.position.0);
                     }
                     None => {
                         self.declare_local(
@@ -586,80 +559,77 @@ impl<'gc> Compiler<'gc> {
                 self.define_local(function_name.get_string().unwrap());
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0));
-                    source_indices.push(function_name.position.0);
+                    result.push(Opcode::LoadImmediateInt(0), function_name.position.0);
                 }
             }
             Stmt::Pass(token) => {
-                if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0));
-                } else {
-                    result.push(Opcode::Nop);
-                }
-                source_indices.push(token.position.0);
+                result.push(
+                    if self.needs_value() {
+                        Opcode::LoadImmediateInt(0)
+                    } else {
+                        Opcode::Nop
+                    },
+                    token.position.0,
+                );
             }
         }
-        Ok((source_indices, result))
+
+        Ok(result)
     }
 
-    fn visit_expr(&mut self, expr: &Expr) -> Result<(Vec<usize>, Vec<Opcode>), String> {
-        let mut result = vec![];
-        let mut source_indices = vec![];
+    fn visit_expr(&mut self, expr: &Expr) -> Result<AnnotatedCodeBlob, String> {
+        let mut result = AnnotatedCodeBlob::new();
         match expr {
             Expr::Number(token) => {
                 let n = token.get_number().unwrap();
                 if n >= (i16::MIN as i64) && n <= (i16::MAX as i64) {
-                    result.push(Opcode::LoadImmediateInt(n as i16));
-                    source_indices.push(token.position.0);
+                    result += (Opcode::LoadImmediateInt(n as i16), token.position.0);
                 } else {
                     let constant_index = self.current_chunk().constants.len();
                     self.current_chunk().constants.push(Value::Int(n));
-                    result.push(Opcode::LoadConst(constant_index as u16)); //TODO extension
-                    source_indices.push(token.position.0);
+                    result += (Opcode::LoadConst(constant_index as u16), token.position.0);
+                    //TODO extension
                 }
                 if !self.needs_value() {
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(token.position.0);
+                    result += (Opcode::Pop(1), token.position.0);
                 }
             }
             Expr::ConstString(s) => {
                 let obj_ptr = self.gc.new_const_string(s.get_string().unwrap());
                 let constant_index = self.current_chunk().constants.len();
                 self.current_chunk().constants.push(obj_ptr);
-                result.push(Opcode::LoadConst(constant_index as u16));
-                source_indices.push(s.position.0);
+                result.push(Opcode::LoadConst(constant_index as u16), s.position.0);
                 if !self.needs_value() {
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(s.position.0);
+                    result.push(Opcode::Pop(1), s.position.0);
                 }
             }
 
             Expr::Unary(op, a) => {
                 self.require_value();
-                let (mut indices_a, mut a) = self.visit_expr(a)?;
+                let expr = self.visit_expr(a)?;
                 self.pop_requirement();
 
-                result.append(&mut a);
-                source_indices.append(&mut indices_a);
+                result.append(expr);
 
-                result.push(match &op.kind {
-                    TokenKind::Not => Opcode::LogicalNot,
-                    other => {
-                        panic!("unimplemented unary operator {} [{}]", other, op.position)
-                    }
-                });
-                source_indices.push(op.position.0);
+                result.push(
+                    match &op.kind {
+                        TokenKind::Not => Opcode::LogicalNot,
+                        other => {
+                            panic!("unimplemented unary operator {} [{}]", other, op.position)
+                        }
+                    },
+                    op.position.0,
+                );
 
                 if !self.needs_value() {
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(op.position.0);
+                    result.push(Opcode::Pop(1), op.position.0);
                 }
             }
 
             Expr::Binary(op, a, b) => {
                 self.require_value();
-                let (mut indices_a, mut a) = self.visit_expr(a)?;
-                let (mut indices_b, mut b) = self.visit_expr(b)?;
+                let a = self.visit_expr(a)?;
+                let b = self.visit_expr(b)?;
                 self.pop_requirement();
 
                 if let TokenKind::Or = op.kind {
@@ -673,17 +643,16 @@ impl<'gc> Compiler<'gc> {
                      */
 
                     //eval (A)
-                    result.append(&mut a);
-                    source_indices.append(&mut indices_a);
+                    result.append(a);
                     //jump PAST (POP eval(B))
-                    result.push(Opcode::JumpIfTrue((b.len() + 1 + 1) as u16));
-                    source_indices.push(op.position.0);
+                    result.push(
+                        Opcode::JumpIfTrue((b.code.len() + 1 + 1) as u16),
+                        op.position.0,
+                    );
                     //pop
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(op.position.0);
+                    result.push(Opcode::Pop(1), op.position.0);
                     //eval(B)
-                    result.append(&mut b);
-                    source_indices.append(&mut indices_b);
+                    result.append(b);
                 } else if let TokenKind::And = op.kind {
                     /*
                     evaluation scheme:
@@ -696,78 +665,68 @@ impl<'gc> Compiler<'gc> {
                      */
 
                     //eval (A)
-                    result.append(&mut a);
-                    source_indices.append(&mut indices_a);
+                    result.append(a);
                     //jump PAST (POP eval(B))
-                    result.push(Opcode::JumpIfFalse((b.len() + 1 + 1) as u16));
-                    source_indices.push(op.position.0);
+                    result.push(
+                        Opcode::JumpIfFalse((b.code.len() + 1 + 1) as u16),
+                        op.position.0,
+                    );
                     //pop
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(op.position.0);
+                    result.push(Opcode::Pop(1), op.position.0);
                     //eval(B)
-                    result.append(&mut b);
-                    source_indices.append(&mut indices_b);
+                    result.append(b);
                 } else {
-                    result.append(&mut a);
-                    source_indices.append(&mut indices_a);
-                    result.append(&mut b);
-                    source_indices.append(&mut indices_b);
+                    result.append(a);
 
-                    result.push(match &op.kind {
-                        TokenKind::Star => Opcode::Mul,
-                        TokenKind::Slash => Opcode::Div,
-                        TokenKind::Plus => Opcode::Add,
-                        TokenKind::Minus => Opcode::Sub,
-                        TokenKind::CompareEquals => Opcode::TestEquals,
-                        TokenKind::CompareNotEquals => Opcode::TestNotEquals,
-                        TokenKind::CompareGreater => Opcode::TestGreater,
-                        TokenKind::CompareGreaterEqual => Opcode::TestGreaterEqual,
-                        TokenKind::CompareLess => Opcode::TestLess,
-                        TokenKind::CompareLessEqual => Opcode::TestLessEqual,
-                        TokenKind::Mod => Opcode::Mod,
-                        TokenKind::Power => Opcode::Power,
-                        other => {
-                            panic!("unimplemented binary operator {} [{}]", other, op.position)
-                        }
-                    });
-                    source_indices.push(op.position.0);
+                    result.append(b);
+                    result.push(
+                        match &op.kind {
+                            TokenKind::Star => Opcode::Mul,
+                            TokenKind::Slash => Opcode::Div,
+                            TokenKind::Plus => Opcode::Add,
+                            TokenKind::Minus => Opcode::Sub,
+                            TokenKind::CompareEquals => Opcode::TestEquals,
+                            TokenKind::CompareNotEquals => Opcode::TestNotEquals,
+                            TokenKind::CompareGreater => Opcode::TestGreater,
+                            TokenKind::CompareGreaterEqual => Opcode::TestGreaterEqual,
+                            TokenKind::CompareLess => Opcode::TestLess,
+                            TokenKind::CompareLessEqual => Opcode::TestLessEqual,
+                            TokenKind::Mod => Opcode::Mod,
+                            TokenKind::Power => Opcode::Power,
+                            other => {
+                                panic!("unimplemented binary operator {} [{}]", other, op.position)
+                            }
+                        },
+                        op.position.0,
+                    );
                 }
 
                 if !self.needs_value() {
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(op.position.0);
+                    result.push(Opcode::Pop(1), op.position.0);
                 }
             }
 
             Expr::Name(n) => match self.lookup_local(n.get_string().unwrap()) {
                 Some((VariableType::Normal, var_idx)) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16)); //TODO extension
-                    source_indices.push(n.position.0);
+                    result.push(Opcode::LoadLocal(var_idx as u16), n.position.0); //TODO extension
                     if !self.needs_value() {
-                        result.push(Opcode::Pop(1));
-                        source_indices.push(n.position.0);
+                        result.push(Opcode::Pop(1), n.position.0);
                     }
                 }
 
                 Some((VariableType::Boxed, var_idx)) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16));
-                    source_indices.push(n.position.0);
-                    result.push(Opcode::LoadBox);
-                    source_indices.push(n.position.0);
+                    result.push(Opcode::LoadLocal(var_idx as u16), n.position.0);
+                    result.push(Opcode::LoadBox, n.position.0);
                     if !self.needs_value() {
-                        result.push(Opcode::Pop(1));
-                        source_indices.push(n.position.0);
+                        result.push(Opcode::Pop(1), n.position.0);
                     }
                 }
 
                 Some((VariableType::Closed, idx)) => {
-                    result.push(Opcode::LoadClosureValue(idx as u16));
-                    source_indices.push(n.position.0);
-                    result.push(Opcode::LoadBox);
-                    source_indices.push(n.position.0);
+                    result.push(Opcode::LoadClosureValue(idx as u16), n.position.0);
+                    result.push(Opcode::LoadBox, n.position.0);
                     if !self.needs_value() {
-                        result.push(Opcode::Pop(1));
-                        source_indices.push(n.position.0);
+                        result.push(Opcode::Pop(1), n.position.0);
                     }
                 }
 
@@ -785,81 +744,78 @@ impl<'gc> Compiler<'gc> {
                             .push(n.get_string().unwrap().to_string());
                         idx
                     });
-                    result.push(Opcode::LoadGlobal(idx as u16));
-                    source_indices.push(n.position.0);
+                    result.push(Opcode::LoadGlobal(idx as u16), n.position.0);
 
                     if !self.needs_value() {
-                        result.push(Opcode::Pop(1));
-                        source_indices.push(n.position.0);
+                        result.push(Opcode::Pop(1), n.position.0);
                     }
                 }
             },
 
             Expr::IfExpr(cond, then_body, else_body) => {
                 self.require_value();
-                let (mut cond_indices, mut condition) = self.visit_expr(cond)?;
+                let condition = self.visit_expr(cond)?;
                 self.pop_requirement();
 
-                let (mut then_indices, mut then_body) = self.visit_expr(then_body)?;
+                let then_body = self.visit_expr(then_body)?;
 
-                let (mut else_indices, mut else_body) = else_body
+                let else_body = else_body
                     .as_ref()
                     .map(|x| self.visit_expr(x.as_ref()))
                     .unwrap_or_else(|| {
-                        Ok(if self.needs_value() {
-                            (
-                                vec![*cond_indices.get(0).unwrap()],
-                                vec![Opcode::LoadImmediateInt(0)],
-                            )
+                        let mut blob = AnnotatedCodeBlob::new();
+                        if self.needs_value() {
+                            {
+                                blob += (
+                                    Opcode::LoadImmediateInt(0),
+                                    *condition.indices.get(0).unwrap(),
+                                );
+                            }
                         } else {
-                            (vec![*cond_indices.get(0).unwrap()], vec![Opcode::Nop])
-                        })
+                            blob += (Opcode::Nop, *condition.indices.get(0).unwrap());
+                        }
+                        Ok(blob)
                     })?;
 
-                result.append(&mut condition);
-                source_indices.append(&mut cond_indices);
+                result.append(condition);
+                let then_body_size = then_body.code.len();
+                let else_body_size = else_body.code.len();
 
-                let then_body_size = then_body.len();
-                let else_body_size = else_body.len();
-
-                result.push(Opcode::JumpIfFalse((then_body_size + 1 + 1 + 1) as u16));
-                source_indices.push(*source_indices.last().unwrap());
+                result.push(
+                    Opcode::JumpIfFalse((then_body_size + 1 + 1 + 1) as u16),
+                    *result.indices.last().unwrap(),
+                );
                 //instruction AFTER POP then_body and jump
-                result.push(Opcode::Pop(1));
-                source_indices.push(then_indices[0]);
+                result.push(Opcode::Pop(1), *then_body.indices.first().unwrap());
 
-                result.append(&mut then_body);
-                source_indices.append(&mut then_indices);
+                result.append(then_body);
 
-                result.push(Opcode::JumpRelative((1 + else_body_size + 1) as u16));
+                result.push(
+                    Opcode::JumpRelative((1 + else_body_size + 1) as u16),
+                    *result.indices.last().unwrap(),
+                );
                 //jump PAST POP else_body
-                source_indices.push(*source_indices.last().unwrap());
 
-                result.push(Opcode::Pop(1));
-                source_indices.push(else_indices[0]);
+                result.push(Opcode::Pop(1), *else_body.indices.first().unwrap());
 
-                result.append(&mut else_body);
-                source_indices.append(&mut else_indices);
-
-                result.push(Opcode::Nop);
-                source_indices.push(*source_indices.last().unwrap());
+                result.append(else_body);
+                result.push(Opcode::Nop, *result.indices.last().unwrap());
             }
 
             Expr::Block(block_begin, block_end, block_body) => {
-                let (sub_indices, body) = self.visit_block(block_body, block_begin, block_end)?;
+                let body = self.visit_block(block_body, block_begin, block_end)?;
                 result = body;
-                source_indices = sub_indices;
             }
 
             Expr::Call(target, args) => {
                 self.require_value();
-                let (mut target_indices, mut target) = self.visit_expr(target)?;
+                let target = self.visit_expr(target)?;
                 self.pop_requirement();
-                let target_indices_copy = target_indices.clone();
+                let target_indices_copy = target.clone();
 
                 if !*self.current_function_was_possibly_overwritten.last().unwrap_or(&true)
-                    && target.len() == 1 //target is 1 op (not load_* load_box)
-                    && target.last().unwrap().eq(&Opcode::LoadLocal(0)) //we load current function
+                    && target.code.len() == 1 //target is 1 op (not load_* load_box)
+                    && target.code.last().unwrap().eq(&Opcode::LoadLocal(0)) //we load current function
                     && self.needs_return_value()
                 //we will return after that
                     && self.current_function().unwrap().arity <= args.len()
@@ -876,87 +832,82 @@ impl<'gc> Compiler<'gc> {
 
                     for (i, arg) in args.iter().enumerate() {
                         self.require_value();
-                        let (mut arg_indices, mut arg_code) = self.visit_expr(arg)?;
-                        result.append(&mut arg_code);
-                        source_indices.append(&mut arg_indices);
+                        let arg_code = self.visit_expr(arg)?;
+                        result.append(arg_code);
                         self.pop_requirement(); //compile arg load
                         argument_indices.push((1 + i) as u16);
                     }
                     //store arguments which are on stack in reverse order
                     for index in argument_indices.into_iter().rev() {
-                        result.push(Opcode::StoreLocal(index));
-                        source_indices.push(*source_indices.last().unwrap());
+                        result.push(Opcode::StoreLocal(index), result.last_index().unwrap());
                     }
                     //pop locals
                     let locals_to_pop = self.total_variables
                         - 1 //current function
                         - args.len(); //arguments
                     if locals_to_pop != 0 {
-                        result.push(Opcode::Pop(locals_to_pop as u16));
-                        source_indices.push(*source_indices.last().unwrap());
+                        result.push(
+                            Opcode::Pop(locals_to_pop as u16),
+                            result.last_index().unwrap(),
+                        );
                     }
 
                     //jump
-                    result.push(Opcode::JumpAbsolute(0));
-                    source_indices.push(*source_indices.last().unwrap());
+                    result.push(Opcode::JumpAbsolute(0), result.last_index().unwrap());
                 } else {
-                    result.append(&mut target);
-                    source_indices.append(&mut target_indices);
+                    result.append(target);
                     for arg in args {
                         self.require_value();
-                        let (mut arg_indices, mut arg_code) = self.visit_expr(arg)?;
-                        result.append(&mut arg_code);
-                        source_indices.append(&mut arg_indices);
+                        let arg_code = self.visit_expr(arg)?;
+                        result.append(arg_code);
                         self.pop_requirement();
                     }
 
-                    result.push(Opcode::Call(args.len() as u16));
-                    source_indices.push(*target_indices_copy.last().unwrap());
+                    result.push(
+                        Opcode::Call(args.len() as u16),
+                        target_indices_copy.last_index().unwrap(),
+                    );
 
                     if !self.needs_value() {
-                        result.push(Opcode::Pop(1));
-                        source_indices.push(*source_indices.last().unwrap());
+                        result.push(Opcode::Pop(1), result.last_index().unwrap());
                     }
                 }
             }
 
             Expr::PartialCall(target, args) => {
                 self.require_value();
-                let (mut target_indices, mut target) = self.visit_expr(target)?;
+                let target = self.visit_expr(target)?;
                 self.pop_requirement();
-                let target_indices_copy = target_indices.clone();
+                let target_indices_copy = target.clone();
 
-                result.append(&mut target);
-                source_indices.append(&mut target_indices);
+                result.append(target);
 
                 for arg in args {
                     if arg.is_none() {
-                        result.push(Opcode::LoadBlank);
-                        source_indices.push(*source_indices.last().unwrap());
+                        result.push(Opcode::LoadBlank, result.last_index().unwrap());
                         continue;
                     }
                     self.require_value();
-                    let (mut arg_indices, mut arg_code) = self.visit_expr(arg.as_ref().unwrap())?;
-                    result.append(&mut arg_code);
-                    source_indices.append(&mut arg_indices);
+                    let arg_code = self.visit_expr(arg.as_ref().unwrap())?;
+                    result.append(arg_code);
                     self.pop_requirement();
                 }
 
-                result.push(Opcode::CallPartial(args.len() as u16));
-                source_indices.push(*target_indices_copy.last().unwrap());
+                result.push(
+                    Opcode::CallPartial(args.len() as u16),
+                    target_indices_copy.last_index().unwrap(),
+                );
 
                 if !self.needs_value() {
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(*source_indices.last().unwrap());
+                    result.push(Opcode::Pop(1), result.last_index().unwrap());
                 }
             }
 
             Expr::SingleStatement(s) => {
                 //propagate requirement
-                let (sub_indices, body) = self.visit_stmt(s)?;
+                let body = self.visit_stmt(s)?;
 
                 result = body;
-                source_indices = sub_indices;
             }
             Expr::AnonFunction(args, name, body) => {
                 let new_chunk_idx = self.compile_function(name, args, body)?;
@@ -966,22 +917,19 @@ impl<'gc> Compiler<'gc> {
                     chunk_id: new_chunk_idx,
                 });
 
-                result.push(Opcode::LoadConst(const_idx as u16)); //code block
-                source_indices.push(name.position.0);
+                result.push(Opcode::LoadConst(const_idx as u16), name.position.0); //code block
 
-                let (mut indices, mut code) = self.close_function(name)?;
+                let code = self.close_function(name)?;
 
-                result.append(&mut code);
-                source_indices.append(&mut indices);
+                result.append(code);
 
                 if !self.needs_value() {
-                    result.push(Opcode::Pop(1));
-                    source_indices.push(name.position.0);
+                    result.push(Opcode::Pop(1), name.position.0);
                 }
             }
         }
 
-        Ok((source_indices, result))
+        Ok(result)
     }
 
     fn visit_block(
@@ -989,7 +937,7 @@ impl<'gc> Compiler<'gc> {
         block: &[Stmt],
         block_begin: &Token,
         block_end: &Token,
-    ) -> Result<(Vec<usize>, Vec<Opcode>), String> {
+    ) -> Result<AnnotatedCodeBlob, String> {
         /*
         block that does not return value:
             stmt(return=false)
@@ -1014,15 +962,13 @@ impl<'gc> Compiler<'gc> {
 
         self.new_scope(block_begin);
 
-        let mut result = vec![];
-        let mut source_indices = vec![];
+        let mut result = AnnotatedCodeBlob::new();
 
         if self.needs_value() && !self.needs_return_value() {
             //if we will return after that, then no tmp slot needed, value will just stay on top of stack
             self.declare_local("_", VariableType::Normal).unwrap();
             self.define_local("_");
-            result.push(Opcode::LoadImmediateInt(0)); // _ variable
-            source_indices.push(block_begin.position.0);
+            result += (Opcode::LoadImmediateInt(0), block_begin.position.0); // _ variable
         }
 
         let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
@@ -1034,8 +980,7 @@ impl<'gc> Compiler<'gc> {
             if let VariableType::Boxed = var_type {
                 self.declare_local(name, VariableType::Boxed);
                 //do not define yet
-                result.push(Opcode::NewBox);
-                source_indices.push(block_begin.position.0);
+                result += (Opcode::NewBox, block_begin.position.0);
             }
         }
 
@@ -1043,30 +988,67 @@ impl<'gc> Compiler<'gc> {
 
         self.require_nothing();
         for item in other_statements {
-            let (mut indices, mut stmt_code) = self.visit_stmt(item)?;
-            result.append(&mut stmt_code);
-            source_indices.append(&mut indices);
+            let blob = self.visit_stmt(item)?;
+            result.append(blob);
         }
         self.pop_requirement();
 
-        let (mut indices, mut last_statement) = self.visit_stmt(last_statement)?;
-        result.append(&mut last_statement);
-        source_indices.append(&mut indices);
+        let last_statement = self.visit_stmt(last_statement)?;
+        result.append(last_statement);
+
         if self.needs_value() && !self.needs_return_value() {
             let (_, fictional_slot) = self.lookup_local("_").unwrap();
-            result.push(Opcode::StoreLocal(fictional_slot as u16));
-            source_indices.push(block_end.position.0);
+            result += (
+                Opcode::StoreLocal(fictional_slot as u16),
+                block_end.position.0,
+            );
             let scope_variable_count = self.pop_scope();
-            result.push(Opcode::Pop((scope_variable_count - 1) as u16));
-            source_indices.push(block_end.position.0);
+            result += (
+                Opcode::Pop((scope_variable_count - 1) as u16),
+                block_end.position.0,
+            );
         } else if self.needs_return_value() {
             //do nothing - extra slots will be pop'ed by executing return instruction
         } else {
             let scope_variable_count = self.pop_scope();
-            result.push(Opcode::Pop(scope_variable_count as u16));
-            source_indices.push(block_end.position.0);
+            result += (
+                Opcode::Pop(scope_variable_count as u16),
+                block_end.position.0,
+            );
         }
 
-        Ok((source_indices, result))
+        Ok(result)
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+struct AnnotatedCodeBlob {
+    code: Vec<Opcode>,
+    indices: Vec<usize>,
+}
+
+impl AnnotatedCodeBlob {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn append(&mut self, mut other: Self) {
+        self.indices.append(&mut other.indices);
+        self.code.append(&mut other.code);
+    }
+
+    pub fn push(&mut self, code: Opcode, index: usize) {
+        self.code.push(code);
+        self.indices.push(index);
+    }
+
+    pub fn last_index(&self) -> Option<usize> {
+        self.indices.last().cloned()
+    }
+}
+
+impl AddAssign<(Opcode, usize)> for AnnotatedCodeBlob {
+    fn add_assign(&mut self, rhs: (Opcode, usize)) {
+        self.push(rhs.0, rhs.1);
     }
 }
