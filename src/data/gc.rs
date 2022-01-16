@@ -700,6 +700,8 @@ impl GC {
 
 impl Drop for GC {
     fn drop(&mut self) {
+        #[cfg(feature = "debug-gc")]
+        println!("begin drop gc");
         //clean refs
         for obj in &mut self.young_objects {
             obj.clear_references();
@@ -707,5 +709,7 @@ impl Drop for GC {
         for obj in &mut self.old_objects {
             obj.clear_references();
         }
+        #[cfg(feature = "debug-gc")]
+        println!("end drop gc");
     }
 }
