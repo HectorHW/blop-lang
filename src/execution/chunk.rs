@@ -198,6 +198,21 @@ mod chunk_pretty_printer {
                         format!("{:<21} (value {})", "LoadImmediateInt", n)
                     }
 
+                    op @ Opcode::LoadLocal(idx) => {
+                        if chunk.name.get_string().unwrap() != "<script>" {
+                            //inside some function
+                            if *idx == 0 {
+                                format!("{:<21} (current function)", format!("{}", op))
+                            } else if *idx as usize <= chunk.arity {
+                                format!("{:<21} (argument {})", format!("{}", op), idx - 1)
+                            } else {
+                                format!("{}", op)
+                            }
+                        } else {
+                            format!("{}", op)
+                        }
+                    }
+
                     Opcode::JumpIfFalse(delta) => {
                         format!(
                             "{:<21} ({})",

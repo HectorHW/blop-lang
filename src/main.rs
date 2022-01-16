@@ -73,8 +73,8 @@ fn main() {
     let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
 
     #[cfg(feature = "print-chunk")]
-    for chunk in &chunks {
-        println!("{}", chunk);
+    for (i, chunk) in chunks.iter().enumerate() {
+        println!("chunk #{}:\n{}", i, chunk);
     }
 
     println!("running");
