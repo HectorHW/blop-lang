@@ -1,7 +1,6 @@
 use crate::data::objects::Value;
 use crate::parsing::lexer::{Token, TokenKind};
 use std::fmt::{Display, Formatter};
-use std::ops::AddAssign;
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
@@ -132,18 +131,6 @@ impl Chunk {
             arity,
             opcode_to_line: vec![],
         }
-    }
-
-    pub fn append(&mut self, mut values: Vec<Opcode>, mut indices: Vec<usize>) {
-        self.code.append(&mut values);
-        self.opcode_to_line.append(&mut indices)
-    }
-}
-
-impl AddAssign<(Opcode, usize)> for Chunk {
-    fn add_assign(&mut self, rhs: (Opcode, usize)) {
-        self.code.push(rhs.0);
-        self.opcode_to_line.push(rhs.1);
     }
 }
 
