@@ -1,5 +1,6 @@
 use super::compile_file;
 use super::run_file;
+use crate::GC;
 
 macro_rules! test_file {
     ($name:ident) => {
@@ -40,7 +41,9 @@ macro_rules! test_fail_compile {
             path.push_str(stringify!($name));
             path.push_str(".txt");
 
-            assert!(compile_file(&path).is_err());
+            let mut gc = GC::default_gc();
+
+            assert!(compile_file(&path, &mut gc).is_err());
         }
     };
 }
@@ -92,11 +95,12 @@ fn test_tail_call_optimization_application() {
     let (variable_types, closed_names) =
         crate::compile::syntax_level_check::check(&statements).unwrap();
     let statements = crate::compile::syntax_level_opt::optimize(statements);
-    let mut vm = VM::new();
-    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
-
+    let mut gc = GC::default_gc();
+    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
+    let mut vm = VM::new(&mut gc);
     vm.override_stack_limit(20); //should be just fine (and is definetly <1000)
     vm.run(&chunks).unwrap();
+    drop(chunks);
 }
 
 test_file! {munchausen}

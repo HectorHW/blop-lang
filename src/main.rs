@@ -1,4 +1,5 @@
 use crate::compile::compiler::Compiler;
+use crate::data::gc::GC;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::VM;
 use crate::parsing::ast::Expr;
@@ -69,9 +70,9 @@ fn main() {
 
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
-    let mut vm = VM::new();
-    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
-
+    let mut gc = GC::default_gc();
+    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
+    let mut vm = VM::new(&mut gc);
     #[cfg(feature = "print-chunk")]
     for (i, chunk) in chunks.iter().enumerate() {
         println!("chunk #{}:\n{}", i, chunk);
@@ -102,8 +103,10 @@ fn normalize_string(s: String) -> String {
 }
 
 pub fn run_file(filename: &str) -> Result<(), String> {
-    let (chunks, mut vm) = compile_file(filename)?;
+    let mut gc = GC::default_gc();
 
+    let chunks = compile_file(filename, &mut gc)?;
+    let mut vm = VM::new(&mut gc);
     vm.run(&chunks).map_err(|error| {
         format!(
             "error {:?} at instruction {}\nat line {}",
@@ -112,13 +115,15 @@ pub fn run_file(filename: &str) -> Result<(), String> {
             chunks[error.chunk_index].opcode_to_line[error.opcode_index],
         )
     })?;
+    //drop all objects that may hold gc refs explicitly
+    drop(chunks);
 
     Ok(())
 }
 
-type CompilationResult = (Vec<Chunk>, VM);
+type CompilationResult = Vec<Chunk>;
 
-pub fn compile_file(filename: &str) -> Result<CompilationResult, String> {
+pub fn compile_file(filename: &str, gc: &mut GC) -> Result<CompilationResult, String> {
     let file_content = std::fs::read_to_string(filename)
         .map_err(|_e| format!("failed to read file {}", filename))?;
     let file_content = normalize_string(file_content);
@@ -130,11 +135,10 @@ pub fn compile_file(filename: &str) -> Result<CompilationResult, String> {
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
     let statements = compile::syntax_level_opt::optimize(statements);
-    let mut vm = VM::new();
-    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc)?;
+    let chunks = Compiler::compile(&statements, variable_types, closed_names, gc)?;
     #[cfg(debug_assertions)]
     for idx in 0..chunks.len() {
         assert_eq!(chunks[idx].opcode_to_line.len(), chunks[idx].code.len());
     }
-    Ok((chunks, vm))
+    Ok(chunks)
 }

@@ -8,13 +8,13 @@ use std::collections::HashMap;
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
 
-pub struct VM {
+pub struct VM<'gc> {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
     pub(super) globals: HashMap<String, Value>,
     locals_offset: usize,
     stack_max_size: usize,
-    pub gc: GC,
+    pub gc: &'gc mut GC,
 }
 
 pub struct CallStackValue {
@@ -57,14 +57,14 @@ enum InstructionExecution {
     Termination,
 }
 
-impl VM {
-    pub fn new() -> VM {
+impl<'gc> VM<'gc> {
+    pub fn new(gc: &'gc mut GC) -> VM<'gc> {
         VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
             globals: HashMap::new(),
             locals_offset: 0,
-            gc: GC::default_gc(),
+            gc,
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
         }
     }
@@ -754,11 +754,5 @@ impl VM {
                 | StackObject::Builtin(_)
                 | StackObject::Partial(..)
         )
-    }
-}
-
-impl Default for VM {
-    fn default() -> Self {
-        Self::new()
     }
 }
