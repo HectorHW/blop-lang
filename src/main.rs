@@ -70,7 +70,7 @@ fn main() {
 
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
-    let mut gc = GC::default_gc();
+    let mut gc = unsafe { GC::default_gc() };
     let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
     let mut vm = VM::new(&mut gc);
     #[cfg(feature = "print-chunk")]
@@ -96,6 +96,8 @@ fn main() {
         let end_time = Instant::now();
         println!("{:?}", end_time - start_time);
     }
+    //explicitly drop gc handled refs before dropping gc
+    drop(chunks);
 }
 
 fn normalize_string(s: String) -> String {
@@ -103,7 +105,7 @@ fn normalize_string(s: String) -> String {
 }
 
 pub fn run_file(filename: &str) -> Result<(), String> {
-    let mut gc = GC::default_gc();
+    let mut gc = unsafe { GC::default_gc() };
 
     let chunks = compile_file(filename, &mut gc)?;
     let mut vm = VM::new(&mut gc);

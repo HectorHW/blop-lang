@@ -1,7 +1,7 @@
 // this module defines api for working with objects from memory side
 
 use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
-use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
+use crate::data::marked_counter::UNMARKED_ONE;
 use crate::data::objects::{Closure, Partial, Value, ValueBox};
 use crate::execution::chunk::Chunk;
 use std::pin::Pin;
@@ -387,8 +387,20 @@ impl Drop for OwnedObject {
     }
 }
 
+/// hybrid garbage collector that implements mark-and-sweep algorithm with reference counting.
+/// Creation and clear methods are marked as unsafe because misuse of this structure may create
+/// dangling pointers or access to freed memory. You MUST drop all objects that contain GCrefs
+/// before dropping instance of GC.
+///
 impl GC {
-    pub fn new(thr: usize, thr_young: usize, young_passes: usize) -> Self {
+    /// creates new instance of GC.
+    ///
+    /// # Arguments
+    /// * `thr` - threshhold of old allocations. This many allocations of old objects will trigger
+    /// mark and sweeep algorithm
+    /// * `thr_young` - threshhold of new allocations. This may allocations wil trigger quck pass
+    /// * `young_passes` - amount of passes over young object in attempt to free more objects
+    pub unsafe fn new(thr: usize, thr_young: usize, young_passes: usize) -> Self {
         GC {
             old_objects: Vec::new(),
             young_objects: Vec::new(),
@@ -398,8 +410,9 @@ impl GC {
             gc_young_passes: young_passes,
         }
     }
-
-    pub fn default_gc() -> Self {
+    ///create instance of GC with default config (see GC_YOUNG_PASSES_DEFAULT, GC_YOUNG_THR_DEFAULT
+    /// and GC_OLD_THR_DEFAULT)
+    pub unsafe fn default_gc() -> Self {
         let young_thr = if cfg!(feature = "debug-gc") {
             10
         } else {
@@ -436,6 +449,8 @@ impl GC {
     /// # Arguments
     ///
     /// * `iter` - An iterator over roots to mark (stack, VM's constants storage and so on)
+    /// * `chunks` - chunks of code. They need to be visited too as they may contain gc refs in
+    /// constants
     ///
     /// thin function is unsafe because passing an iterator that does not include all possible items
     /// will create dangling pointers
