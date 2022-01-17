@@ -6,7 +6,8 @@ use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::TokenKind::BeginBlock;
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use std::collections::HashMap;
-use std::ops::AddAssign;
+
+use crate::compile::code_blob::AnnotatedCodeBlob;
 
 enum ValueRequirement {
     Nothing,
@@ -87,10 +88,17 @@ impl<'gc> Compiler<'gc> {
         compiler.new_scope(block_identifier);
 
         compiler.require_nothing();
-        let blob = compiler.visit_expr(program)?;
-        compiler.current_chunk().append(blob.code, blob.indices);
+        let mut blob = compiler.visit_expr(program)?;
         compiler.pop_requirement();
-        *compiler.current_chunk() += (Opcode::Return, 0);
+
+        blob += (Opcode::Return, 0);
+        compiler.chunks[0] = blob.into_chunk(
+            Token {
+                kind: TokenKind::Name("<script>".to_string()),
+                position: Index(0, 0),
+            },
+            0,
+        );
         Ok(compiler.chunks)
     }
 
@@ -124,18 +132,8 @@ impl<'gc> Compiler<'gc> {
         }
     }
 
-    fn current_chunk(&mut self) -> &mut Chunk {
-        self.chunks
-            .get_mut(*self.current_chunk_idx.last().unwrap())
-            .unwrap()
-    }
-
     fn current_function(&self) -> Option<&FunctionCompilationContext> {
         self._current_function.last()
-    }
-
-    fn current_indices(&mut self) -> &mut Vec<usize> {
-        &mut self.current_chunk().opcode_to_line
     }
 
     fn lookup_local(&self, name: &str) -> Option<(VariableType, usize)> {
@@ -308,6 +306,8 @@ impl<'gc> Compiler<'gc> {
 
         let mut closed_arguments = 0;
 
+        let mut current_chunk = AnnotatedCodeBlob::new();
+
         for arg in args {
             if let VariableType::Boxed = self
                 .variable_types
@@ -317,10 +317,10 @@ impl<'gc> Compiler<'gc> {
                 .unwrap()
             {
                 let (_, real_idx) = self.lookup_local(arg.get_string().unwrap()).unwrap();
-                *self.current_chunk() += (Opcode::NewBox, name.position.0);
-                *self.current_chunk() += (Opcode::Duplicate, name.position.0);
-                *self.current_chunk() += (Opcode::LoadLocal(real_idx as u16), name.position.0);
-                *self.current_chunk() += (Opcode::StoreBox, name.position.0);
+                current_chunk += (Opcode::NewBox, name.position.0);
+                current_chunk += (Opcode::Duplicate, name.position.0);
+                current_chunk += (Opcode::LoadLocal(real_idx as u16), name.position.0);
+                current_chunk += (Opcode::StoreBox, name.position.0);
                 self.declare_local(arg.get_string().unwrap(), VariableType::Boxed);
                 self.define_local(arg.get_string().unwrap());
                 closed_arguments += 1;
@@ -332,17 +332,17 @@ impl<'gc> Compiler<'gc> {
         }
 
         self.require_return_value();
-        let AnnotatedCodeBlob { code, indices } = self.visit_expr(body)?;
+        let body = self.visit_expr(body)?;
         self.pop_requirement();
-        self.current_chunk().append(code, indices);
+        current_chunk = current_chunk + body;
 
-        let return_index = *self.current_indices().last().unwrap();
+        let return_index = current_chunk.last_index().unwrap();
 
-        *self.current_chunk() += (Opcode::Return, return_index);
+        current_chunk += (Opcode::Return, return_index);
 
         //load current compiler
         let new_chunk_idx = self.pop_function_compilation_state(prev_state);
-
+        self.chunks[new_chunk_idx] = current_chunk.into_chunk(name.clone(), args.len());
         Ok(new_chunk_idx)
     }
 
@@ -516,8 +516,7 @@ impl<'gc> Compiler<'gc> {
             } => {
                 let new_chunk_idx = self.compile_function(function_name, args, body)?;
 
-                let const_idx = self.current_chunk().constants.len();
-                self.current_chunk().constants.push(Value::Function {
+                let const_idx = result.get_or_create_constant(Value::Function {
                     chunk_id: new_chunk_idx,
                 });
 
@@ -585,8 +584,7 @@ impl<'gc> Compiler<'gc> {
                 if n >= (i16::MIN as i64) && n <= (i16::MAX as i64) {
                     result += (Opcode::LoadImmediateInt(n as i16), token.position.0);
                 } else {
-                    let constant_index = self.current_chunk().constants.len();
-                    self.current_chunk().constants.push(Value::Int(n));
+                    let constant_index = result.get_or_create_constant(Value::Int(n));
                     result += (Opcode::LoadConst(constant_index as u16), token.position.0);
                     //TODO extension
                 }
@@ -596,8 +594,7 @@ impl<'gc> Compiler<'gc> {
             }
             Expr::ConstString(s) => {
                 let obj_ptr = self.gc.new_const_string(s.get_string().unwrap());
-                let constant_index = self.current_chunk().constants.len();
-                self.current_chunk().constants.push(obj_ptr);
+                let constant_index = result.get_or_create_constant(obj_ptr);
                 result.push(Opcode::LoadConst(constant_index as u16), s.position.0);
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), s.position.0);
@@ -732,18 +729,8 @@ impl<'gc> Compiler<'gc> {
 
                 None => {
                     //global
-                    let existing_index = self
-                        .current_chunk()
-                        .global_names
-                        .iter()
-                        .position(|x| x == n.get_string().unwrap());
-                    let idx = existing_index.unwrap_or_else(|| {
-                        let idx = self.current_chunk().global_names.len();
-                        self.current_chunk()
-                            .global_names
-                            .push(n.get_string().unwrap().to_string());
-                        idx
-                    });
+                    let idx = result.get_or_create_name(n.get_string().unwrap());
+
                     result.push(Opcode::LoadGlobal(idx as u16), n.position.0);
 
                     if !self.needs_value() {
@@ -854,6 +841,7 @@ impl<'gc> Compiler<'gc> {
 
                     //jump
                     result.push(Opcode::JumpAbsolute(0), result.last_index().unwrap());
+                    result.make_last_absolute();
                 } else {
                     result.append(target);
                     for arg in args {
@@ -912,8 +900,7 @@ impl<'gc> Compiler<'gc> {
             Expr::AnonFunction(args, name, body) => {
                 let new_chunk_idx = self.compile_function(name, args, body)?;
 
-                let const_idx = self.current_chunk().constants.len();
-                self.current_chunk().constants.push(Value::Function {
+                let const_idx = result.get_or_create_constant(Value::Function {
                     chunk_id: new_chunk_idx,
                 });
 
@@ -1018,37 +1005,5 @@ impl<'gc> Compiler<'gc> {
         }
 
         Ok(result)
-    }
-}
-
-#[derive(Clone, Default, Debug)]
-struct AnnotatedCodeBlob {
-    code: Vec<Opcode>,
-    indices: Vec<usize>,
-}
-
-impl AnnotatedCodeBlob {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn append(&mut self, mut other: Self) {
-        self.indices.append(&mut other.indices);
-        self.code.append(&mut other.code);
-    }
-
-    pub fn push(&mut self, code: Opcode, index: usize) {
-        self.code.push(code);
-        self.indices.push(index);
-    }
-
-    pub fn last_index(&self) -> Option<usize> {
-        self.indices.last().cloned()
-    }
-}
-
-impl AddAssign<(Opcode, usize)> for AnnotatedCodeBlob {
-    fn add_assign(&mut self, rhs: (Opcode, usize)) {
-        self.push(rhs.0, rhs.1);
     }
 }

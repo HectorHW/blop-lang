@@ -413,7 +413,14 @@ impl PartialEq for StackObject {
                 std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
             }
             (StackObject::Builtin(s1), StackObject::Builtin(s2)) => s1 == s2,
-            _ => panic!("eq: same discriminant, not string, unhandled case"),
+            (
+                StackObject::Function { chunk_id: chunk1 },
+                StackObject::Function { chunk_id: chunk2 },
+            ) => chunk1 == chunk2,
+            (other1, other2) => panic!(
+                "eq: same discriminant, not string, unhandled case {:?}",
+                (other1, other2)
+            ),
         }
     }
 }
