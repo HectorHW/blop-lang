@@ -12,7 +12,7 @@ pub type Value = StackObject;
 pub enum StackObject {
     Int(i64),
     Blank,
-    Builtin(&'static str),
+    Builtin(&'static &'static str),
     HeapObject(PrivatePtr<OwnedObject>),
 }
 
