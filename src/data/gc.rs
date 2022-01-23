@@ -42,34 +42,9 @@ impl Clone for StackObject {
             StackObject::Function { chunk_id } => StackObject::Function {
                 chunk_id: *chunk_id,
             },
-
-            StackObject::Map(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().inc_gc_counter();
-                return StackObject::Map(*gc_ptr, *obj_ptr);
-            }
-            StackObject::Vector(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().inc_gc_counter();
-                StackObject::Vector(*gc_ptr, *obj_ptr)
-            }
-            StackObject::MutableString(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().inc_gc_counter();
-                StackObject::MutableString(*gc_ptr, *obj_ptr)
-            }
-            StackObject::ConstantString(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().inc_gc_counter();
-                StackObject::ConstantString(*gc_ptr, *obj_ptr)
-            }
-            StackObject::Box(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().inc_gc_counter();
-                StackObject::Box(*gc_ptr, *obj_ptr)
-            }
-            StackObject::Closure(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().inc_gc_counter();
-                StackObject::Closure(*gc_ptr, *obj_ptr)
-            }
-            StackObject::Partial(gc_ptr, obj_ptr) => {
-                gc_ptr.unwrap_ref_mut().inc_gc_counter();
-                StackObject::Partial(*gc_ptr, *obj_ptr)
+            StackObject::HeapObject(ptr) => {
+                ptr.unwrap_ref_mut().inc_gc_counter();
+                return StackObject::HeapObject(*ptr);
             }
 
             StackObject::Builtin(s) => StackObject::Builtin(s),
@@ -83,19 +58,14 @@ impl Drop for StackObject {
         match self {
             StackObject::Int(_) => {}
             StackObject::Function { .. } => {}
-            StackObject::Map(gc_ptr, _)
-            | StackObject::Vector(gc_ptr, _)
-            | StackObject::MutableString(gc_ptr, _)
-            | StackObject::ConstantString(gc_ptr, _)
-            | StackObject::Box(gc_ptr, _)
-            | StackObject::Closure(gc_ptr, _)
-            | StackObject::Partial(gc_ptr, _) => {
-                gc_ptr.unwrap_ref_mut().dec_gc_counter();
+
+            StackObject::HeapObject(ptr) => {
+                ptr.unwrap_ref_mut().dec_gc_counter();
                 #[cfg(feature = "debug-gc")]
                 println!(
                     "drop stackobject of {:p}, RC is now {}",
-                    gc_ptr.unwrap_ref(),
-                    gc_ptr.unwrap_ref().marker.counter()
+                    ptr.unwrap_ref(),
+                    ptr.unwrap_ref().marker.counter()
                 );
             }
             StackObject::Builtin(..) | StackObject::Blank => {}
@@ -107,39 +77,7 @@ impl OwnedObject {
     fn make_stack_object(owned_reference: &mut OwnedObject) -> StackObject {
         use super::objects::PtrWrapper;
         let trace_ptr = owned_reference.wrap_private();
-
-        match &mut owned_reference.item {
-            OwnedObjectItem::Map(ptr) => {
-                let object_ptr = ptr.wrap_private();
-                StackObject::Map(trace_ptr, object_ptr)
-            }
-            OwnedObjectItem::Vector(v) => {
-                let object_ptr = v.wrap_private();
-                StackObject::Vector(trace_ptr, object_ptr)
-            }
-            OwnedObjectItem::MutableString(s) => {
-                let object_ptr = s.wrap_private();
-                StackObject::MutableString(trace_ptr, object_ptr)
-            }
-
-            OwnedObjectItem::ConstantString(s) => {
-                let object_ptr = s.wrap_private();
-                StackObject::ConstantString(trace_ptr, object_ptr)
-            }
-            OwnedObjectItem::Box(ptr) => {
-                let object_ptr = ptr.wrap_private();
-                StackObject::Box(trace_ptr, object_ptr)
-            }
-            OwnedObjectItem::Closure(ptr) => {
-                let object_ptr = ptr.wrap_private();
-                StackObject::Closure(trace_ptr, object_ptr)
-            }
-
-            OwnedObjectItem::Partial(ptr) => {
-                let object_ptr = ptr.wrap_private();
-                StackObject::Partial(trace_ptr, object_ptr)
-            }
-        }
+        StackObject::HeapObject(trace_ptr)
     }
 
     fn mark(&mut self, value: bool) {
@@ -560,26 +498,16 @@ impl GC {
                 chunk_id: *chunk_id,
             }, //no cloning necessary for function as it itself carries no data that can change during runtime
 
-            s @ StackObject::ConstantString(..) => {
-                s.clone()
-                //constant string are *cough cough* constant, no need to add new object,
-                // just reuse old one, but bump counter
-            }
-
-            StackObject::MutableString(..)
-            | StackObject::Vector(..)
-            | StackObject::Map(..)
-            | StackObject::Closure(..)
-            | StackObject::Box(..)
-            | StackObject::Partial(..) => {
-                let owned_ref = obj.unwrap_traceable().expect("null ptr in clone");
-                let new_obj = owned_ref.clone();
-                let obj_boxed = Box::new(new_obj);
-                self.old_objects.push(Pin::new(obj_boxed));
-
-                let mut_ref = self.old_objects.last_mut().unwrap();
-
-                OwnedObject::make_stack_object(mut_ref)
+            h @ StackObject::HeapObject(ptr) => {
+                if matches!(ptr.unwrap_ref().item, OwnedObjectItem::ConstantString(..)) {
+                    h.clone()
+                } else {
+                    let new_obj = ptr.unwrap_ref().clone();
+                    let boxed = Pin::new(Box::new(new_obj));
+                    self.young_objects.push(boxed);
+                    let mut_ref = self.old_objects.last_mut().unwrap();
+                    OwnedObject::make_stack_object(mut_ref)
+                }
             }
 
             StackObject::Builtin(s) => StackObject::Builtin(s),
@@ -645,8 +573,8 @@ impl GC {
 
     pub fn try_inplace_string_concat(
         &mut self,
-        mut s1: StackObject,
-        mut s2: StackObject,
+        s1: StackObject,
+        s2: StackObject,
     ) -> Result<StackObject, String> {
         if s1.unwrap_any_str().is_none() {
             return Err(format!(
@@ -665,25 +593,34 @@ impl GC {
         #[cfg(feature = "debug-gc")]
         println!("try_inplace_string_concat");
 
-        match (&mut s1, &mut s2) {
-            (StackObject::MutableString(gc_ptr, obj_ptr), s2)
-                if gc_ptr.unwrap_ref_mut().marker.counter() == 1 =>
+        match (&mut s1.as_heap_object(), &mut s2.as_heap_object()) {
+            (Some(_obj1), _obj2)
+                if s1.unwrap_traceable().unwrap().marker.counter() == 1
+                    && s1.unwrap_mutable_string().is_some() =>
             {
                 #[cfg(feature = "debug-gc")]
-                println!("RC of s1[{:p}] is 1, reusing it", gc_ptr.unwrap_ref_mut());
-                obj_ptr
-                    .unwrap_ref_mut()
+                println!(
+                    "RC of s1[{:p}] is 1, reusing it",
+                    s1.unwrap_traceable().unwrap()
+                );
+                s1.unwrap_mutable_string()
+                    .unwrap()
                     .push_str(s2.unwrap_any_str().unwrap());
                 return Ok(s1);
             }
-            (s1, StackObject::MutableString(gc_ptr, obj_ptr))
-                if gc_ptr.unwrap_ref_mut().marker.counter() == 1 =>
+
+            (_obj1, Some(_obj2))
+                if s2.unwrap_traceable().unwrap().marker.counter() == 1
+                    && s2.unwrap_mutable_string().is_some() =>
             {
                 #[cfg(feature = "debug-gc")]
-                println!("RC of s2[{:p}] is 1, reusing it", gc_ptr.unwrap_ref_mut());
+                println!(
+                    "RC of s2[{:p}] is 1, reusing it",
+                    s2.unwrap_traceable().unwrap()
+                );
                 let mut part_1 = s1.unwrap_any_str().unwrap().to_string();
-                std::mem::swap(&mut part_1, obj_ptr.unwrap_ref_mut());
-                obj_ptr.unwrap_ref_mut().push_str(&part_1);
+                std::mem::swap(&mut part_1, s2.unwrap_mutable_string().unwrap());
+                s2.unwrap_mutable_string().unwrap().push_str(&part_1);
                 return Ok(s2);
             }
             (_, _) => {}
@@ -697,7 +634,7 @@ impl GC {
             s2.unwrap_traceable().unwrap().marker.counter()
         );
 
-        let mut result_string = self.allocate_new::<String>();
+        let result_string = self.allocate_new::<String>();
 
         result_string
             .unwrap_mutable_string()

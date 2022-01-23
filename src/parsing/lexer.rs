@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::{format, Debug, Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::iter::Peekable;
 use std::mem;
 use std::str::CharIndices;

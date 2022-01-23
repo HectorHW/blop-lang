@@ -1,8 +1,7 @@
 use crate::data::marked_counter::MarkedCounter;
-use crate::data::objects::StackObject::Function;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt::{write, Debug, Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
@@ -12,24 +11,18 @@ pub type Value = StackObject;
 pub enum StackObject {
     Int(i64),
     Function { chunk_id: usize },
-    Map(PrivatePtr<OwnedObject>, PrivatePtr<VMap>),
-    Vector(PrivatePtr<OwnedObject>, PrivatePtr<VVec>),
-    MutableString(PrivatePtr<OwnedObject>, PrivatePtr<String>),
-    ConstantString(PrivatePtr<OwnedObject>, PrivatePtr<String>),
-    Box(PrivatePtr<OwnedObject>, PrivatePtr<ValueBox>),
-    Closure(PrivatePtr<OwnedObject>, PrivatePtr<Closure>),
-    Builtin(&'static str),
     Blank,
-    Partial(PrivatePtr<OwnedObject>, PrivatePtr<Partial>),
+    Builtin(&'static str),
+    HeapObject(PrivatePtr<OwnedObject>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct OwnedObject {
     pub item: OwnedObjectItem,
     pub marker: MarkedCounter,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValueBox(pub StackObject);
 
 impl Default for ValueBox {
@@ -38,13 +31,13 @@ impl Default for ValueBox {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Closure {
     pub closed_values: Vec<StackObject>,
     pub chunk_id: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Partial {
     pub target: Value,
     pub args: Vec<Value>,
@@ -93,7 +86,7 @@ impl Partial {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnedObjectItem {
     ConstantString(String),
     MutableString(String),
@@ -174,22 +167,8 @@ impl Display for StackObject {
             StackObject::Function { chunk_id, .. } => {
                 write!(f, "function<{}>", chunk_id)
             }
-            StackObject::Map(_, ptr) => write!(f, "Map {:?}", ptr.unwrap_ref()),
-
-            StackObject::Vector(_, ptr) => write!(f, "Vector {:?}", ptr.unwrap_ref()),
-
-            StackObject::MutableString(_, ptr) => write!(f, "{}", ptr.unwrap_ref()),
-
-            StackObject::ConstantString(_, ptr) => write!(f, "{}", ptr.unwrap_ref()),
-            StackObject::Box(_, ptr) => write!(f, "box[{}]", ptr.unwrap_ref().0),
-            StackObject::Closure(_, ptr) => {
-                let closure = ptr.unwrap_ref();
-                write!(
-                    f,
-                    "closure<{}, {}>",
-                    closure.closed_values.len(),
-                    closure.chunk_id
-                )
+            StackObject::HeapObject(ptr) => {
+                write!(f, "{}", ptr.unwrap_ref())
             }
             StackObject::Builtin(s) => {
                 write!(f, "builtin<{}>", s)
@@ -197,12 +176,6 @@ impl Display for StackObject {
             StackObject::Blank => {
                 write!(f, "Blank")
             }
-            StackObject::Partial(_, ptr) => write!(
-                f,
-                "partial[{}] over {}",
-                ptr.unwrap_ref().args.len(),
-                ptr.unwrap_ref().target
-            ),
         }
     }
 }
@@ -212,51 +185,14 @@ impl Debug for StackObject {
         match self {
             StackObject::Int(i) => write!(f, "Int {}", i),
             StackObject::Function { chunk_id } => write!(f, "Function {}", chunk_id),
-            StackObject::Map(gc_ptr, ptr) => {
-                write!(f, "Map {:?} at {:p}", ptr.unwrap_ref(), gc_ptr.unwrap_ref())
+            StackObject::HeapObject(ptr) => {
+                write!(f, "{:?}", ptr.unwrap_ref().item)
             }
-            StackObject::Vector(gc_ptr, ptr) => write!(
-                f,
-                "Vector {:?} at {:p}",
-                ptr.unwrap_ref(),
-                gc_ptr.unwrap_ref()
-            ),
-            StackObject::MutableString(gc_ptr, ptr) => write!(
-                f,
-                "MutStr \"{:?}\" at {:p}",
-                ptr.unwrap_ref(),
-                gc_ptr.unwrap_ref()
-            ),
-            StackObject::ConstantString(gc_ptr, ptr) => write!(
-                f,
-                "ConstStr {:?} at {:p}",
-                ptr.unwrap_ref(),
-                gc_ptr.unwrap_ref()
-            ),
-            StackObject::Box(gc_ptr, ptr) => write!(
-                f,
-                "Box [{:?}] at {:p}",
-                ptr.unwrap_ref(),
-                gc_ptr.unwrap_ref()
-            ),
-            StackObject::Closure(gc_ptr, ptr) => write!(
-                f,
-                "Closure (Function {}, values: {:?}) at {:p}",
-                ptr.unwrap_ref().chunk_id,
-                ptr.unwrap_ref().closed_values,
-                gc_ptr.unwrap_ref()
-            ),
+
             StackObject::Builtin(name) => write!(f, "Builtin[{}]", name),
             StackObject::Blank => {
                 write!(f, "Blank")
             }
-            StackObject::Partial(gc_ptr, ptr) => write!(
-                f,
-                "Partial over {} with args {:?} at {:p}",
-                ptr.unwrap_ref().target,
-                ptr.unwrap_ref().args,
-                gc_ptr.unwrap_ref()
-            ),
         }
     }
 }
@@ -270,47 +206,44 @@ impl StackObject {
     pub fn can_hash(&self) -> bool {
         use StackObject::*;
         match self {
-            Int(..) | MutableString(..) | ConstantString(..) => true,
-            Box(_gc_ptr, obj_ptr) => {
-                let object = obj_ptr.unwrap_ref();
-                object.0.can_hash()
-            }
-
-            Map(..)
-            | Vector(..)
-            | Function { .. }
-            | Closure(..)
-            | Builtin(..)
-            | Blank
-            | Partial(..) => false,
+            Int(..) => true,
+            Function { .. } | Builtin(..) | Blank => false,
+            HeapObject(ptr) => ptr.unwrap_ref().can_hash(),
         }
     }
 
-    pub fn unwrap_map(&mut self) -> Option<&mut VMap> {
+    pub fn as_heap_object(&self) -> Option<&mut OwnedObjectItem> {
         match self {
-            StackObject::Map(_, ptr) => Some(ptr.unwrap_ref_mut()),
+            StackObject::HeapObject(ptr) => Some(&mut ptr.unwrap_ref_mut().item),
             _ => None,
         }
     }
 
-    pub fn unwrap_vector(&mut self) -> Option<&mut VVec> {
-        match self {
-            StackObject::Vector(_, ptr) => Some(ptr.unwrap_ref_mut()),
+    pub fn unwrap_map(&self) -> Option<&mut VMap> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::Map(m)) => Some(m),
             _ => None,
         }
     }
 
-    pub fn unwrap_mutable_string(&mut self) -> Option<&mut String> {
-        match self {
-            StackObject::MutableString(_, ptr) => Some(ptr.unwrap_ref_mut()),
+    pub fn unwrap_vector(&self) -> Option<&mut VVec> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::Vector(v)) => Some(v),
             _ => None,
         }
     }
 
-    pub fn unwrap_const_string(&mut self) -> Option<&str> {
+    pub fn unwrap_mutable_string(&self) -> Option<&mut String> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::MutableString(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_const_string(&self) -> Option<&str> {
         //return &str because ConstString is guaranteed not to be mutable;
-        match self {
-            StackObject::ConstantString(_, ptr) => Some(ptr.unwrap_ref().as_str()),
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::ConstantString(s)) => Some(s),
             _ => None,
         }
     }
@@ -322,34 +255,38 @@ impl StackObject {
         }
     }
 
-    pub fn unwrap_partial(&mut self) -> Option<&mut Partial> {
-        match self {
-            StackObject::Partial(_, ptr) => Some(ptr.unwrap_ref_mut()),
+    pub fn unwrap_partial(&self) -> Option<&mut Partial> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::Partial(p)) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_closure(&self) -> Option<&mut Closure> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::Closure(c)) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_box(&self) -> Option<&mut ValueBox> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::Box(b)) => Some(b),
             _ => None,
         }
     }
 
     pub(super) fn unwrap_traceable(&self) -> Option<&mut OwnedObject> {
         match self {
-            StackObject::MutableString(trace_ptr, _)
-            | StackObject::Vector(trace_ptr, _)
-            | StackObject::Map(trace_ptr, _)
-            | StackObject::Box(trace_ptr, _)
-            | StackObject::Closure(trace_ptr, _)
-            | StackObject::ConstantString(trace_ptr, _) => Some(trace_ptr.unwrap_ref_mut()),
-            StackObject::Partial(trace_ptr, _) => Some(trace_ptr.unwrap_ref_mut()),
-
-            StackObject::Int(_) => None,
-            StackObject::Function { .. } => None,
-            StackObject::Builtin(..) => None,
-            StackObject::Blank => None,
+            StackObject::HeapObject(h) => Some(h.unwrap_ref_mut()),
+            _ => None,
         }
     }
 
     pub fn unwrap_any_str(&self) -> Option<&str> {
-        match self {
-            StackObject::MutableString(_, ptr) => Some(ptr.unwrap_ref().as_str()),
-            StackObject::ConstantString(_, ptr) => Some(ptr.unwrap_ref().as_str()),
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::MutableString(m)) => Some(m.as_str()),
+            Some(OwnedObjectItem::ConstantString(s)) => Some(s.as_str()),
             _ => None,
         }
     }
@@ -358,15 +295,9 @@ impl StackObject {
         match self {
             StackObject::Int(_) => "int".to_string(),
             StackObject::Function { .. } => "function".to_string(),
-            StackObject::Map(_, _) => "Map".to_string(),
-            StackObject::Vector(_, _) => "Vector".to_string(),
-            StackObject::MutableString(_, _) => "String".to_string(),
-            StackObject::ConstantString(_, _) => "ConstantString".to_string(),
-            StackObject::Box(_, _) => "Box".to_string(),
-            StackObject::Closure(_, _) => "Closure".to_string(),
             StackObject::Builtin(_) => "Builtin".to_string(),
             StackObject::Blank => "Blank".to_string(),
-            StackObject::Partial(..) => "Partial".to_string(),
+            StackObject::HeapObject(ptr) => ptr.unwrap_ref().type_string(),
         }
     }
 
@@ -404,12 +335,7 @@ impl PartialEq for StackObject {
 
         match (self, other) {
             (StackObject::Int(a), StackObject::Int(b)) => a == b,
-
-            (StackObject::Map(_, ptr1), StackObject::Map(_, ptr2)) => {
-                std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
-            }
-
-            (StackObject::Vector(_, ptr1), StackObject::Vector(_, ptr2)) => {
+            (StackObject::HeapObject(ptr1), StackObject::HeapObject(ptr2)) => {
                 std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
             }
             (StackObject::Builtin(s1), StackObject::Builtin(s2)) => s1 == s2,
@@ -431,18 +357,10 @@ impl Hash for StackObject {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             StackObject::Int(i) => i.hash(state),
-            StackObject::MutableString(_, ptr) => ptr.unwrap_ref().hash(state),
-
-            StackObject::ConstantString(_, ptr) => ptr.unwrap_ref().hash(state),
-
-            StackObject::Vector(..) | StackObject::Map(..) | Function { .. } => {
-                panic!("hash on unhashable object")
-            }
-            StackObject::Box(..) => panic!("cannot hash box"),
-            StackObject::Closure(..) => panic!("cannot hash closure"),
+            StackObject::HeapObject(ptr) => ptr.unwrap_ref().hash(state),
             StackObject::Builtin(..) => panic!("cannot hash builtin"),
             StackObject::Blank => panic!("cannot hash blank"),
-            StackObject::Partial(..) => panic!("cannot hash partial"),
+            other => panic!("cannot hash {:?}", other),
         }
     }
 }
@@ -476,29 +394,19 @@ impl OwnedObject {
             _ => None,
         }
     }
-}
 
-impl PartialEq for OwnedObject {
-    fn eq(&self, other: &Self) -> bool {
-        if std::mem::discriminant(&self.item) != std::mem::discriminant(&other.item) {
-            return false;
-        }
-
-        match (&self.item, &other.item) {
-            (OwnedObjectItem::Vector(object1), OwnedObjectItem::Vector(object2)) => {
-                object1 == object2
-            }
-
-            (OwnedObjectItem::Map(object1), OwnedObjectItem::Map(object2)) => object1 == object2,
-            (OwnedObjectItem::MutableString(obj1), OwnedObjectItem::MutableString(obj2)) => {
-                obj1 == obj2
-            }
-            _ => panic!(),
+    pub fn type_string(&self) -> String {
+        match self.item {
+            OwnedObjectItem::ConstantString(_) => "ConstantString".to_string(),
+            OwnedObjectItem::MutableString(_) => "String".to_string(),
+            OwnedObjectItem::Vector(_) => "Vector".to_string(),
+            OwnedObjectItem::Map(_) => "Map".to_string(),
+            OwnedObjectItem::Box(_) => "Box".to_string(),
+            OwnedObjectItem::Closure(_) => "Closure".to_string(),
+            OwnedObjectItem::Partial(_) => "Partial".to_string(),
         }
     }
 }
-
-impl Eq for OwnedObject {}
 
 impl Hash for OwnedObject {
     fn hash<H: Hasher>(&self, _state: &mut H) {
@@ -525,3 +433,58 @@ impl DerefMut for OwnedObject {
         &mut self.item
     }
 }
+
+impl Debug for OwnedObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let content = match &self.item {
+            OwnedObjectItem::ConstantString(s) => format!("ConstStr {:?} at {:p}", s, self),
+            OwnedObjectItem::MutableString(s) => format!("MutStr \"{:?}\" at {:p}", s, self),
+            OwnedObjectItem::Vector(v) => format!("{:?}", v),
+            OwnedObjectItem::Map(m) => {
+                format!("Map {:?} at {:p}", m, self)
+            }
+            OwnedObjectItem::Box(b) => format!("Box [{:?}] at {:p}", b.0, self),
+            OwnedObjectItem::Closure(c) => format!(
+                "Closure (Function {}, values: {:?}) at {:p}",
+                c.chunk_id, c.closed_values, self
+            ),
+            OwnedObjectItem::Partial(p) => format!(
+                "Partial over {} with args {:?} at {:p}",
+                p.target, p.args, self
+            ),
+        };
+
+        write!(f, "object [{}], RC={}", content, self.marker.counter())
+    }
+}
+
+impl Display for OwnedObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.item {
+            OwnedObjectItem::ConstantString(ptr) => write!(f, "{}", ptr),
+            OwnedObjectItem::MutableString(ptr) => write!(f, "{}", ptr),
+            OwnedObjectItem::Vector(ptr) => write!(f, "Vector {:?}", ptr),
+            OwnedObjectItem::Map(ptr) => write!(f, "Map {:?}", ptr),
+            OwnedObjectItem::Box(ptr) => write!(f, "box[{}]", ptr.0),
+            OwnedObjectItem::Closure(closure) => {
+                write!(
+                    f,
+                    "closure<{}, {}>",
+                    closure.closed_values.len(),
+                    closure.chunk_id
+                )
+            }
+            OwnedObjectItem::Partial(ptr) => {
+                write!(f, "partial[{}] over {}", ptr.args.len(), ptr.target)
+            }
+        }
+    }
+}
+
+impl PartialEq for OwnedObject {
+    fn eq(&self, other: &Self) -> bool {
+        &self.item == &other.item
+    }
+}
+
+impl Eq for OwnedObject {}

@@ -205,17 +205,6 @@ impl<'gc> VM<'gc> {
             };
         }
 
-        macro_rules! as_closure {
-            ($value:expr) => {
-                Ok($value).and_then(|closure| match &closure {
-                    Value::Closure(_gc_ptr, closure_ptr) => Ok(closure_ptr.unwrap_ref()),
-                    other => Err(runtime_error!(TypeError {
-                        message: format!("expected {} but got {}", "function", other.type_string())
-                    })),
-                })
-            };
-        }
-
         macro_rules! comparison_operator {
             ($pat:pat) => {{
                 let second_operand = checked_stack_pop!()?;
@@ -497,7 +486,7 @@ impl<'gc> VM<'gc> {
                 if object.unwrap_partial().is_some() {
                     let final_length = self.stack.len().saturating_sub(arity);
                     let args = self.stack.split_off(final_length);
-                    let mut target = checked_stack_pop!()?;
+                    let target = checked_stack_pop!()?;
 
                     //check that all blanks are filled for fully defined call
                     if args.len() != target.unwrap_partial().unwrap().count_blanks() {
@@ -541,7 +530,9 @@ impl<'gc> VM<'gc> {
                 } else {
                     let chunk_id = match object {
                         Value::Function { chunk_id } => Ok(chunk_id),
-                        Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().chunk_id),
+                        _ if object.unwrap_closure().is_some() => {
+                            Ok(object.unwrap_closure().unwrap().chunk_id)
+                        }
                         _ => Err(runtime_error!(TypeError {
                             message: format!("expected function but got {}", object.type_string())
                         })),
@@ -583,7 +574,7 @@ impl<'gc> VM<'gc> {
                 */
                 let final_length = self.stack.len().saturating_sub(arity);
                 let args = self.stack.split_off(final_length);
-                let mut target = checked_stack_pop!()?;
+                let target = checked_stack_pop!()?;
                 if !VM::is_callable(&target) {
                     return Err(runtime_error!(TypeError {
                         message: format!(
@@ -631,43 +622,32 @@ impl<'gc> VM<'gc> {
                 InstructionExecution::NextInstruction
             }
             Opcode::LoadBox => {
-                match checked_stack_pop!()? {
-                    Value::Box(_gc, _obj) => {
-                        let box_obj = _obj.unwrap_ref_mut();
+                let addr = checked_stack_pop!()?;
+                addr.unwrap_box()
+                    .map(|box_obj| {
                         self.stack.push(box_obj.0.clone());
-                    }
-                    _any_other => {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "expected {} but got {}",
-                                "box",
-                                _any_other.type_string()
-                            ),
-                        }))
-                    }
-                };
+                    })
+                    .ok_or_else(|| {
+                        runtime_error!(TypeError {
+                            message: format!("expected {} but got {}", "box", addr.type_string()),
+                        })
+                    })?;
+
                 InstructionExecution::NextInstruction
             }
 
             Opcode::StoreBox => {
                 let value = checked_stack_pop!()?;
                 let addr = checked_stack_pop!()?;
-
-                match addr {
-                    Value::Box(_gc, _obj) => {
-                        let box_obj = _obj.unwrap_ref_mut();
+                addr.unwrap_box()
+                    .map(|box_obj| {
                         box_obj.0 = value;
-                    }
-                    _any_other => {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "expected {} but got {}",
-                                "box",
-                                _any_other.type_string()
-                            ),
-                        }))
-                    }
-                };
+                    })
+                    .ok_or_else(|| {
+                        runtime_error!(TypeError {
+                            message: format!("expected {} but got {}", "box", addr.type_string()),
+                        })
+                    })?;
                 InstructionExecution::NextInstruction
             }
 
@@ -698,16 +678,16 @@ impl<'gc> VM<'gc> {
                 let value = checked_stack_pop!()?;
                 let closure = checked_stack_pop!()?;
 
-                match &closure {
-                    Value::Closure(_gc_ptr, closure_ptr) => {
-                        closure_ptr.unwrap_ref_mut().closed_values.push(value);
+                match closure.unwrap_closure() {
+                    Some(closure_ptr) => {
+                        closure_ptr.closed_values.push(value);
                     }
-                    other => {
+                    None => {
                         return Err(runtime_error!(TypeError {
                             message: format!(
                                 "expected {} but got {}",
-                                "function",
-                                other.type_string()
+                                "closure",
+                                closure.type_string()
                             )
                         }))
                     }
@@ -715,8 +695,18 @@ impl<'gc> VM<'gc> {
                 self.stack.push(closure);
                 InstructionExecution::NextInstruction
             }
+
             Opcode::LoadClosureValue(idx) => {
-                let closure = as_closure!(self.stack.get(self.locals_offset).unwrap())?;
+                let maybe_closure = self.stack.get(self.locals_offset).unwrap();
+                let closure = maybe_closure.unwrap_closure().ok_or_else(|| {
+                    runtime_error!(TypeError {
+                        message: format!(
+                            "expected {} but got {}",
+                            "function",
+                            maybe_closure.type_string()
+                        )
+                    })
+                })?;
                 let value = closure
                     .closed_values
                     .get(idx as usize)
@@ -749,10 +739,8 @@ impl<'gc> VM<'gc> {
     fn is_callable(value: &StackObject) -> bool {
         matches!(
             value,
-            StackObject::Function { .. }
-                | StackObject::Closure(_, _)
-                | StackObject::Builtin(_)
-                | StackObject::Partial(..)
-        )
+            StackObject::Function { .. } | StackObject::Builtin(_)
+        ) || value.unwrap_closure().is_some()
+            || value.unwrap_partial().is_some()
     }
 }
