@@ -159,6 +159,7 @@ impl<'gc> VM<'gc> {
         Ok(())
     }
 
+    #[inline(always)]
     fn execute_instruction(
         &mut self,
         ip: usize,
