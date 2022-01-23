@@ -222,7 +222,9 @@ impl<'gc> VM<'gc> {
             }};
         }
 
-        let jump = match current_chunk.unwrap_function().unwrap().code[ip] {
+        let chunk = current_chunk.unwrap_function().unwrap();
+
+        let jump = match chunk.code[ip] {
             Opcode::Print => {
                 let result = checked_stack_pop!()?;
                 println!("{}", result);
@@ -230,9 +232,7 @@ impl<'gc> VM<'gc> {
             }
             Opcode::LoadConst(idx) => {
                 let idx = idx as usize;
-                let value = current_chunk
-                    .unwrap_function()
-                    .unwrap()
+                let value = chunk
                     .constants
                     .get(idx)
                     .cloned()
@@ -323,9 +323,7 @@ impl<'gc> VM<'gc> {
             }
 
             Opcode::LoadGlobal(idx) => {
-                let key = current_chunk
-                    .unwrap_function()
-                    .unwrap()
+                let key = chunk
                     .global_names
                     .get(idx as usize)
                     .ok_or(runtime_error!(OperandIndexing))?;
@@ -407,7 +405,7 @@ impl<'gc> VM<'gc> {
                 let value_to_test = as_int!(checked_stack_pop!()?)?;
                 let result = if value_to_test == 0 {
                     let new_ip = ip + delta as usize;
-                    if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
+                    if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
@@ -423,7 +421,7 @@ impl<'gc> VM<'gc> {
                 self.stack.push(StackObject::Int(value_to_test));
                 if value_to_test == 1 {
                     let new_ip = ip + delta as usize;
-                    if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
+                    if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
@@ -434,7 +432,7 @@ impl<'gc> VM<'gc> {
 
             Opcode::JumpRelative(delta) => {
                 let new_ip = ip + delta as usize;
-                if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
+                if new_ip >= chunk.code.len() {
                     return Err(runtime_error!(JumpBounds));
                 }
                 InstructionExecution::LocalJump(new_ip)
@@ -442,7 +440,7 @@ impl<'gc> VM<'gc> {
 
             Opcode::JumpAbsolute(idx) => {
                 let new_ip = idx as usize;
-                if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
+                if new_ip >= chunk.code.len() {
                     return Err(runtime_error!(JumpBounds));
                 }
                 InstructionExecution::LocalJump(new_ip)
