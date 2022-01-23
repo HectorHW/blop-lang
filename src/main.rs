@@ -60,12 +60,6 @@ fn main() {
     println!("{:?}", statements);
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
-    for (token, index_map) in &variable_types {
-        println!("{:?}", token);
-        for item in index_map.iter() {
-            println!("     {} {:?}", item.0, item.1);
-        }
-    }
 
     let statements = compile::syntax_level_opt::optimize(statements);
 
