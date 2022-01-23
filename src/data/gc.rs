@@ -4,6 +4,7 @@ use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
 use crate::data::marked_counter::UNMARKED_ONE;
 use crate::data::objects::{Closure, Partial, Value, ValueBox};
 use crate::execution::chunk::Chunk;
+use crate::execution::vm::CallStackValue;
 use std::pin::Pin;
 
 const GC_YOUNG_THR_DEFAULT: usize = 100;
@@ -21,16 +22,8 @@ pub struct GC {
 
 impl StackObject {
     fn mark(&self, value: bool) {
-        match self {
-            StackObject::Function { .. } => {
-                //chunks are marked separately by gc
-            }
-
-            _ => {
-                if let Some(obj) = self.unwrap_traceable() {
-                    obj.mark(value)
-                }
-            }
+        if let Some(obj) = self.unwrap_traceable() {
+            obj.mark(value)
         }
     }
 }
@@ -39,12 +32,9 @@ impl Clone for StackObject {
     fn clone(&self) -> Self {
         match self {
             StackObject::Int(i) => StackObject::Int(*i),
-            StackObject::Function { chunk_id } => StackObject::Function {
-                chunk_id: *chunk_id,
-            },
             StackObject::HeapObject(ptr) => {
                 ptr.unwrap_ref_mut().inc_gc_counter();
-                return StackObject::HeapObject(*ptr);
+                StackObject::HeapObject(*ptr)
             }
 
             StackObject::Builtin(s) => StackObject::Builtin(s),
@@ -57,7 +47,6 @@ impl Drop for StackObject {
     fn drop(&mut self) {
         match self {
             StackObject::Int(_) => {}
-            StackObject::Function { .. } => {}
 
             StackObject::HeapObject(ptr) => {
                 ptr.unwrap_ref_mut().dec_gc_counter();
@@ -105,16 +94,23 @@ impl OwnedObject {
             OwnedObjectItem::Box(ptr) => {
                 ptr.0.mark(value);
             }
-            OwnedObjectItem::Closure(Closure { closed_values, .. }) => {
-                for closed_element in closed_values {
+            OwnedObjectItem::Closure(c) => {
+                c.underlying.mark(value);
+                for closed_element in &c.closed_values {
                     closed_element.mark(value);
                 }
             }
 
-            OwnedObjectItem::Partial(ref partial) => {
+            OwnedObjectItem::Partial(partial) => {
                 partial.target.mark(value);
                 for stored_arg in &partial.args {
                     stored_arg.mark(value);
+                }
+            }
+
+            OwnedObjectItem::Function(chunk) => {
+                for constant in &chunk.constants {
+                    constant.mark(value);
                 }
             }
         }
@@ -143,7 +139,15 @@ impl OwnedObject {
                 false
             }
             OwnedObjectItem::Closure(c) => {
-                let f = !c.closed_values.is_empty();
+                let mut f = false;
+                if let StackObject::Blank = c.underlying {
+                } else {
+                    let mut value = StackObject::Blank;
+                    std::mem::swap(&mut c.underlying, &mut value);
+                    drop(value);
+                    f = true;
+                }
+                let f = f || !c.closed_values.is_empty();
                 c.closed_values.clear();
                 f
             }
@@ -162,6 +166,12 @@ impl OwnedObject {
                     f = true;
                     partial.args.clear();
                 }
+                f
+            }
+
+            OwnedObjectItem::Function(chunk) => {
+                let f = chunk.constants.is_empty();
+                chunk.constants.clear();
                 f
             }
         }
@@ -318,6 +328,19 @@ impl GCAlloc for Partial {
     }
 }
 
+impl GCAlloc for Chunk {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(_obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::Function(_obj),
+            marker: UNMARKED_ONE,
+        }
+    }
+}
+
 #[cfg(feature = "debug-gc")]
 impl Drop for OwnedObject {
     fn drop(&mut self) {
@@ -392,7 +415,7 @@ impl GC {
     ///
     /// thin function is unsafe because passing an iterator that does not include all possible items
     /// will create dangling pointers
-    pub unsafe fn mark_and_sweep<'a, I>(&mut self, iter: I, chunks: &[Chunk])
+    pub unsafe fn mark_and_sweep<'a, I>(&mut self, iter: I, call_stack: &[CallStackValue])
     where
         I: Iterator<Item = &'a StackObject>,
     {
@@ -406,6 +429,8 @@ impl GC {
             return;
         }
 
+        debug_assert!(self.young_objects.is_empty());
+
         #[cfg(feature = "debug-gc")]
         println!("begin slow_pass");
 
@@ -414,8 +439,9 @@ impl GC {
             item.mark(true);
         }
 
-        for chunk in chunks {
-            let _ = chunk.constants.iter().map(|obj| obj.mark(true));
+        for stack_frame in call_stack {
+            let chunk = &stack_frame.return_chunk;
+            chunk.mark(true);
         }
 
         //clean refs
@@ -434,9 +460,6 @@ impl GC {
             item.mark_shallow(false);
         }
 
-        for chunk in chunks {
-            let _ = chunk.constants.iter().map(|obj| obj.mark(false));
-        }
         self.old_allocations = 0;
         #[cfg(feature = "debug-gc")]
         println!("end slow_pass");
@@ -493,10 +516,6 @@ impl GC {
         //copies underlying object
         match obj {
             StackObject::Int(i) => StackObject::Int(*i), //no cloning necessary
-
-            StackObject::Function { chunk_id } => StackObject::Function {
-                chunk_id: *chunk_id,
-            }, //no cloning necessary for function as it itself carries no data that can change during runtime
 
             h @ StackObject::HeapObject(ptr) => {
                 if matches!(ptr.unwrap_ref().item, OwnedObjectItem::ConstantString(..)) {
@@ -647,6 +666,12 @@ impl GC {
             .push_str(s2.unwrap_any_str().unwrap());
 
         Ok(result_string)
+    }
+
+    pub(crate) fn items(&self) -> impl Iterator<Item = &'_ Pin<Box<OwnedObject>>> {
+        (&self.young_objects)
+            .iter()
+            .chain((&self.old_objects).iter())
     }
 }
 

@@ -96,11 +96,10 @@ fn test_tail_call_optimization_application() {
         crate::compile::syntax_level_check::check(&statements).unwrap();
     let statements = crate::compile::syntax_level_opt::optimize(statements);
     let mut gc = unsafe { GC::default_gc() };
-    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
+    let entry = Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
     let mut vm = VM::new(&mut gc);
     vm.override_stack_limit(20); //should be just fine (and is definetly <1000)
-    vm.run(&chunks).unwrap();
-    drop(chunks);
+    vm.run(entry).unwrap();
 }
 
 test_file! {munchausen}

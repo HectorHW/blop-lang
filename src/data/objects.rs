@@ -1,4 +1,5 @@
-use crate::data::marked_counter::MarkedCounter;
+use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
+use crate::Chunk;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -10,13 +11,11 @@ pub type Value = StackObject;
 
 pub enum StackObject {
     Int(i64),
-    Function { chunk_id: usize },
     Blank,
     Builtin(&'static str),
     HeapObject(PrivatePtr<OwnedObject>),
 }
 
-#[derive(Clone)]
 pub struct OwnedObject {
     pub item: OwnedObjectItem,
     pub marker: MarkedCounter,
@@ -34,7 +33,7 @@ impl Default for ValueBox {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Closure {
     pub closed_values: Vec<StackObject>,
-    pub chunk_id: usize,
+    pub underlying: StackObject, //actually Function
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,6 +93,7 @@ pub enum OwnedObjectItem {
     Map(VMap),
     Box(ValueBox),
     Closure(Closure),
+    Function(Chunk),
     Partial(Partial),
 }
 
@@ -164,9 +164,6 @@ impl Display for StackObject {
             StackObject::Int(n) => {
                 write!(f, "{}", n)
             }
-            StackObject::Function { chunk_id, .. } => {
-                write!(f, "function<{}>", chunk_id)
-            }
             StackObject::HeapObject(ptr) => {
                 write!(f, "{}", ptr.unwrap_ref())
             }
@@ -184,7 +181,6 @@ impl Debug for StackObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             StackObject::Int(i) => write!(f, "Int {}", i),
-            StackObject::Function { chunk_id } => write!(f, "Function {}", chunk_id),
             StackObject::HeapObject(ptr) => {
                 write!(f, "{:?}", ptr.unwrap_ref().item)
             }
@@ -207,7 +203,7 @@ impl StackObject {
         use StackObject::*;
         match self {
             Int(..) => true,
-            Function { .. } | Builtin(..) | Blank => false,
+            Builtin(..) | Blank => false,
             HeapObject(ptr) => ptr.unwrap_ref().can_hash(),
         }
     }
@@ -283,6 +279,13 @@ impl StackObject {
         }
     }
 
+    pub fn unwrap_function(&self) -> Option<&mut Chunk> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::Function(chunk)) => Some(chunk),
+            _ => None,
+        }
+    }
+
     pub fn unwrap_any_str(&self) -> Option<&str> {
         match self.as_heap_object() {
             Some(OwnedObjectItem::MutableString(m)) => Some(m.as_str()),
@@ -294,7 +297,6 @@ impl StackObject {
     pub fn type_string(&self) -> String {
         match self {
             StackObject::Int(_) => "int".to_string(),
-            StackObject::Function { .. } => "function".to_string(),
             StackObject::Builtin(_) => "Builtin".to_string(),
             StackObject::Blank => "Blank".to_string(),
             StackObject::HeapObject(ptr) => ptr.unwrap_ref().type_string(),
@@ -339,10 +341,6 @@ impl PartialEq for StackObject {
                 std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
             }
             (StackObject::Builtin(s1), StackObject::Builtin(s2)) => s1 == s2,
-            (
-                StackObject::Function { chunk_id: chunk1 },
-                StackObject::Function { chunk_id: chunk2 },
-            ) => chunk1 == chunk2,
             (other1, other2) => panic!(
                 "eq: same discriminant, not string, unhandled case {:?}",
                 (other1, other2)
@@ -358,8 +356,6 @@ impl Hash for StackObject {
         match self {
             StackObject::Int(i) => i.hash(state),
             StackObject::HeapObject(ptr) => ptr.unwrap_ref().hash(state),
-            StackObject::Builtin(..) => panic!("cannot hash builtin"),
-            StackObject::Blank => panic!("cannot hash blank"),
             other => panic!("cannot hash {:?}", other),
         }
     }
@@ -404,6 +400,7 @@ impl OwnedObject {
             OwnedObjectItem::Box(_) => "Box".to_string(),
             OwnedObjectItem::Closure(_) => "Closure".to_string(),
             OwnedObjectItem::Partial(_) => "Partial".to_string(),
+            OwnedObjectItem::Function(..) => "Function".to_string(),
         }
     }
 }
@@ -445,13 +442,20 @@ impl Debug for OwnedObject {
             }
             OwnedObjectItem::Box(b) => format!("Box [{:?}] at {:p}", b.0, self),
             OwnedObjectItem::Closure(c) => format!(
-                "Closure (Function {}, values: {:?}) at {:p}",
-                c.chunk_id, c.closed_values, self
+                "Closure (over {}, values: {:?}) at {:p}",
+                c.underlying, c.closed_values, self
             ),
             OwnedObjectItem::Partial(p) => format!(
                 "Partial over {} with args {:?} at {:p}",
                 p.target, p.args, self
             ),
+            OwnedObjectItem::Function(chunk) => {
+                format!(
+                    "Function {} of {} args",
+                    chunk.name.get_string().unwrap(),
+                    chunk.arity
+                )
+            }
         };
 
         write!(f, "object [{}], RC={}", content, self.marker.counter())
@@ -471,11 +475,19 @@ impl Display for OwnedObject {
                     f,
                     "closure<{}, {}>",
                     closure.closed_values.len(),
-                    closure.chunk_id
+                    closure.underlying
                 )
             }
             OwnedObjectItem::Partial(ptr) => {
                 write!(f, "partial[{}] over {}", ptr.args.len(), ptr.target)
+            }
+            OwnedObjectItem::Function(chunk) => {
+                write!(
+                    f,
+                    "Function {} of {} args",
+                    chunk.name.get_string().unwrap(),
+                    chunk.arity
+                )
             }
         }
     }
@@ -488,3 +500,12 @@ impl PartialEq for OwnedObject {
 }
 
 impl Eq for OwnedObject {}
+
+impl Clone for OwnedObject {
+    fn clone(&self) -> Self {
+        OwnedObject {
+            marker: UNMARKED_ONE,
+            item: self.item.clone(),
+        }
+    }
+}

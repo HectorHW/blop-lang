@@ -1,7 +1,7 @@
 use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, Value, ValueBox};
 use crate::execution::builtins::{apply_builtin, get_builtin};
-use crate::execution::chunk::{Chunk, Opcode};
+use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -18,7 +18,7 @@ pub struct VM<'gc> {
 }
 
 pub struct CallStackValue {
-    return_chunk: usize,
+    pub return_chunk: StackObject, //actually HeapObject -> Function
     return_ip: usize,
     return_locals_offset: usize,
     return_stack_size: usize,
@@ -30,7 +30,7 @@ type Result<T> = std::result::Result<T, InterpretError>;
 #[allow(dead_code)]
 pub struct InterpretError {
     pub opcode_index: usize,
-    pub chunk_index: usize,
+    pub chunk: StackObject,
     pub kind: InterpretErrorKind,
 }
 
@@ -52,8 +52,11 @@ pub enum InterpretErrorKind {
 enum InstructionExecution {
     NextInstruction,
     LocalJump(usize),
-    EnterChunk(usize),
-    CrossChunkJump { new_chunk_id: usize, new_ip: usize },
+    EnterChunk(StackObject),
+    CrossChunkJump {
+        new_chunk_id: StackObject,
+        new_ip: usize,
+    },
     Termination,
 }
 
@@ -75,27 +78,26 @@ impl<'gc> VM<'gc> {
         old_stack_size
     }
 
-    pub fn run(&mut self, program: &[Chunk]) -> Result<()> {
+    pub fn run(&mut self, entry_point: StackObject) -> Result<()> {
         use InterpretErrorKind::*;
         let mut ip = 0;
-        let mut current_chunk_id = 0;
-        let mut current_chunk = program.get(current_chunk_id).unwrap();
+        let mut current_chunk = entry_point;
 
         macro_rules! runtime_error {
             ($e:expr) => {
                 InterpretError {
                     opcode_index: ip,
-                    chunk_index: current_chunk_id,
+                    chunk: current_chunk,
                     kind: $e,
                 }
             };
         }
 
-        while ip < current_chunk.code.len() {
+        while ip < current_chunk.unwrap_function().unwrap().code.len() {
             #[cfg(feature = "print-execution")]
-            print!("{} => ", current_chunk.code[ip]);
+            print!("{} => ", current_chunk.unwrap_function().unwrap().code[ip]);
 
-            let jump = self.execute_instruction(ip, current_chunk_id, program)?;
+            let jump = self.execute_instruction(ip, &current_chunk)?;
 
             #[cfg(feature = "print-execution")]
             {
@@ -119,10 +121,9 @@ impl<'gc> VM<'gc> {
                     ip = idx;
                 }
 
-                InstructionExecution::EnterChunk(chunk_id) => {
+                InstructionExecution::EnterChunk(chunk) => {
                     ip = 0;
-                    current_chunk_id = chunk_id;
-                    current_chunk = &program[current_chunk_id];
+                    current_chunk = chunk;
                 }
 
                 InstructionExecution::CrossChunkJump {
@@ -130,8 +131,7 @@ impl<'gc> VM<'gc> {
                     new_ip,
                 } => {
                     ip = new_ip;
-                    current_chunk_id = new_chunk_id;
-                    current_chunk = &program[current_chunk_id];
+                    current_chunk = new_chunk_id;
                 }
 
                 InstructionExecution::Termination => return Ok(()),
@@ -144,14 +144,14 @@ impl<'gc> VM<'gc> {
             }
 
             unsafe {
-                self.gc.mark_and_sweep(self.stack.iter(), program);
+                self.gc.mark_and_sweep(self.stack.iter(), &*self.call_stack);
             }
         }
 
-        if ip == current_chunk.code.len() {
+        if ip == current_chunk.unwrap_function().unwrap().code.len() {
             return Err(InterpretError {
                 opcode_index: ip - 1,
-                chunk_index: current_chunk_id,
+                chunk: current_chunk,
                 kind: InterpretErrorKind::MissedReturn,
             });
         }
@@ -162,18 +162,15 @@ impl<'gc> VM<'gc> {
     fn execute_instruction(
         &mut self,
         ip: usize,
-        current_chunk_id: usize,
-        chunks: &[Chunk],
+        current_chunk: &StackObject,
     ) -> Result<InstructionExecution> {
         use InterpretErrorKind::*;
-
-        let current_chunk = &chunks[current_chunk_id];
 
         macro_rules! checked_stack_pop {
             () => {{
                 self.stack.pop().ok_or(InterpretError {
                     opcode_index: ip,
-                    chunk_index: current_chunk_id,
+                    chunk: current_chunk.clone(),
                     kind: StackUnderflow,
                 })
             }};
@@ -183,7 +180,7 @@ impl<'gc> VM<'gc> {
             ($e:expr) => {
                 InterpretError {
                     opcode_index: ip,
-                    chunk_index: current_chunk_id,
+                    chunk: current_chunk.clone(),
                     kind: $e,
                 }
             };
@@ -225,7 +222,7 @@ impl<'gc> VM<'gc> {
             }};
         }
 
-        let jump = match current_chunk.code[ip] {
+        let jump = match current_chunk.unwrap_function().unwrap().code[ip] {
             Opcode::Print => {
                 let result = checked_stack_pop!()?;
                 println!("{}", result);
@@ -234,6 +231,8 @@ impl<'gc> VM<'gc> {
             Opcode::LoadConst(idx) => {
                 let idx = idx as usize;
                 let value = current_chunk
+                    .unwrap_function()
+                    .unwrap()
                     .constants
                     .get(idx)
                     .cloned()
@@ -325,6 +324,8 @@ impl<'gc> VM<'gc> {
 
             Opcode::LoadGlobal(idx) => {
                 let key = current_chunk
+                    .unwrap_function()
+                    .unwrap()
                     .global_names
                     .get(idx as usize)
                     .ok_or(runtime_error!(OperandIndexing))?;
@@ -406,7 +407,7 @@ impl<'gc> VM<'gc> {
                 let value_to_test = as_int!(checked_stack_pop!()?)?;
                 let result = if value_to_test == 0 {
                     let new_ip = ip + delta as usize;
-                    if new_ip >= current_chunk.code.len() {
+                    if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
@@ -422,7 +423,7 @@ impl<'gc> VM<'gc> {
                 self.stack.push(StackObject::Int(value_to_test));
                 if value_to_test == 1 {
                     let new_ip = ip + delta as usize;
-                    if new_ip >= current_chunk.code.len() {
+                    if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
@@ -433,7 +434,7 @@ impl<'gc> VM<'gc> {
 
             Opcode::JumpRelative(delta) => {
                 let new_ip = ip + delta as usize;
-                if new_ip >= current_chunk.code.len() {
+                if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
                     return Err(runtime_error!(JumpBounds));
                 }
                 InstructionExecution::LocalJump(new_ip)
@@ -441,7 +442,7 @@ impl<'gc> VM<'gc> {
 
             Opcode::JumpAbsolute(idx) => {
                 let new_ip = idx as usize;
-                if new_ip >= current_chunk.code.len() {
+                if new_ip >= current_chunk.unwrap_function().unwrap().code.len() {
                     return Err(runtime_error!(JumpBounds));
                 }
                 InstructionExecution::LocalJump(new_ip)
@@ -528,18 +529,14 @@ impl<'gc> VM<'gc> {
                     self.stack.push(result);
                     InstructionExecution::NextInstruction
                 } else {
-                    let chunk_id = match object {
-                        Value::Function { chunk_id } => Ok(chunk_id),
-                        _ if object.unwrap_closure().is_some() => {
-                            Ok(object.unwrap_closure().unwrap().chunk_id)
-                        }
-                        _ => Err(runtime_error!(TypeError {
+                    let new_chunk = VM::get_chunk(object.clone()).ok_or_else(|| {
+                        runtime_error!(TypeError {
                             message: format!("expected function but got {}", object.type_string())
-                        })),
-                    }?;
+                        })
+                    })?;
 
                     self.call_stack.push(CallStackValue {
-                        return_chunk: current_chunk_id,
+                        return_chunk: current_chunk.clone(),
                         return_ip: ip + 1,
                         return_locals_offset: self.locals_offset,
                         return_stack_size: self.stack.len() - 1 - arity,
@@ -547,18 +544,16 @@ impl<'gc> VM<'gc> {
 
                     self.locals_offset = self.stack.len() - 1 - arity;
 
-                    let current_chunk_id = chunk_id;
-                    let current_chunk = chunks.get(current_chunk_id).unwrap();
-
-                    if arity as usize != chunks.get(chunk_id).unwrap().arity {
+                    if arity as usize != new_chunk.unwrap_function().unwrap().arity {
                         return Err(runtime_error!(TypeError {
                             message: format!(
                                 "mismatched arguments: expected {} but got {}",
-                                current_chunk.arity, arity
+                                new_chunk.unwrap_function().unwrap().arity,
+                                arity
                             )
                         }));
                     } else {
-                        InstructionExecution::EnterChunk(chunk_id)
+                        InstructionExecution::EnterChunk(new_chunk)
                     }
                 }
             }
@@ -653,22 +648,15 @@ impl<'gc> VM<'gc> {
 
             Opcode::NewClosure => {
                 let value = checked_stack_pop!()?;
-                let chunk_id = match value {
-                    Value::Function { chunk_id } => chunk_id,
-                    other => {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "expected {} but got {}",
-                                "function",
-                                other.type_string()
-                            )
-                        }))
-                    }
-                };
+                if value.unwrap_function().is_none() {
+                    return Err(runtime_error!(TypeError {
+                        message: format!("expected {} but got {}", "function", value.type_string())
+                    }));
+                }
 
                 let ptr = self.gc.store(Closure {
                     closed_values: vec![],
-                    chunk_id,
+                    underlying: value,
                 });
                 self.stack.push(ptr);
                 InstructionExecution::NextInstruction
@@ -737,10 +725,22 @@ impl<'gc> VM<'gc> {
     }
 
     fn is_callable(value: &StackObject) -> bool {
-        matches!(
-            value,
-            StackObject::Function { .. } | StackObject::Builtin(_)
-        ) || value.unwrap_closure().is_some()
+        matches!(value, StackObject::Builtin(_))
+            || value.unwrap_closure().is_some()
             || value.unwrap_partial().is_some()
+            || value.unwrap_function().is_some()
+    }
+
+    fn get_chunk(value: StackObject) -> Option<StackObject> {
+        if value.unwrap_function().is_some() {
+            return Some(value);
+        }
+        if value.unwrap_closure().is_some() {
+            return Some(value.unwrap_closure().unwrap().underlying.clone());
+        }
+        if value.unwrap_partial().is_some() {
+            return VM::get_chunk(value.unwrap_partial().unwrap().target.clone());
+        }
+        return None;
     }
 }
