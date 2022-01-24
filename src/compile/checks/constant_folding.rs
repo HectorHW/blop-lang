@@ -32,50 +32,52 @@ impl Visitor<String> for Folder {
                 let na = a.get_number().unwrap();
                 let nb = b.get_number().unwrap();
 
-                match op.kind {
-                    TokenKind::Star => Expr::Number(Token {
-                        position: a.position,
-                        kind: TokenKind::Number(na * nb),
-                    }),
+                enum FoldResult {
+                    Ok(i64),
+                    Warning(String),
+                    Error(String),
+                }
+
+                let result = match &op.kind {
+                    TokenKind::Star => FoldResult::Ok(na*nb),
+
                     TokenKind::Slash => match na.checked_div(nb) {
-                        Some(result) => Expr::Number(Token {
-                            position: a.position,
-                            kind: TokenKind::Number(result),
-                        }),
+                        Some(result) => FoldResult::Ok(result),
                         None => {
-                            eprintln!("encountered zero division while folding constants, assuming it is intended [{}]", op.position);
-                            Expr::Binary(op, Box::new(left), Box::new(right))
+                            FoldResult::Warning(format!("encountered zero division while folding constants, assuming it is intended [{}]", op.position))
                         }
                     },
 
                     TokenKind::Mod => match na.checked_rem(nb) {
-                        Some(result) => Expr::Number(Token {
-                            position: a.position,
-                            kind: TokenKind::Number(result),
-                        }),
+                        Some(result) => FoldResult::Ok(result),
                         None => {
-                            eprintln!("encountered modulo 0 while folding constants, assuming it is intended [{}]", op.position);
-                            Expr::Binary(op, Box::new(left), Box::new(right))
+                            FoldResult::Warning( format!("encountered modulo 0 while folding constants, assuming it is intended [{}]", op.position))
                         }
                     },
 
-                    TokenKind::Plus => Expr::Number(Token {
+                    TokenKind::Plus => FoldResult::Ok(na + nb),
+
+                    TokenKind::Minus => FoldResult::Ok(na - nb),
+
+                    TokenKind::CompareEquals => FoldResult::Ok(if na == nb { 1 } else { 0 }),
+
+                    TokenKind::Power => FoldResult::Ok(na.pow(nb as u64 as u32)),
+
+                    _any_other => FoldResult::Error(format!("unexpected binary operator {}", _any_other)),
+                };
+
+                match result {
+                    FoldResult::Ok(number) => Expr::Number(Token {
                         position: a.position,
-                        kind: TokenKind::Number(na + nb),
+                        kind: TokenKind::Number(number),
                     }),
-                    TokenKind::Minus => Expr::Number(Token {
-                        position: a.position,
-                        kind: TokenKind::Number(na - nb),
-                    }),
-                    TokenKind::CompareEquals => Expr::Number(Token {
-                        position: a.position,
-                        kind: TokenKind::Number(if na == nb { 1 } else { 0 }),
-                    }),
-                    TokenKind::Power => Expr::Number(Token {
-                        position: a.position,
-                        kind: TokenKind::Number(na.pow(nb as u64 as u32)),
-                    }),
-                    _any_other => panic!("unexpected binary operator {}", _any_other),
+                    FoldResult::Warning(w) => {
+                        eprintln!("{}", w);
+                        Expr::Binary(op, Box::new(left), Box::new(right))
+                    }
+                    FoldResult::Error(e) => {
+                        return Err(e);
+                    }
                 }
             }
 
