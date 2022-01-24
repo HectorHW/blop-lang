@@ -2,7 +2,7 @@ use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Token, TokenKind};
 use indexmap::{IndexMap, IndexSet};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 struct Checker {
     names: Vec<(ScopeType, Token, HashMap<String, bool>)>,

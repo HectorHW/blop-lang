@@ -1,24 +1,24 @@
 use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, Value, ValueBox};
 use crate::execution::builtins::{apply_builtin, get_builtin};
-use crate::execution::chunk::{Chunk, Opcode};
+use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
 
-pub struct VM {
+pub struct VM<'gc> {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
     pub(super) globals: HashMap<String, Value>,
     locals_offset: usize,
     stack_max_size: usize,
-    pub gc: GC,
+    pub gc: &'gc mut GC,
 }
 
 pub struct CallStackValue {
-    return_chunk: usize,
+    pub return_chunk: StackObject, //actually HeapObject -> Function
     return_ip: usize,
     return_locals_offset: usize,
     return_stack_size: usize,
@@ -30,7 +30,7 @@ type Result<T> = std::result::Result<T, InterpretError>;
 #[allow(dead_code)]
 pub struct InterpretError {
     pub opcode_index: usize,
-    pub chunk_index: usize,
+    pub chunk: StackObject,
     pub kind: InterpretErrorKind,
 }
 
@@ -52,19 +52,22 @@ pub enum InterpretErrorKind {
 enum InstructionExecution {
     NextInstruction,
     LocalJump(usize),
-    EnterChunk(usize),
-    CrossChunkJump { new_chunk_id: usize, new_ip: usize },
+    EnterChunk(StackObject),
+    CrossChunkJump {
+        new_chunk_id: StackObject,
+        new_ip: usize,
+    },
     Termination,
 }
 
-impl VM {
-    pub fn new() -> VM {
+impl<'gc> VM<'gc> {
+    pub fn new(gc: &'gc mut GC) -> VM<'gc> {
         VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
             globals: HashMap::new(),
             locals_offset: 0,
-            gc: GC::default_gc(),
+            gc,
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
         }
     }
@@ -75,27 +78,26 @@ impl VM {
         old_stack_size
     }
 
-    pub fn run(&mut self, program: &[Chunk]) -> Result<()> {
+    pub fn run(&mut self, entry_point: StackObject) -> Result<()> {
         use InterpretErrorKind::*;
         let mut ip = 0;
-        let mut current_chunk_id = 0;
-        let mut current_chunk = program.get(current_chunk_id).unwrap();
+        let mut current_chunk = entry_point;
 
         macro_rules! runtime_error {
             ($e:expr) => {
                 InterpretError {
                     opcode_index: ip,
-                    chunk_index: current_chunk_id,
+                    chunk: current_chunk,
                     kind: $e,
                 }
             };
         }
 
-        while ip < current_chunk.code.len() {
+        while ip < current_chunk.unwrap_function().unwrap().code.len() {
             #[cfg(feature = "print-execution")]
-            print!("{} => ", current_chunk.code[ip]);
+            print!("{} => ", current_chunk.unwrap_function().unwrap().code[ip]);
 
-            let jump = self.execute_instruction(ip, current_chunk_id, program)?;
+            let jump = self.execute_instruction(ip, &current_chunk)?;
 
             #[cfg(feature = "print-execution")]
             {
@@ -119,10 +121,9 @@ impl VM {
                     ip = idx;
                 }
 
-                InstructionExecution::EnterChunk(chunk_id) => {
+                InstructionExecution::EnterChunk(chunk) => {
                     ip = 0;
-                    current_chunk_id = chunk_id;
-                    current_chunk = &program[current_chunk_id];
+                    current_chunk = chunk;
                 }
 
                 InstructionExecution::CrossChunkJump {
@@ -130,8 +131,7 @@ impl VM {
                     new_ip,
                 } => {
                     ip = new_ip;
-                    current_chunk_id = new_chunk_id;
-                    current_chunk = &program[current_chunk_id];
+                    current_chunk = new_chunk_id;
                 }
 
                 InstructionExecution::Termination => return Ok(()),
@@ -144,14 +144,14 @@ impl VM {
             }
 
             unsafe {
-                self.gc.mark_and_sweep(self.stack.iter(), program);
+                self.gc.mark_and_sweep(self.stack.iter(), &*self.call_stack);
             }
         }
 
-        if ip == current_chunk.code.len() {
+        if ip == current_chunk.unwrap_function().unwrap().code.len() {
             return Err(InterpretError {
                 opcode_index: ip - 1,
-                chunk_index: current_chunk_id,
+                chunk: current_chunk,
                 kind: InterpretErrorKind::MissedReturn,
             });
         }
@@ -159,21 +159,19 @@ impl VM {
         Ok(())
     }
 
+    #[inline(always)]
     fn execute_instruction(
         &mut self,
         ip: usize,
-        current_chunk_id: usize,
-        chunks: &[Chunk],
+        current_chunk: &StackObject,
     ) -> Result<InstructionExecution> {
         use InterpretErrorKind::*;
-
-        let current_chunk = &chunks[current_chunk_id];
 
         macro_rules! checked_stack_pop {
             () => {{
                 self.stack.pop().ok_or(InterpretError {
                     opcode_index: ip,
-                    chunk_index: current_chunk_id,
+                    chunk: current_chunk.clone(),
                     kind: StackUnderflow,
                 })
             }};
@@ -183,7 +181,7 @@ impl VM {
             ($e:expr) => {
                 InterpretError {
                     opcode_index: ip,
-                    chunk_index: current_chunk_id,
+                    chunk: current_chunk.clone(),
                     kind: $e,
                 }
             };
@@ -201,17 +199,6 @@ impl VM {
                             )
                         })
                     })
-                })
-            };
-        }
-
-        macro_rules! as_closure {
-            ($value:expr) => {
-                Ok($value).and_then(|closure| match &closure {
-                    Value::Closure(_gc_ptr, closure_ptr) => Ok(closure_ptr.unwrap_ref()),
-                    other => Err(runtime_error!(TypeError {
-                        message: format!("expected {} but got {}", "function", other.type_string())
-                    })),
                 })
             };
         }
@@ -236,7 +223,9 @@ impl VM {
             }};
         }
 
-        let jump = match current_chunk.code[ip] {
+        let chunk = current_chunk.unwrap_function().unwrap();
+
+        let jump = match chunk.code[ip] {
             Opcode::Print => {
                 let result = checked_stack_pop!()?;
                 println!("{}", result);
@@ -244,7 +233,7 @@ impl VM {
             }
             Opcode::LoadConst(idx) => {
                 let idx = idx as usize;
-                let value = current_chunk
+                let value = chunk
                     .constants
                     .get(idx)
                     .cloned()
@@ -335,7 +324,7 @@ impl VM {
             }
 
             Opcode::LoadGlobal(idx) => {
-                let key = current_chunk
+                let key = chunk
                     .global_names
                     .get(idx as usize)
                     .ok_or(runtime_error!(OperandIndexing))?;
@@ -417,7 +406,7 @@ impl VM {
                 let value_to_test = as_int!(checked_stack_pop!()?)?;
                 let result = if value_to_test == 0 {
                     let new_ip = ip + delta as usize;
-                    if new_ip >= current_chunk.code.len() {
+                    if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
@@ -433,7 +422,7 @@ impl VM {
                 self.stack.push(StackObject::Int(value_to_test));
                 if value_to_test == 1 {
                     let new_ip = ip + delta as usize;
-                    if new_ip >= current_chunk.code.len() {
+                    if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
@@ -444,7 +433,7 @@ impl VM {
 
             Opcode::JumpRelative(delta) => {
                 let new_ip = ip + delta as usize;
-                if new_ip >= current_chunk.code.len() {
+                if new_ip >= chunk.code.len() {
                     return Err(runtime_error!(JumpBounds));
                 }
                 InstructionExecution::LocalJump(new_ip)
@@ -452,7 +441,7 @@ impl VM {
 
             Opcode::JumpAbsolute(idx) => {
                 let new_ip = idx as usize;
-                if new_ip >= current_chunk.code.len() {
+                if new_ip >= chunk.code.len() {
                     return Err(runtime_error!(JumpBounds));
                 }
                 InstructionExecution::LocalJump(new_ip)
@@ -497,7 +486,7 @@ impl VM {
                 if object.unwrap_partial().is_some() {
                     let final_length = self.stack.len().saturating_sub(arity);
                     let args = self.stack.split_off(final_length);
-                    let mut target = checked_stack_pop!()?;
+                    let target = checked_stack_pop!()?;
 
                     //check that all blanks are filled for fully defined call
                     if args.len() != target.unwrap_partial().unwrap().count_blanks() {
@@ -539,16 +528,14 @@ impl VM {
                     self.stack.push(result);
                     InstructionExecution::NextInstruction
                 } else {
-                    let chunk_id = match object {
-                        Value::Function { chunk_id } => Ok(chunk_id),
-                        Value::Closure(_gc, ptr) => Ok(ptr.unwrap_ref().chunk_id),
-                        _ => Err(runtime_error!(TypeError {
+                    let new_chunk = VM::get_chunk(object.clone()).ok_or_else(|| {
+                        runtime_error!(TypeError {
                             message: format!("expected function but got {}", object.type_string())
-                        })),
-                    }?;
+                        })
+                    })?;
 
                     self.call_stack.push(CallStackValue {
-                        return_chunk: current_chunk_id,
+                        return_chunk: current_chunk.clone(),
                         return_ip: ip + 1,
                         return_locals_offset: self.locals_offset,
                         return_stack_size: self.stack.len() - 1 - arity,
@@ -556,18 +543,16 @@ impl VM {
 
                     self.locals_offset = self.stack.len() - 1 - arity;
 
-                    let current_chunk_id = chunk_id;
-                    let current_chunk = chunks.get(current_chunk_id).unwrap();
-
-                    if arity as usize != chunks.get(chunk_id).unwrap().arity {
+                    if arity as usize != new_chunk.unwrap_function().unwrap().arity {
                         return Err(runtime_error!(TypeError {
                             message: format!(
                                 "mismatched arguments: expected {} but got {}",
-                                current_chunk.arity, arity
+                                new_chunk.unwrap_function().unwrap().arity,
+                                arity
                             )
                         }));
                     } else {
-                        InstructionExecution::EnterChunk(chunk_id)
+                        InstructionExecution::EnterChunk(new_chunk)
                     }
                 }
             }
@@ -583,7 +568,7 @@ impl VM {
                 */
                 let final_length = self.stack.len().saturating_sub(arity);
                 let args = self.stack.split_off(final_length);
-                let mut target = checked_stack_pop!()?;
+                let target = checked_stack_pop!()?;
                 if !VM::is_callable(&target) {
                     return Err(runtime_error!(TypeError {
                         message: format!(
@@ -631,64 +616,46 @@ impl VM {
                 InstructionExecution::NextInstruction
             }
             Opcode::LoadBox => {
-                match checked_stack_pop!()? {
-                    Value::Box(_gc, _obj) => {
-                        let box_obj = _obj.unwrap_ref_mut();
+                let addr = checked_stack_pop!()?;
+                addr.unwrap_box()
+                    .map(|box_obj| {
                         self.stack.push(box_obj.0.clone());
-                    }
-                    _any_other => {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "expected {} but got {}",
-                                "box",
-                                _any_other.type_string()
-                            ),
-                        }))
-                    }
-                };
+                    })
+                    .ok_or_else(|| {
+                        runtime_error!(TypeError {
+                            message: format!("expected {} but got {}", "box", addr.type_string()),
+                        })
+                    })?;
+
                 InstructionExecution::NextInstruction
             }
 
             Opcode::StoreBox => {
                 let value = checked_stack_pop!()?;
                 let addr = checked_stack_pop!()?;
-
-                match addr {
-                    Value::Box(_gc, _obj) => {
-                        let box_obj = _obj.unwrap_ref_mut();
+                addr.unwrap_box()
+                    .map(|box_obj| {
                         box_obj.0 = value;
-                    }
-                    _any_other => {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "expected {} but got {}",
-                                "box",
-                                _any_other.type_string()
-                            ),
-                        }))
-                    }
-                };
+                    })
+                    .ok_or_else(|| {
+                        runtime_error!(TypeError {
+                            message: format!("expected {} but got {}", "box", addr.type_string()),
+                        })
+                    })?;
                 InstructionExecution::NextInstruction
             }
 
             Opcode::NewClosure => {
                 let value = checked_stack_pop!()?;
-                let chunk_id = match value {
-                    Value::Function { chunk_id } => chunk_id,
-                    other => {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "expected {} but got {}",
-                                "function",
-                                other.type_string()
-                            )
-                        }))
-                    }
-                };
+                if value.unwrap_function().is_none() {
+                    return Err(runtime_error!(TypeError {
+                        message: format!("expected {} but got {}", "function", value.type_string())
+                    }));
+                }
 
                 let ptr = self.gc.store(Closure {
                     closed_values: vec![],
-                    chunk_id,
+                    underlying: value,
                 });
                 self.stack.push(ptr);
                 InstructionExecution::NextInstruction
@@ -698,16 +665,16 @@ impl VM {
                 let value = checked_stack_pop!()?;
                 let closure = checked_stack_pop!()?;
 
-                match &closure {
-                    Value::Closure(_gc_ptr, closure_ptr) => {
-                        closure_ptr.unwrap_ref_mut().closed_values.push(value);
+                match closure.unwrap_closure() {
+                    Some(closure_ptr) => {
+                        closure_ptr.closed_values.push(value);
                     }
-                    other => {
+                    None => {
                         return Err(runtime_error!(TypeError {
                             message: format!(
                                 "expected {} but got {}",
-                                "function",
-                                other.type_string()
+                                "closure",
+                                closure.type_string()
                             )
                         }))
                     }
@@ -715,8 +682,18 @@ impl VM {
                 self.stack.push(closure);
                 InstructionExecution::NextInstruction
             }
+
             Opcode::LoadClosureValue(idx) => {
-                let closure = as_closure!(self.stack.get(self.locals_offset).unwrap())?;
+                let maybe_closure = self.stack.get(self.locals_offset).unwrap();
+                let closure = maybe_closure.unwrap_closure().ok_or_else(|| {
+                    runtime_error!(TypeError {
+                        message: format!(
+                            "expected {} but got {}",
+                            "function",
+                            maybe_closure.type_string()
+                        )
+                    })
+                })?;
                 let value = closure
                     .closed_values
                     .get(idx as usize)
@@ -747,18 +724,22 @@ impl VM {
     }
 
     fn is_callable(value: &StackObject) -> bool {
-        matches!(
-            value,
-            StackObject::Function { .. }
-                | StackObject::Closure(_, _)
-                | StackObject::Builtin(_)
-                | StackObject::Partial(..)
-        )
+        matches!(value, StackObject::Builtin(_))
+            || value.unwrap_closure().is_some()
+            || value.unwrap_partial().is_some()
+            || value.unwrap_function().is_some()
     }
-}
 
-impl Default for VM {
-    fn default() -> Self {
-        Self::new()
+    fn get_chunk(value: StackObject) -> Option<StackObject> {
+        if value.unwrap_function().is_some() {
+            return Some(value);
+        }
+        if value.unwrap_closure().is_some() {
+            return Some(value.unwrap_closure().unwrap().underlying.clone());
+        }
+        if value.unwrap_partial().is_some() {
+            return VM::get_chunk(value.unwrap_partial().unwrap().target.clone());
+        }
+        return None;
     }
 }

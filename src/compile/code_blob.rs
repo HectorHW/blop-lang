@@ -30,7 +30,7 @@ impl AnnotatedCodeBlob {
         self.relativity.append(&mut other.relativity);
     }
 
-    pub fn append(&mut self, mut other: Self) {
+    pub fn append(&mut self, other: Self) {
         let mut one = AnnotatedCodeBlob::new();
         std::mem::swap(self, &mut one);
         one = one.fuse(other);

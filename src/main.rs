@@ -1,4 +1,6 @@
 use crate::compile::compiler::Compiler;
+use crate::data::gc::GC;
+use crate::data::objects::Value;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::VM;
 use crate::parsing::ast::Expr;
@@ -58,36 +60,45 @@ fn main() {
     println!("{:?}", statements);
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
-    for (token, index_map) in &variable_types {
-        println!("{:?}", token);
-        for item in index_map.iter() {
-            println!("     {} {:?}", item.0, item.1);
-        }
-    }
 
     let statements = compile::syntax_level_opt::optimize(statements);
 
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
-    let mut vm = VM::new();
-    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc).unwrap();
+    let mut gc = unsafe { GC::default_gc() };
+    let entry_point =
+        Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
 
     #[cfg(feature = "print-chunk")]
-    for (i, chunk) in chunks.iter().enumerate() {
-        println!("chunk #{}:\n{}", i, chunk);
+    {
+        use crate::data::objects::OwnedObjectItem;
+        for chunk in gc
+            .items()
+            .filter(|p| matches!(p.item, OwnedObjectItem::Function(..)))
+        {
+            println!("{:?}", chunk);
+            match &chunk.item {
+                OwnedObjectItem::Function(chunk) => {
+                    println!("{}", chunk)
+                }
+                _ => unreachable!(),
+            }
+        }
     }
+
+    let mut vm = VM::new(&mut gc);
 
     println!("running");
 
     #[cfg(feature = "bench")]
     let start_time = Instant::now();
 
-    vm.run(&chunks).unwrap_or_else(|error| {
+    vm.run(entry_point).unwrap_or_else(|error| {
         println!(
             "error {:?} at instruction {}\nat line {}",
             error,
-            chunks[error.chunk_index].code[error.opcode_index],
-            chunks[error.chunk_index].opcode_to_line[error.opcode_index],
+            error.chunk.unwrap_function().unwrap().code[error.opcode_index],
+            error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index],
         );
     }); /**/
     #[cfg(feature = "bench")]
@@ -102,23 +113,24 @@ fn normalize_string(s: String) -> String {
 }
 
 pub fn run_file(filename: &str) -> Result<(), String> {
-    let (chunks, mut vm) = compile_file(filename)?;
+    let mut gc = unsafe { GC::default_gc() };
 
-    vm.run(&chunks).map_err(|error| {
+    let entry_point = compile_file(filename, &mut gc)?;
+    let mut vm = VM::new(&mut gc);
+    vm.run(entry_point).map_err(|error| {
         format!(
             "error {:?} at instruction {}\nat line {}",
             error,
-            chunks[error.chunk_index].code[error.opcode_index],
-            chunks[error.chunk_index].opcode_to_line[error.opcode_index],
+            error.chunk.unwrap_function().unwrap().code[error.opcode_index],
+            error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index],
         )
     })?;
-
     Ok(())
 }
 
-type CompilationResult = (Vec<Chunk>, VM);
+type CompilationResult = Value;
 
-pub fn compile_file(filename: &str) -> Result<CompilationResult, String> {
+pub fn compile_file(filename: &str, gc: &mut GC) -> Result<CompilationResult, String> {
     let file_content = std::fs::read_to_string(filename)
         .map_err(|_e| format!("failed to read file {}", filename))?;
     let file_content = normalize_string(file_content);
@@ -130,11 +142,6 @@ pub fn compile_file(filename: &str) -> Result<CompilationResult, String> {
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
     let statements = compile::syntax_level_opt::optimize(statements);
-    let mut vm = VM::new();
-    let chunks = Compiler::compile(&statements, variable_types, closed_names, &mut vm.gc)?;
-    #[cfg(debug_assertions)]
-    for idx in 0..chunks.len() {
-        assert_eq!(chunks[idx].opcode_to_line.len(), chunks[idx].code.len());
-    }
-    Ok((chunks, vm))
+    let chunks = Compiler::compile(&statements, variable_types, closed_names, gc)?;
+    Ok(chunks)
 }

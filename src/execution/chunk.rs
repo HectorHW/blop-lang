@@ -2,7 +2,7 @@ use crate::data::objects::Value;
 use crate::parsing::lexer::{Token, TokenKind};
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
     pub constants: Vec<Value>,
     pub global_names: Vec<String>,
@@ -149,7 +149,15 @@ impl Display for Chunk {
                 self.name.position
             )
         )?;
-        writeln!(f, "constants: {:?}", self.constants)?;
+        writeln!(
+            f,
+            "constants: {}",
+            self.constants
+                .iter()
+                .map(|v| { format!("{}", v) })
+                .collect::<Vec<String>>()
+                .join(", ")
+        )?;
         let strings = chunk_pretty_printer::draw_chunk(self);
         for s in &strings {
             writeln!(f, "{}", s)?
@@ -180,7 +188,7 @@ mod chunk_pretty_printer {
                 match opcode {
                     Opcode::LoadConst(idx) => {
                         format!(
-                            "{:<21} (value {:?})",
+                            "{:<21} (value {})",
                             format!("{}", Opcode::LoadConst(*idx)),
                             (chunk.constants[(*idx) as usize])
                         )
