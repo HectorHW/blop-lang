@@ -1,6 +1,6 @@
 use super::compile_file;
 use super::run_file;
-use crate::GC;
+use crate::{compile, GC};
 
 macro_rules! test_file {
     ($name:ident) => {
@@ -92,9 +92,10 @@ fn test_tail_call_optimization_application() {
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))
         .unwrap();
 
+    let statements = compile::checks::check_optimize(statements).unwrap();
+
     let (variable_types, closed_names) =
         crate::compile::syntax_level_check::check(&statements).unwrap();
-    let statements = crate::compile::syntax_level_opt::optimize(statements);
     let mut gc = unsafe { GC::default_gc() };
     let entry = Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
     let mut vm = VM::new(&mut gc);

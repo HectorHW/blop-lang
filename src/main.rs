@@ -63,8 +63,6 @@ fn main() {
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
 
-    let statements = compile::syntax_level_opt::optimize(statements);
-
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
     let mut gc = unsafe { GC::default_gc() };
@@ -142,8 +140,9 @@ pub fn compile_file(filename: &str, gc: &mut GC) -> Result<CompilationResult, St
     let statements: Expr = program_parser::program(&tokens)
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
 
+    let statements = compile::checks::check_optimize(statements).unwrap();
+
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
-    let statements = compile::syntax_level_opt::optimize(statements);
     let chunks = Compiler::compile(&statements, variable_types, closed_names, gc)?;
     Ok(chunks)
 }
