@@ -88,7 +88,7 @@ fn test_tail_call_optimization_application() {
     let tokens = crate::parsing::lexer::tokenize(&file_content).unwrap();
     use crate::parsing::parser::program_parser;
 
-    let statements: Box<Expr> = program_parser::program(&tokens)
+    let statements: Expr = program_parser::program(&tokens)
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))
         .unwrap();
 

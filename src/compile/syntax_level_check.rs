@@ -30,7 +30,7 @@ pub type ClosedNamesMap = HashMap<Token, IndexSet<String>>;
 
 pub fn check(program: &Program) -> Result<(BlockNameMap, ClosedNamesMap), String> {
     let mut checker = Checker::new();
-    let block_token = match program.as_ref() {
+    let block_token = match program {
         Expr::Block(block_token, _block_end_token, _) => block_token,
         _ => panic!("this should never happen as program is parsed as block"),
     };
@@ -285,7 +285,7 @@ impl Checker {
                     _ => Err(format!("cannot compile operator {:?}", op)),
                 }
             }
-            Expr::IfExpr(cond, then_body, else_body) => {
+            Expr::If(cond, then_body, else_body) => {
                 self.visit_expr(cond)?;
                 self.visit_expr(then_body)?;
                 else_body

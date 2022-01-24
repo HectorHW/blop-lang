@@ -7,15 +7,21 @@ macro_rules! t {
     };
 }
 
+macro_rules! bin {
+    ($op:expr, $a:expr, $b:expr) => {
+        Expr::Binary($op, Box::new($a), Box::new($b))
+    };
+}
+
 enum CallVariant {
-    Normal(Vec<Box<Expr>>),
-    Partial(Vec<Option<Box<Expr>>>),
+    Normal(Vec<Expr>),
+    Partial(Vec<Option<Expr>>),
 }
 
 peg::parser! {
     pub grammar program_parser() for [Token] {
         use TokenKind::*;
-        pub rule program() -> Box<Expr>
+        pub rule program() -> Expr
             = block_expr()
 
         rule block() -> (Token, Token, Vec<Stmt>) =
@@ -37,7 +43,7 @@ peg::parser! {
             [t!(Var)] n:name() e:assignment_right_side()?
                 {Stmt::VarDeclaration(n, e)}
 
-        rule assignment_right_side() -> Box<Expr> =
+        rule assignment_right_side() -> Expr =
             [t!(Equals)] e:expr() {e}
 
         rule function_decl_stmt() -> Stmt =
@@ -63,34 +69,34 @@ peg::parser! {
         rule assert_stmt() -> Stmt =
             [a@t!(Assert)] e:expr() {Stmt::Assert(a, e)}
 
-        rule if_expr() -> Box<Expr> =
+        rule if_expr() -> Expr =
             if_elif_else()/ if_elif() / if_then()
 
-        rule if_elif() -> Box<Expr> =
+        rule if_elif() -> Expr =
             [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)]? elif:elif_body()+
                 {
                     let mut last_if_cond = None;
                     for (cond, body) in elif.into_iter().rev() {
-                        last_if_cond = Some(Box::new(Expr::IfExpr(cond, body, last_if_cond)));
+                        last_if_cond = Some(Box::new(Expr::IfExpr(Box::new(cond), Box::new(body), last_if_cond)));
                     }
-                    Box::new(Expr::IfExpr(cond, then, last_if_cond))
+                    Expr::IfExpr(Box::new(cond), Box::new(then), last_if_cond)
                 }
 
-        rule if_then() -> Box<Expr> =
+        rule if_then() -> Expr =
             [t!(If)] cond:simple_expr() then:expr()
-                {Box::new(Expr::IfExpr(cond, then, None))}
+                {Expr::IfExpr(Box::new(cond), Box::new(then), None)}
 
-        rule if_elif_else() -> Box<Expr> =
+        rule if_elif_else() -> Expr =
             [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)]? elif:elif_body()* [t!(Else)] else_body:expr()
                 {
-                    let mut last_if_cond = Some(else_body);
+                    let mut last_if_cond = Some(Box::new(else_body));
                     for (cond, body) in elif.into_iter().rev() {
-                        last_if_cond = Some(Box::new(Expr::IfExpr(cond, body, last_if_cond)));
+                        last_if_cond = Some(Box::new(Expr::IfExpr(Box::new(cond), Box::new(body), last_if_cond)));
                     }
 
-                    Box::new(Expr::IfExpr(cond, then, last_if_cond))}
+                    Expr::IfExpr(Box::new(cond), Box::new(then), last_if_cond)}
 
-        rule elif_body() -> (Box<Expr>, Box<Expr>) =
+        rule elif_body() -> (Expr, Expr) =
             [t!(ELif)] elif_cond:simple_expr() elif_body: expr() [t!(LineEnd)]? {
                 (elif_cond, elif_body)
             }
@@ -98,80 +104,79 @@ peg::parser! {
         rule pass_stmt() -> Stmt =
             [t@t!(Pass)] {Stmt::Pass(t)}
 
-        rule expr() -> Box<Expr> =
+        rule expr() -> Expr =
             block_expr() /
             if_expr() /
             simple_expr()
 
-        rule block_expr() -> Box<Expr> =
-            b:block() {Box::new(Expr::Block(b.0, b.1, b.2))}
+        rule block_expr() -> Expr =
+            b:block() {Expr::Block(b.0, b.1, b.2)}
 
-        rule simple_expr() -> Box<Expr> =
+        rule simple_expr() -> Expr =
             arrow() /
-
             arithmetic()
 
-        rule arrow() -> Box<Expr> =
+        rule arrow() -> Expr =
             p:paren_name_list() [t@t!(Arrow)] b:simple_expr() {
-            Box::new(Expr::AnonFunction(p, t, b))
+            Expr::AnonFunction(p, t, Box::new(b))
         }
 
-        rule arithmetic() -> Box<Expr> = precedence! {
+        rule arithmetic() -> Expr = precedence! {
             x: (@) [op@t!(Or)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             --
             x: (@) [op@t!(And)] y: @
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             --
             [op@t!(Not)] x: @
                 {
-                    Box::new(Expr::Unary(op, x))
+                    Expr::Unary(op, Box::new(x))
                 }
 
             --
             x: (@) [op@t!(CompareEquals)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             x: (@) [op@t!(CompareNotEquals)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             --
             x: (@) [op@t!(CompareGreater)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             x: (@) [op@t!(CompareGreaterEqual)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             x: (@) [op@t!(CompareLess)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             x: (@) [op@t!(CompareLessEqual)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
 
             --
             x: (@) [op@t!(Plus)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             x: (@) [op@t!(Minus)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             --
             x: (@) [op@t!(Star)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             x: (@) [op@t!(Slash)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             x: (@) [op@t!(Mod)] y:@
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             --
             x:@ [op@t!(Power)] y:(@)
-                {Box::new(Expr::Binary(op, x, y))}
+                {bin!(op, x, y)}
             --
             n:call() {n}
         }
 
-        rule call() -> Box<Expr> =
+        rule call() -> Expr =
             target:term() calls:call_parens()* {
                 let mut res = target;
                 for parens in calls {
                 match parens {
                     CallVariant::Normal(args) => {
-                        res = Box::new(Expr::Call(res, args))
+                        res = Expr::Call(Box::new(res), args)
                     }
                     CallVariant::Partial(args) => {
-                        res = Box::new(Expr::PartialCall(res, args))
+                        res = Expr::PartialCall(Box::new(res), args)
                     }
                 }
             }
@@ -185,15 +190,15 @@ peg::parser! {
             CallVariant::Partial(args)
         }
 
-        rule maybe_argument() -> Option<Box<Expr>> =
+        rule maybe_argument() -> Option<Expr> =
             e:simple_expr() {Some(e)}
         / [t!(Blank)] {None}
 
-        rule term() -> Box<Expr>
-            = [num@t!(Number(..))] { Box::new(Expr::Number(num))}
+        rule term() -> Expr
+            = [num@t!(Number(..))] {Expr::Number(num)}
             / t:name()
-                {Box::new(Expr::Name(t))}
-            / [s@t!(ConstString(..))] {Box::new(Expr::ConstString(s))}
+                {Expr::Name(t)}
+            / [s@t!(ConstString(..))] {Expr::ConstString(s)}
             / [t!(LParen)] e:expr() [t!(RParen)] {e}
 
 

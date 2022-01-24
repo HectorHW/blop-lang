@@ -69,7 +69,7 @@ impl<'gc> Compiler<'gc> {
     ) -> Result<StackObject, String> {
         let mut compiler = Compiler::new(variable_types, closed_names, gc);
 
-        let block_identifier = match program.as_ref() {
+        let block_identifier = match program {
             Expr::Block(bb, _be, _) => bb,
             _ => &Token {
                 kind: BeginBlock,
@@ -724,7 +724,7 @@ impl<'gc> Compiler<'gc> {
                 }
             },
 
-            Expr::IfExpr(cond, then_body, else_body) => {
+            Expr::If(cond, then_body, else_body) => {
                 self.require_value();
                 let condition = self.visit_expr(cond)?;
                 self.pop_requirement();

@@ -59,9 +59,9 @@ impl Optimizer {
                 let body = self.visit_expr(expr);
                 Stmt::Assignment(target, body)
             }
-            Stmt::Expression(e) => match *e {
-                Expr::SingleStatement(s) => self.visit_stmt(s),
-                _any_other => Stmt::Expression(self.visit_expr(Box::new(_any_other))),
+            Stmt::Expression(e) => match e {
+                Expr::SingleStatement(s) => self.visit_stmt(*s),
+                any_other => Stmt::Expression(self.visit_expr(any_other)),
             },
             a @ Stmt::Assert(..) => a, //never optimize assert expression
             Stmt::FunctionDeclaration { name, args, body } => {
@@ -74,9 +74,7 @@ impl Optimizer {
         }
     }
 
-    fn visit_expr(&mut self, expr: Box<Expr>) -> Box<Expr> {
-        let expr = *expr;
-
+    fn visit_expr(&mut self, expr: Expr) -> Expr {
         let expr: Expr = match expr {
             n @ Expr::Number(..) => n,
             s @ Expr::ConstString(..) => s,
@@ -84,14 +82,14 @@ impl Optimizer {
             na @ Expr::Name(..) => na,
 
             Expr::Unary(op, a) => {
-                let a = self.visit_expr(a);
-                Expr::Unary(op, a)
+                let a = self.visit_expr(*a);
+                Expr::Unary(op, Box::new(a))
             }
 
             Expr::Binary(op, a, b) => {
-                let a = self.visit_expr(a);
-                let b = self.visit_expr(b);
-                match (a.as_ref(), b.as_ref()) {
+                let a = self.visit_expr(*a);
+                let b = self.visit_expr(*b);
+                match (&a, &b) {
                     (Expr::Number(token_a), Expr::Number(token_b)) => {
                         let na = token_a.get_number().unwrap();
                         let nb = token_b.get_number().unwrap();
@@ -107,7 +105,7 @@ impl Optimizer {
                                 }),
                                 None => {
                                     eprintln!("encountered zero division while folding constants, assuming it is intended [{}]", op.position);
-                                    Expr::Binary(op, a, b)
+                                    Expr::Binary(op, Box::new(a), Box::new(b))
                                 }
                             },
 
@@ -118,7 +116,7 @@ impl Optimizer {
                                 }),
                                 None => {
                                     eprintln!("encountered modulo 0 while folding constants, assuming it is intended [{}]", op.position);
-                                    Expr::Binary(op, a, b)
+                                    Expr::Binary(op, Box::new(a), Box::new(b))
                                 }
                             },
 
@@ -141,45 +139,49 @@ impl Optimizer {
                             _any_other => panic!("unexpected binary operator {}", _any_other),
                         }
                     }
-                    _other_cases => Expr::Binary(op, a, b),
+                    _other_cases => Expr::Binary(op, Box::new(a), Box::new(b)),
                 }
             }
 
-            Expr::IfExpr(cond, then_body, else_body) => {
-                let cond = self.visit_expr(cond);
-                let then_body = self.visit_expr(then_body);
-                let else_body = else_body.map(|x| self.visit_expr(x));
-                Expr::IfExpr(cond, then_body, else_body)
+            Expr::If(cond, then_body, else_body) => {
+                let cond = self.visit_expr(*cond);
+                let then_body = self.visit_expr(*then_body);
+                let else_body = else_body.map(|x| self.visit_expr(*x));
+                Expr::If(
+                    Box::new(cond),
+                    Box::new(then_body),
+                    else_body.map(|e| Box::new(e)),
+                )
             }
 
             Expr::Block(bb, be, mut statements) => {
                 if statements.len() == 1 {
                     let statement = statements.remove(0);
-                    let e = Box::new(Expr::SingleStatement(statement));
-                    *self.visit_expr(e)
+                    let e = Expr::SingleStatement(Box::new(statement));
+                    self.visit_expr(e)
                 } else {
                     let statements = statements.into_iter().map(|s| self.visit_stmt(s)).collect();
                     Expr::Block(bb, be, statements)
                 }
             }
             Expr::Call(target, args) => {
-                let target = self.visit_expr(target);
+                let target = self.visit_expr(*target);
                 let args = args.into_iter().map(|a| self.visit_expr(a)).collect();
-                Expr::Call(target, args)
+                Expr::Call(Box::new(target), args)
             }
 
             Expr::PartialCall(target, args) => {
-                let target = self.visit_expr(target);
+                let target = self.visit_expr(*target);
                 let args = args
                     .into_iter()
                     .map(|a| a.map(|a| self.visit_expr(a)))
                     .collect();
-                Expr::PartialCall(target, args)
+                Expr::PartialCall(Box::new(target), args)
             }
 
-            Expr::SingleStatement(s) => match s {
-                //singleStatement is artificial node representing block wit single statement
-                Stmt::Print(t, p) => Expr::SingleStatement(Stmt::Print(t, p)),
+            Expr::SingleStatement(s) => match *s {
+                //singleStatement is artificial node representing block with single statement
+                Stmt::Print(t, p) => Expr::SingleStatement(Box::new(Stmt::Print(t, p))),
 
                 Stmt::VarDeclaration(_name, maybe_body) => {
                     /*
@@ -191,17 +193,17 @@ impl Optimizer {
 
                     variable is not used anywhere else, can be substituted with expr
                     */
-                    maybe_body.map(|e| *e).unwrap_or(Expr::Number(Token {
+                    maybe_body.unwrap_or(Expr::Number(Token {
                         position: _name.position,
                         kind: TokenKind::Number(0),
                     }))
                 }
 
-                a @ Stmt::Assignment(..) => Expr::SingleStatement(a),
+                a @ Stmt::Assignment(..) => Expr::SingleStatement(Box::new(a)),
 
-                Stmt::Expression(e) => *self.visit_expr(e),
+                Stmt::Expression(e) => self.visit_expr(e),
 
-                a @ Stmt::Assert(..) => Expr::SingleStatement(a),
+                a @ Stmt::Assert(..) => Expr::SingleStatement(Box::new(a)),
 
                 Stmt::FunctionDeclaration { name, .. } => {
                     /*
@@ -220,15 +222,15 @@ impl Optimizer {
                     //Expr::SingleStatement(a)
                 }
 
-                p @ Stmt::Pass(..) => Expr::SingleStatement(p),
+                p @ Stmt::Pass(..) => Expr::SingleStatement(Box::new(p)),
             },
 
             anon @ Expr::AnonFunction(..) => anon,
         };
-        Box::new(expr)
+        expr
     }
 
-    fn check_function(&mut self, name: Token, args: Vec<Token>, body: Box<Expr>) -> Stmt {
+    fn check_function(&mut self, name: Token, args: Vec<Token>, body: Expr) -> Stmt {
         let mut scope_stack = vec![];
         std::mem::swap(&mut self.names, &mut scope_stack);
         let previous_total_variables = self.total_variables;

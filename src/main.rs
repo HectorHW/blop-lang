@@ -137,7 +137,7 @@ pub fn compile_file(filename: &str, gc: &mut GC) -> Result<CompilationResult, St
     let tokens = parsing::lexer::tokenize(&file_content)?;
     use parsing::parser::program_parser;
 
-    let statements: Box<Expr> = program_parser::program(&tokens)
+    let statements: Expr = program_parser::program(&tokens)
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
 
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;

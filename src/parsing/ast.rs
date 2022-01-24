@@ -2,16 +2,16 @@ use crate::parsing::lexer::Token;
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Print(Token, Box<Expr>),
-    VarDeclaration(Token, Option<Box<Expr>>),
-    Assignment(Token, Box<Expr>),
-    Expression(Box<Expr>),
-    Assert(Token, Box<Expr>),
+    Print(Token, Expr),
+    VarDeclaration(Token, Option<Expr>),
+    Assignment(Token, Expr),
+    Expression(Expr),
+    Assert(Token, Expr),
     Pass(Token),
     FunctionDeclaration {
         name: Token,
         args: Vec<Token>,
-        body: Box<Expr>,
+        body: Expr,
     },
 }
 
@@ -22,12 +22,12 @@ pub enum Expr {
     ConstString(Token),
     Binary(Token, Box<Expr>, Box<Expr>),
     Unary(Token, Box<Expr>),
-    IfExpr(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+    If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Block(Token, Token, Vec<Stmt>),
-    SingleStatement(Stmt),
-    Call(Box<Expr>, Vec<Box<Expr>>),
-    PartialCall(Box<Expr>, Vec<Option<Box<Expr>>>),
+    SingleStatement(Box<Stmt>),
+    Call(Box<Expr>, Vec<Expr>),
+    PartialCall(Box<Expr>, Vec<Option<Expr>>),
     AnonFunction(Vec<Token>, Token, Box<Expr>),
 }
 
-pub type Program = Box<Expr>;
+pub type Program = Expr;
