@@ -77,24 +77,24 @@ peg::parser! {
                 {
                     let mut last_if_cond = None;
                     for (cond, body) in elif.into_iter().rev() {
-                        last_if_cond = Some(Box::new(Expr::IfExpr(Box::new(cond), Box::new(body), last_if_cond)));
+                        last_if_cond = Some(Box::new(Expr::If(Box::new(cond), Box::new(body), last_if_cond)));
                     }
-                    Expr::IfExpr(Box::new(cond), Box::new(then), last_if_cond)
+                    Expr::If(Box::new(cond), Box::new(then), last_if_cond)
                 }
 
         rule if_then() -> Expr =
             [t!(If)] cond:simple_expr() then:expr()
-                {Expr::IfExpr(Box::new(cond), Box::new(then), None)}
+                {Expr::If(Box::new(cond), Box::new(then), None)}
 
         rule if_elif_else() -> Expr =
             [t!(If)] cond:simple_expr() then:expr() [t!(LineEnd)]? elif:elif_body()* [t!(Else)] else_body:expr()
                 {
                     let mut last_if_cond = Some(Box::new(else_body));
                     for (cond, body) in elif.into_iter().rev() {
-                        last_if_cond = Some(Box::new(Expr::IfExpr(Box::new(cond), Box::new(body), last_if_cond)));
+                        last_if_cond = Some(Box::new(Expr::If(Box::new(cond), Box::new(body), last_if_cond)));
                     }
 
-                    Expr::IfExpr(Box::new(cond), Box::new(then), last_if_cond)}
+                    Expr::If(Box::new(cond), Box::new(then), last_if_cond)}
 
         rule elif_body() -> (Expr, Expr) =
             [t!(ELif)] elif_cond:simple_expr() elif_body: expr() [t!(LineEnd)]? {

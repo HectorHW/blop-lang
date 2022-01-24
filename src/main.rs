@@ -59,6 +59,8 @@ fn main() {
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
 
+    let statements = compile::checks::check_optimize(statements).unwrap();
+
     let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
 
     let statements = compile::syntax_level_opt::optimize(statements);
