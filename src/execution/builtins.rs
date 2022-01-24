@@ -33,7 +33,7 @@ pub fn apply_builtin(builtin_name: &str, args: &[Value]) -> Result<Value, String
 
 pub fn get_builtin(builtin_name: &str) -> Option<StackObject> {
     match builtin_name {
-        "int" => Some(StackObject::Builtin("int")),
+        "int" => Some(StackObject::Builtin(&"int")),
         _ => None,
     }
 }

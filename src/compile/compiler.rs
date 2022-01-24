@@ -1,7 +1,7 @@
 use crate::compile::syntax_level_check::{BlockNameMap, ClosedNamesMap, VariableType};
 use crate::data::gc::GC;
-use crate::data::objects::Value;
-use crate::execution::chunk::{Chunk, Opcode};
+use crate::data::objects::{StackObject, Value};
+use crate::execution::chunk::Opcode;
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::TokenKind::BeginBlock;
 use crate::parsing::lexer::{Index, Token, TokenKind};
@@ -18,7 +18,6 @@ enum ValueRequirement {
 pub struct Compiler<'gc> {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
-    chunks: Vec<Chunk>,
     total_variables: usize,
     total_closed_variables: usize,
     current_chunk_idx: Vec<usize>,
@@ -50,7 +49,6 @@ impl<'gc> Compiler<'gc> {
         Compiler {
             names: vec![],
             value_requirements: vec![],
-            chunks: vec![],
             total_variables: 0,
             total_closed_variables: 0,
             current_chunk_idx: vec![0],
@@ -68,16 +66,9 @@ impl<'gc> Compiler<'gc> {
         variable_types: BlockNameMap,
         closed_names: ClosedNamesMap,
         gc: &'gc mut GC,
-    ) -> Result<Vec<Chunk>, String> {
+    ) -> Result<StackObject, String> {
         let mut compiler = Compiler::new(variable_types, closed_names, gc);
 
-        compiler.chunks = vec![Chunk::new(
-            Token {
-                kind: TokenKind::Name("<script>".to_string()),
-                position: Index(0, 0),
-            },
-            0,
-        )];
         let block_identifier = match program.as_ref() {
             Expr::Block(bb, _be, _) => bb,
             _ => &Token {
@@ -92,14 +83,15 @@ impl<'gc> Compiler<'gc> {
         compiler.pop_requirement();
 
         blob += (Opcode::Return, 0);
-        compiler.chunks[0] = blob.into_chunk(
+        let program_chunk = blob.into_chunk(
             Token {
                 kind: TokenKind::Name("<script>".to_string()),
                 position: Index(0, 0),
             },
             0,
         );
-        Ok(compiler.chunks)
+        let pointer = compiler.gc.store(program_chunk);
+        Ok(pointer)
     }
 
     fn require_value(&mut self) {
@@ -230,10 +222,6 @@ impl<'gc> Compiler<'gc> {
             total_variables: self.total_variables,
             total_closed_variables: self.total_closed_variables,
         };
-
-        let new_chunk_idx = self.chunks.len();
-        self.chunks.push(Chunk::new(name.clone(), arity));
-        self.current_chunk_idx.push(new_chunk_idx);
         self.current_function_was_possibly_overwritten.push(false);
         self.total_variables = 0;
         self.total_closed_variables = 0;
@@ -246,15 +234,13 @@ impl<'gc> Compiler<'gc> {
         previous_state
     }
 
-    fn pop_function_compilation_state(&mut self, s: FunctionCompilerState) -> usize {
+    fn pop_function_compilation_state(&mut self, s: FunctionCompilerState) {
         let mut state = s;
         std::mem::swap(&mut self.names, &mut state.names);
-        let idx = self.current_chunk_idx.pop().unwrap();
         self.total_variables = state.total_variables;
         self.total_closed_variables = state.total_closed_variables;
         self.current_function_was_possibly_overwritten.pop();
         self._current_function.pop();
-        idx
     }
 
     fn compile_function(
@@ -262,7 +248,7 @@ impl<'gc> Compiler<'gc> {
         name: &Token,
         args: &[Token],
         body: &Expr,
-    ) -> Result<usize, String> {
+    ) -> Result<StackObject, String> {
         //save current compiler
 
         let prev_state = self.create_function_compilation_state(name, args.len());
@@ -341,9 +327,10 @@ impl<'gc> Compiler<'gc> {
         current_chunk += (Opcode::Return, return_index);
 
         //load current compiler
-        let new_chunk_idx = self.pop_function_compilation_state(prev_state);
-        self.chunks[new_chunk_idx] = current_chunk.into_chunk(name.clone(), args.len());
-        Ok(new_chunk_idx)
+        self.pop_function_compilation_state(prev_state);
+        let chunk = current_chunk.into_chunk(name.clone(), args.len());
+        let pointer = self.gc.store(chunk);
+        Ok(pointer)
     }
 
     fn close_function(&mut self, function_name: &Token) -> Result<AnnotatedCodeBlob, String> {
@@ -446,7 +433,7 @@ impl<'gc> Compiler<'gc> {
                     varname, target.position
                 ))?;
 
-                if *self.current_chunk_idx.last().unwrap() != 0 {
+                if self.current_function().is_some() {
                     //compiling some function
                     if var_type != VariableType::Closed && var_idx == 0 {
                         //slot 0 - current function
@@ -516,9 +503,7 @@ impl<'gc> Compiler<'gc> {
             } => {
                 let new_chunk_idx = self.compile_function(function_name, args, body)?;
 
-                let const_idx = result.get_or_create_constant(Value::Function {
-                    chunk_id: new_chunk_idx,
-                });
+                let const_idx = result.get_or_create_constant(new_chunk_idx);
 
                 if let Some((_, idx)) = self.lookup_block(function_name.get_string().unwrap()) {
                     //load pointer
@@ -900,9 +885,7 @@ impl<'gc> Compiler<'gc> {
             Expr::AnonFunction(args, name, body) => {
                 let new_chunk_idx = self.compile_function(name, args, body)?;
 
-                let const_idx = result.get_or_create_constant(Value::Function {
-                    chunk_id: new_chunk_idx,
-                });
+                let const_idx = result.get_or_create_constant(new_chunk_idx);
 
                 result.push(Opcode::LoadConst(const_idx as u16), name.position.0); //code block
 
