@@ -61,7 +61,10 @@ impl Visitor<String> for Folder {
 
                     TokenKind::CompareEquals => FoldResult::Ok(if na == nb { 1 } else { 0 }),
 
-                    TokenKind::Power => FoldResult::Ok(na.pow(nb as u64 as u32)),
+                    TokenKind::Power => match na.checked_pow(nb as u64 as u32) {
+                        Some(value) => FoldResult::Ok(value),
+                        None => FoldResult::Warning(format!("overflow when folding power at [{}]", op.position))
+                    },
 
                     _any_other => FoldResult::Error(format!("unexpected binary operator {}", _any_other)),
                 };
