@@ -451,9 +451,10 @@ impl Debug for OwnedObject {
             ),
             OwnedObjectItem::Function(chunk) => {
                 format!(
-                    "Function {} of {} args",
+                    "Function {} of {} args at {:p}",
                     chunk.name.get_string().unwrap(),
-                    chunk.arity
+                    chunk.arity,
+                    self
                 )
             }
         };

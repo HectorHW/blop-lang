@@ -4,6 +4,7 @@ use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::iter::once;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
@@ -142,9 +143,13 @@ impl<'gc> VM<'gc> {
                 return Err(runtime_error!(StackOverflow));
                 //TODO include last stack frame?
             }
-
-            unsafe {
-                self.gc.mark_and_sweep(self.stack.iter(), &*self.call_stack);
+            if self.gc.needs_collection() {
+                unsafe {
+                    self.gc.mark_and_sweep(
+                        self.stack.iter().chain(once(&current_chunk)),
+                        &*self.call_stack,
+                    );
+                }
             }
         }
 
