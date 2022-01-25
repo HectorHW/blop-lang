@@ -1,8 +1,14 @@
+#1 base allocation - script
+#1 allocation - boxing here
 var a = 2
-var b = a*8
-a = 16
-print a+b
 
-var c = 1 ?= 1
-print c
-1+2
+#trigger enough allocations (10 in debug-gc)
+#2 allocations here for each definition - creation of function object and creation of closure
+def f1 = a
+def f2 = a
+def f3 = a
+def f4 = a
+
+#this should trigger quick pass
+#1 compile-time allocation - creation of string object
+print "is it working?"

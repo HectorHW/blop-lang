@@ -83,6 +83,13 @@ impl<'gc> VM<'gc> {
         let mut ip = 0;
         let mut current_chunk = entry_point;
 
+        self.call_stack.push(CallStackValue {
+            return_chunk: current_chunk.clone(),
+            return_ip: 0,
+            return_locals_offset: 0,
+            return_stack_size: usize::MAX,
+        });
+
         macro_rules! runtime_error {
             ($e:expr) => {
                 InterpretError {
@@ -142,9 +149,10 @@ impl<'gc> VM<'gc> {
                 return Err(runtime_error!(StackOverflow));
                 //TODO include last stack frame?
             }
-
-            unsafe {
-                self.gc.mark_and_sweep(self.stack.iter(), &*self.call_stack);
+            if self.gc.needs_collection() {
+                unsafe {
+                    self.gc.mark_and_sweep(self.stack.iter(), &*self.call_stack);
+                }
             }
         }
 
@@ -590,7 +598,7 @@ impl<'gc> VM<'gc> {
             }
 
             Opcode::Return => {
-                if self.call_stack.is_empty() {
+                if self.call_stack.len() <= 1 {
                     return Ok(InstructionExecution::Termination);
                 }
                 let return_info = self.call_stack.pop().unwrap();
