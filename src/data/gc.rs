@@ -405,6 +405,11 @@ impl GC {
         }
     }
 
+    /// quick check to determine if we need to trigger any stage of garbage collection
+    pub fn needs_collection(&self) -> bool {
+        self.young_objects.len() >= self.new_allocations_threshold_young
+    }
+
     /// (maybe) collects garbage from internal list of objects (created with allocate_new or store)
     ///
     /// # Arguments
@@ -419,7 +424,7 @@ impl GC {
     where
         I: Iterator<Item = &'a StackObject>,
     {
-        if self.young_objects.len() < self.new_allocations_threshold_young {
+        if !self.needs_collection() {
             return;
         }
 
