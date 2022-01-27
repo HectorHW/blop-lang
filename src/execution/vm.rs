@@ -141,7 +141,12 @@ impl<'gc> VM<'gc> {
                     current_chunk = new_chunk_id;
                 }
 
-                InstructionExecution::Termination => return Ok(()),
+                InstructionExecution::Termination => {
+                    self.stack.clear();
+                    self.call_stack.clear();
+                    self.locals_offset = 0;
+                    return Ok(());
+                }
             }
 
             if self.stack.len() > self.stack_max_size || self.call_stack.len() > self.stack_max_size
