@@ -1,19 +1,5 @@
-def sqrt_iter(guess, x) =
-    if good_enough(guess, x)
-        guess
-    else
-        sqrt_iter(improve(guess, x), x)
+#argument a shadows function a
+#as a result, call inside function is performed on argument instead of treating it like recursive
+def a(a) = a()
 
-def improve(guess, x) = average(guess, x/guess)
-
-def average(x, y) = (x+y)/2
-
-def abs(x) = if x<0 0-x else x
-
-def square(x) = x*x
-
-def good_enough(guess, x) = abs(square(guess)-x)<0.001
-
-def sqrt(x) = sqrt_iter(1.0, x)
-
-print sqrt(7.0)
+print a(() => 1)

@@ -8,8 +8,7 @@ use std::collections::HashMap;
 pub struct AnnotationGenerator<'a> {
     annotations: &'a mut Annotations,
 
-    scopes: Vec<(ScopeType, Token, HashMap<String, bool>)>,
-    blocks: Vec<Token>,
+    scopes: Vec<(ScopeType, Token, HashMap<String, bool>)>
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -18,11 +17,6 @@ enum ScopeType {
     Function,
 }
 
-enum LookupResult {
-    FoundInitInLocal(Token),
-    FoundAnyInOuter(Token, usize),
-    NotFound,
-}
 
 impl<'a> AnnotationGenerator<'a> {
     pub fn generate_annotations(
@@ -32,7 +26,6 @@ impl<'a> AnnotationGenerator<'a> {
         let mut annotator = AnnotationGenerator {
             annotations,
             scopes: Default::default(),
-            blocks: Default::default(),
         };
 
         let block_id = match &ast {
@@ -46,10 +39,6 @@ impl<'a> AnnotationGenerator<'a> {
         annotator.new_scope(ScopeType::Block, block_id);
 
         annotator.visit_expr(ast)
-    }
-
-    fn current_block(&self) -> &Token {
-        self.blocks.last().unwrap()
     }
 
     fn declare_name(&mut self, variable_name: &Token) {
@@ -146,12 +135,12 @@ impl<'a> AnnotationGenerator<'a> {
 }
 
 impl<'a> Visitor<String> for AnnotationGenerator<'a> {
-    fn visit_var_stmt(&mut self, name: &Token, mut rhs: Option<&Expr>) -> Result<(), String> {
+    fn visit_var_stmt(&mut self, name: &Token, rhs: Option<&Expr>) -> Result<(), String> {
         if let Some(value) = rhs {
             self.visit_expr(value)?;
         }
 
-        self.define_name(&name);
+        self.define_name(name);
 
         Ok(())
     }
@@ -162,8 +151,8 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
         args: &[Token],
         body: &Expr,
     ) -> Result<(), String> {
-        self.new_scope(ScopeType::Function, &name);
-        self.annotations.get_or_create_closure_scope(&name);
+        self.new_scope(ScopeType::Function, name);
+        self.annotations.get_or_create_closure_scope(name);
         for arg_name in args {
             self.declare_name(arg_name);
             self.define_name(arg_name);
@@ -186,8 +175,8 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
         _end_token: &Token,
         containing_statements: &[Stmt],
     ) -> Result<(), String> {
-        self.new_scope(ScopeType::Block, &start_token);
-        self.annotations.get_or_create_block_scope(&start_token);
+        self.new_scope(ScopeType::Block, start_token);
+        self.annotations.get_or_create_block_scope(start_token);
 
         //declare variables
         for statement in containing_statements {
@@ -216,8 +205,8 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
         arrow: &Token,
         body: &Expr,
     ) -> Result<(), String> {
-        self.new_scope(ScopeType::Function, &arrow);
-        self.annotations.get_or_create_closure_scope(&arrow);
+        self.new_scope(ScopeType::Function, arrow);
+        self.annotations.get_or_create_closure_scope(arrow);
         for arg_name in args {
             self.declare_name(arg_name);
             self.define_name(arg_name);

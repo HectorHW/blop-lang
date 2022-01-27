@@ -43,7 +43,7 @@ impl Visitor<String> for NameRedefinitionChecker {
             self.visit_expr(rhs)?
         };
 
-        self.declare_name(&name).map_err(|e| {
+        self.declare_name(name).map_err(|e| {
             format!(
                 "name {} [{}] is redefined in block, previous definition at [{}]",
                 name.get_string().unwrap(),
@@ -61,7 +61,7 @@ impl Visitor<String> for NameRedefinitionChecker {
         args: &[Token],
         body: &Expr,
     ) -> Result<(), String> {
-        self.declare_name(&name).map_err(|e| {
+        self.declare_name(name).map_err(|e| {
             format!(
                 "name {} [{}] is redefined in block, previous definition at [{}]",
                 name.get_string().unwrap(),

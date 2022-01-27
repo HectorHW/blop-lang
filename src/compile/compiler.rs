@@ -265,6 +265,7 @@ impl<'gc> Compiler<'gc> {
         self.define_local(name.get_string().unwrap());
         //define function inside itself
 
+        self.new_scope(name);
         for arg_name in args {
             match self.declare_local(arg_name.get_string().unwrap(), VariableType::Normal) {
                 Some(_) => {
@@ -279,6 +280,7 @@ impl<'gc> Compiler<'gc> {
                 }
             }
         }
+        //define arguments
 
         self.new_scope(name);
 
