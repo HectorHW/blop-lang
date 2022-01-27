@@ -68,14 +68,5 @@ pub fn check_optimize(tree: Program) -> Result<(Program, Annotations), String> {
     AnnotationGenerator::generate_annotations(&tree, &mut annotations)?;
     let tree = Folder::fold_constants(tree)?;
 
-    println!("blocks:");
-    for (id, mapping) in &annotations.block_symbol_table {
-        println!("{:?} - {:?}", id, mapping);
-    }
-    println!("closures:");
-    for (id, closures) in &annotations.closed_names_table {
-        println!("{:?} - {:?}", id, closures);
-    }
-
     Ok((tree, annotations))
 }
