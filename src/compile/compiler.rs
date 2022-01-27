@@ -120,7 +120,8 @@ impl<'gc> Compiler<'gc> {
     fn current_function(&self) -> Option<&FunctionCompilationContext> {
         self._current_function.last()
     }
-
+    /// looks up variable by name, considering only well-defined variables
+    /// (i.e. previously declared with var or def)
     fn lookup_local(&self, name: &str) -> Option<(VariableType, usize)> {
         for scope in self.names.iter().rev() {
             if let Some((var_type, true, var_idx)) = scope.get(name) {
@@ -130,10 +131,8 @@ impl<'gc> Compiler<'gc> {
         None
     }
 
+    /// looks up variable by name, searching for nearest declaration including forward declarations
     fn lookup_uninit_local(&self, name: &str) -> Option<(VariableType, usize)> {
-        if let Some((v_type, idx)) = self.lookup_local(name) {
-            return Some((v_type, idx));
-        }
         for scope in self.names.iter().rev() {
             if let Some((var_type, _any_state, var_idx)) = scope.get(name) {
                 return Some((*var_type, *var_idx));
