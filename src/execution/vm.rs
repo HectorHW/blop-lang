@@ -359,6 +359,17 @@ impl<'gc> VM<'gc> {
                 InstructionExecution::NextInstruction
             }
 
+            Opcode::StoreGLobal(idx) => {
+                let key = chunk
+                    .global_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                let value = checked_stack_pop!()?;
+
+                self.globals.insert(key.to_string(), value);
+                InstructionExecution::NextInstruction
+            }
+
             Opcode::LoadLocal(idx) => {
                 let absolute_pos = self.locals_offset + idx as usize;
                 let value = self

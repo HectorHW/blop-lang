@@ -19,6 +19,7 @@ pub enum Opcode {
     LoadGlobal(u16),
     LoadLocal(u16),
     StoreLocal(u16),
+    StoreGLobal(u16),
 
     NewBox,
     LoadBox,
@@ -77,6 +78,7 @@ impl Display for Opcode {
                 LoadConst(a) => format!("LoadConst[{}]", a),
                 LoadImmediateInt(i) => format!("LoadImmediateInt[{}]", i),
                 LoadGlobal(a) => format!("LoadGlobal[{}]", a),
+                StoreGLobal(a) => format!("StoreGlobal[{}]", a),
                 StoreLocal(a) => format!("StoreLocal[{}]", a),
                 Add => "Add".to_string(),
                 Sub => "Sub".to_string(),
@@ -198,6 +200,14 @@ mod chunk_pretty_printer {
                         format!(
                             "{:<21} ({})",
                             format!("{}", Opcode::LoadGlobal(*idx)),
+                            chunk.global_names[(*idx) as usize]
+                        )
+                    }
+
+                    Opcode::StoreGLobal(idx) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", Opcode::StoreGLobal(*idx)),
                             chunk.global_names[(*idx) as usize]
                         )
                     }
