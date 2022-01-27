@@ -1,14 +1,19 @@
-#1 base allocation - script
-#1 allocation - boxing here
-var a = 2
+def sqrt_iter(guess, x) =
+    if good_enough(guess, x)
+        guess
+    else
+        sqrt_iter(improve(guess, x), x)
 
-#trigger enough allocations (10 in debug-gc)
-#2 allocations here for each definition - creation of function object and creation of closure
-def f1 = a
-def f2 = a
-def f3 = a
-def f4 = a
+def improve(guess, x) = average(guess, x/guess)
 
-#this should trigger quick pass
-#1 compile-time allocation - creation of string object
-print "is it working?"
+def average(x, y) = (x+y)/2
+
+def abs(x) = if x<0 0-x else x
+
+def square(x) = x*x
+
+def good_enough(guess, x) = abs(square(guess)-x)<0.001
+
+def sqrt(x) = sqrt_iter(1.0, x)
+
+print sqrt(7.0)

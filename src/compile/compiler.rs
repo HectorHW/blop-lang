@@ -1,4 +1,4 @@
-use crate::compile::syntax_level_check::{BlockNameMap, ClosedNamesMap, VariableType};
+use crate::compile::checks::{Annotations, VariableType};
 use crate::data::gc::GC;
 use crate::data::objects::{StackObject, Value};
 use crate::execution::chunk::Opcode;
@@ -23,8 +23,7 @@ pub struct Compiler<'gc> {
     current_chunk_idx: Vec<usize>,
     current_block: Vec<Token>,
     _current_function: Vec<FunctionCompilationContext>,
-    variable_types: BlockNameMap,
-    closed_names: ClosedNamesMap,
+    annotations: Annotations,
     current_function_was_possibly_overwritten: Vec<bool>,
     gc: &'gc mut GC,
 }
@@ -41,11 +40,7 @@ struct FunctionCompilationContext {
 }
 
 impl<'gc> Compiler<'gc> {
-    fn new(
-        variable_types: BlockNameMap,
-        closed_names: ClosedNamesMap,
-        gc: &'gc mut GC,
-    ) -> Compiler {
+    fn new(annotations: Annotations, gc: &'gc mut GC) -> Compiler {
         Compiler {
             names: vec![],
             value_requirements: vec![],
@@ -54,8 +49,7 @@ impl<'gc> Compiler<'gc> {
             current_chunk_idx: vec![0],
             current_block: vec![],
             _current_function: vec![],
-            variable_types,
-            closed_names,
+            annotations,
             current_function_was_possibly_overwritten: vec![],
             gc,
         }
@@ -63,11 +57,10 @@ impl<'gc> Compiler<'gc> {
 
     pub fn compile(
         program: &Program,
-        variable_types: BlockNameMap,
-        closed_names: ClosedNamesMap,
+        annotations: Annotations,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut compiler = Compiler::new(variable_types, closed_names, gc);
+        let mut compiler = Compiler::new(annotations, gc);
 
         let block_identifier = match program {
             Expr::Block(bb, _be, _) => bb,
@@ -258,8 +251,8 @@ impl<'gc> Compiler<'gc> {
         self.new_scope(name);
 
         let closures = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-            .closed_names
-            .get(name)
+            .annotations
+            .get_closure_scope(name)
             .unwrap();
 
         for closed_variable in closures {
@@ -296,9 +289,8 @@ impl<'gc> Compiler<'gc> {
 
         for arg in args {
             if let VariableType::Boxed = self
-                .variable_types
-                .get(name)
-                .unwrap()
+                .annotations
+                .get_or_create_block_scope(name)
                 .get(arg.get_string().unwrap())
                 .unwrap()
             {
@@ -335,15 +327,19 @@ impl<'gc> Compiler<'gc> {
 
     fn close_function(&mut self, function_name: &Token) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
-        if self.closed_names.get(function_name).unwrap().is_empty() {
+        if self
+            .annotations
+            .get_or_create_closure_scope(function_name)
+            .is_empty()
+        {
             return Ok(result);
         }
 
         result.push(Opcode::NewClosure, function_name.position.0);
 
         let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-            .closed_names
-            .get(function_name)
+            .annotations
+            .get_closure_scope(function_name)
             .unwrap();
 
         for closed_over_value in map_iter {
@@ -942,8 +938,8 @@ impl<'gc> Compiler<'gc> {
         }
 
         let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-            .variable_types
-            .get(block_begin)
+            .annotations
+            .get_block_scope(block_begin)
             .unwrap();
 
         for (name, var_type) in map_iter {
