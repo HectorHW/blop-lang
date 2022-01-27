@@ -156,7 +156,12 @@ impl<'gc> VM<'gc> {
             }
             if self.gc.needs_collection() {
                 unsafe {
-                    self.gc.mark_and_sweep(self.stack.iter(), &*self.call_stack);
+                    self.gc.mark_and_sweep(
+                        self.stack
+                            .iter()
+                            .chain(self.globals.iter().map(|(_k, v)| v)),
+                        &*self.call_stack,
+                    );
                 }
             }
         }
