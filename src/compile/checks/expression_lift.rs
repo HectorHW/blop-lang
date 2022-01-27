@@ -1,4 +1,4 @@
-use crate::compile::checks::tree_visitor::Visitor;
+use crate::compile::checks::tree_rewriter::Rewriter;
 use crate::parsing::ast::{Program, Stmt};
 use crate::parsing::lexer::{Token, TokenKind};
 use crate::Expr;
@@ -12,7 +12,7 @@ impl ExpressionLifter {
     }
 }
 
-impl Visitor<String> for ExpressionLifter {
+impl Rewriter<String> for ExpressionLifter {
     fn visit_expr_stmt(&mut self, expr: Expr) -> Result<Stmt, String> {
         match expr {
             Expr::SingleStatement(s) => self.visit_stmt(*s),

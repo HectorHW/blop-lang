@@ -1,4 +1,4 @@
-use super::tree_visitor::Visitor;
+use super::tree_rewriter::Rewriter;
 use crate::parsing::ast::{Program, Stmt};
 use crate::parsing::lexer::{Token, TokenKind};
 use crate::Expr;
@@ -12,7 +12,7 @@ impl Folder {
     }
 }
 
-impl Visitor<String> for Folder {
+impl Rewriter<String> for Folder {
     fn visit_assert_statement(&mut self, keyword: Token, expr: Expr) -> Result<Stmt, String> {
         //do not touch asserts
         Ok(Stmt::Assert(keyword, expr))

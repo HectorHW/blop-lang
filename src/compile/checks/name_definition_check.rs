@@ -10,7 +10,7 @@ pub struct NameRedefinitionChecker {
 }
 
 impl NameRedefinitionChecker {
-    pub fn check(ast: Program) -> Result<Program, String> {
+    pub fn check(ast: &Program) -> Result<(), String> {
         let mut checker = NameRedefinitionChecker { scope: vec![] };
         checker.visit_expr(ast)
     }
@@ -38,11 +38,9 @@ impl NameRedefinitionChecker {
 }
 
 impl Visitor<String> for NameRedefinitionChecker {
-    fn visit_var_stmt(&mut self, name: Token, rhs: Option<Expr>) -> Result<Stmt, String> {
-        let rhs = if let Some(rhs) = rhs {
-            Some(self.visit_expr(rhs)?)
-        } else {
-            None
+    fn visit_var_stmt(&mut self, name: &Token, rhs: Option<&Expr>) -> Result<(), String> {
+        if let Some(rhs) = rhs {
+            self.visit_expr(rhs)?
         };
 
         self.declare_name(&name).map_err(|e| {
@@ -54,15 +52,15 @@ impl Visitor<String> for NameRedefinitionChecker {
             )
         })?;
 
-        Ok(Stmt::VarDeclaration(name, rhs))
+        Ok(())
     }
 
     fn visit_function_declaration_statement(
         &mut self,
-        name: Token,
-        args: Vec<Token>,
-        body: Expr,
-    ) -> Result<Stmt, String> {
+        name: &Token,
+        args: &[Token],
+        body: &Expr,
+    ) -> Result<(), String> {
         self.declare_name(&name).map_err(|e| {
             format!(
                 "name {} [{}] is redefined in block, previous definition at [{}]",
@@ -73,7 +71,7 @@ impl Visitor<String> for NameRedefinitionChecker {
         })?;
 
         self.new_scope();
-        for arg_name in &args {
+        for arg_name in args {
             self.declare_name(arg_name).map_err(|_e| {
                 format!(
                     "argument {} repeats in function {} at [{}]",
@@ -83,35 +81,35 @@ impl Visitor<String> for NameRedefinitionChecker {
                 )
             })?;
         }
-        let body = self.visit_expr(body)?;
+        self.visit_expr(body)?;
         self.pop_scope();
-        Ok(Stmt::FunctionDeclaration { name, args, body })
+        Ok(())
     }
 
     fn visit_block(
         &mut self,
-        start_token: Token,
-        end_token: Token,
-        containing_statements: Vec<Stmt>,
-    ) -> Result<Expr, String> {
+        _start_token: &Token,
+        _end_token: &Token,
+        containing_statements: &[Stmt],
+    ) -> Result<(), String> {
         let mut statements = vec![];
         self.new_scope();
         for stmt in containing_statements {
             statements.push(self.visit_stmt(stmt)?);
         }
         self.pop_scope();
-        Ok(Expr::Block(start_token, end_token, statements))
+        Ok(())
     }
 
     fn visit_anon_function_expr(
         &mut self,
-        args: Vec<Token>,
-        arrow: Token,
-        body: Box<Expr>,
-    ) -> Result<Expr, String> {
+        args: &[Token],
+        arrow: &Token,
+        body: &Expr,
+    ) -> Result<(), String> {
         self.new_scope();
 
-        for arg_name in &args {
+        for arg_name in args {
             self.declare_name(arg_name).map_err(|_e| {
                 format!(
                     "argument {} repeats in anonymous function at [{}]",
@@ -120,7 +118,6 @@ impl Visitor<String> for NameRedefinitionChecker {
                 )
             })?;
         }
-        let body = Box::new(self.visit_expr(*body)?);
-        Ok(Expr::AnonFunction(args, arrow, body))
+        self.visit_expr(body)
     }
 }

@@ -26,9 +26,9 @@ enum LookupResult {
 
 impl<'a> AnnotationGenerator<'a> {
     pub fn generate_annotations(
-        ast: Program,
+        ast: &Program,
         annotations: &'a mut Annotations,
-    ) -> Result<Program, String> {
+    ) -> Result<(), String> {
         let mut annotator = AnnotationGenerator {
             annotations,
             scopes: Default::default(),
@@ -146,51 +146,51 @@ impl<'a> AnnotationGenerator<'a> {
 }
 
 impl<'a> Visitor<String> for AnnotationGenerator<'a> {
-    fn visit_var_stmt(&mut self, name: Token, mut rhs: Option<Expr>) -> Result<Stmt, String> {
+    fn visit_var_stmt(&mut self, name: &Token, mut rhs: Option<&Expr>) -> Result<(), String> {
         if let Some(value) = rhs {
-            rhs = Some(self.visit_expr(value)?);
+            self.visit_expr(value)?;
         }
 
         self.define_name(&name);
 
-        Ok(Stmt::VarDeclaration(name, rhs))
+        Ok(())
     }
 
     fn visit_function_declaration_statement(
         &mut self,
-        name: Token,
-        args: Vec<Token>,
-        body: Expr,
-    ) -> Result<Stmt, String> {
+        name: &Token,
+        args: &[Token],
+        body: &Expr,
+    ) -> Result<(), String> {
         self.new_scope(ScopeType::Function, &name);
         self.annotations.get_or_create_closure_scope(&name);
-        for arg_name in &args {
+        for arg_name in args {
             self.declare_name(arg_name);
             self.define_name(arg_name);
         }
         self.define_name(&name);
-        let body = self.visit_expr(body)?;
+        self.visit_expr(body)?;
         self.pop_scope();
 
-        Ok(Stmt::FunctionDeclaration { name, args, body })
+        Ok(())
     }
 
-    fn visit_variable_expr(&mut self, variable_name: Token) -> Result<Expr, String> {
+    fn visit_variable_expr(&mut self, variable_name: &Token) -> Result<(), String> {
         self.lookup_name(variable_name.get_string().unwrap());
-        Ok(Expr::Name(variable_name))
+        Ok(())
     }
 
     fn visit_block(
         &mut self,
-        start_token: Token,
-        end_token: Token,
-        containing_statements: Vec<Stmt>,
-    ) -> Result<Expr, String> {
+        start_token: &Token,
+        _end_token: &Token,
+        containing_statements: &[Stmt],
+    ) -> Result<(), String> {
         self.new_scope(ScopeType::Block, &start_token);
         self.annotations.get_or_create_block_scope(&start_token);
 
         //declare variables
-        for statement in &containing_statements {
+        for statement in containing_statements {
             match statement {
                 Stmt::VarDeclaration(name, _) => {
                     self.declare_name(name);
@@ -202,30 +202,29 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
             }
         }
 
-        let mut statements = vec![];
         for item in containing_statements {
-            statements.push(self.visit_stmt(item)?);
+            self.visit_stmt(item)?;
         }
 
         self.pop_scope();
-        Ok(Expr::Block(start_token, end_token, statements))
+        Ok(())
     }
 
     fn visit_anon_function_expr(
         &mut self,
-        args: Vec<Token>,
-        arrow: Token,
-        body: Box<Expr>,
-    ) -> Result<Expr, String> {
+        args: &[Token],
+        arrow: &Token,
+        body: &Expr,
+    ) -> Result<(), String> {
         self.new_scope(ScopeType::Function, &arrow);
         self.annotations.get_or_create_closure_scope(&arrow);
-        for arg_name in &args {
+        for arg_name in args {
             self.declare_name(arg_name);
             self.define_name(arg_name);
         }
 
-        let body = self.visit_expr(*body)?;
+        self.visit_expr(body)?;
         self.pop_scope();
-        Ok(Expr::AnonFunction(args, arrow, Box::new(body)))
+        Ok(())
     }
 }

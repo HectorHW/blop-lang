@@ -1,6 +1,7 @@
 mod constant_folding;
 mod expression_lift;
 mod name_definition_check;
+mod tree_rewriter;
 mod tree_visitor;
 mod variable_annotation_generation;
 
@@ -61,10 +62,10 @@ impl Annotations {
 }
 
 pub fn check_optimize(tree: Program) -> Result<(Program, Annotations), String> {
-    let tree = NameRedefinitionChecker::check(tree)?;
+    NameRedefinitionChecker::check(&tree)?;
     let tree = ExpressionLifter::optimize(tree)?;
     let mut annotations = Annotations::new();
-    let tree = AnnotationGenerator::generate_annotations(tree, &mut annotations)?;
+    AnnotationGenerator::generate_annotations(&tree, &mut annotations)?;
     let tree = Folder::fold_constants(tree)?;
 
     println!("blocks:");
