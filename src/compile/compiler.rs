@@ -1,4 +1,4 @@
-use crate::compile::syntax_level_check::{BlockNameMap, ClosedNamesMap, VariableType};
+use crate::compile::checks::{Annotations, VariableType};
 use crate::data::gc::GC;
 use crate::data::objects::{StackObject, Value};
 use crate::execution::chunk::Opcode;
@@ -23,8 +23,7 @@ pub struct Compiler<'gc> {
     current_chunk_idx: Vec<usize>,
     current_block: Vec<Token>,
     _current_function: Vec<FunctionCompilationContext>,
-    variable_types: BlockNameMap,
-    closed_names: ClosedNamesMap,
+    annotations: Annotations,
     current_function_was_possibly_overwritten: Vec<bool>,
     gc: &'gc mut GC,
 }
@@ -41,11 +40,7 @@ struct FunctionCompilationContext {
 }
 
 impl<'gc> Compiler<'gc> {
-    fn new(
-        variable_types: BlockNameMap,
-        closed_names: ClosedNamesMap,
-        gc: &'gc mut GC,
-    ) -> Compiler {
+    fn new(annotations: Annotations, gc: &'gc mut GC) -> Compiler {
         Compiler {
             names: vec![],
             value_requirements: vec![],
@@ -54,8 +49,7 @@ impl<'gc> Compiler<'gc> {
             current_chunk_idx: vec![0],
             current_block: vec![],
             _current_function: vec![],
-            variable_types,
-            closed_names,
+            annotations,
             current_function_was_possibly_overwritten: vec![],
             gc,
         }
@@ -63,13 +57,12 @@ impl<'gc> Compiler<'gc> {
 
     pub fn compile(
         program: &Program,
-        variable_types: BlockNameMap,
-        closed_names: ClosedNamesMap,
+        annotations: Annotations,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut compiler = Compiler::new(variable_types, closed_names, gc);
+        let mut compiler = Compiler::new(annotations, gc);
 
-        let block_identifier = match program.as_ref() {
+        let block_identifier = match program {
             Expr::Block(bb, _be, _) => bb,
             _ => &Token {
                 kind: BeginBlock,
@@ -127,7 +120,8 @@ impl<'gc> Compiler<'gc> {
     fn current_function(&self) -> Option<&FunctionCompilationContext> {
         self._current_function.last()
     }
-
+    /// looks up variable by name, considering only well-defined variables
+    /// (i.e. previously declared with var or def)
     fn lookup_local(&self, name: &str) -> Option<(VariableType, usize)> {
         for scope in self.names.iter().rev() {
             if let Some((var_type, true, var_idx)) = scope.get(name) {
@@ -137,10 +131,8 @@ impl<'gc> Compiler<'gc> {
         None
     }
 
+    /// looks up variable by name, searching for nearest declaration including forward declarations
     fn lookup_uninit_local(&self, name: &str) -> Option<(VariableType, usize)> {
-        if let Some((v_type, idx)) = self.lookup_local(name) {
-            return Some((v_type, idx));
-        }
         for scope in self.names.iter().rev() {
             if let Some((var_type, _any_state, var_idx)) = scope.get(name) {
                 return Some((*var_type, *var_idx));
@@ -258,8 +250,8 @@ impl<'gc> Compiler<'gc> {
         self.new_scope(name);
 
         let closures = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-            .closed_names
-            .get(name)
+            .annotations
+            .get_closure_scope(name)
             .unwrap();
 
         for closed_variable in closures {
@@ -273,6 +265,7 @@ impl<'gc> Compiler<'gc> {
         self.define_local(name.get_string().unwrap());
         //define function inside itself
 
+        self.new_scope(name);
         for arg_name in args {
             match self.declare_local(arg_name.get_string().unwrap(), VariableType::Normal) {
                 Some(_) => {
@@ -287,6 +280,7 @@ impl<'gc> Compiler<'gc> {
                 }
             }
         }
+        //define arguments
 
         self.new_scope(name);
 
@@ -296,9 +290,8 @@ impl<'gc> Compiler<'gc> {
 
         for arg in args {
             if let VariableType::Boxed = self
-                .variable_types
-                .get(name)
-                .unwrap()
+                .annotations
+                .get_or_create_block_scope(name)
                 .get(arg.get_string().unwrap())
                 .unwrap()
             {
@@ -335,15 +328,19 @@ impl<'gc> Compiler<'gc> {
 
     fn close_function(&mut self, function_name: &Token) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
-        if self.closed_names.get(function_name).unwrap().is_empty() {
+        if self
+            .annotations
+            .get_or_create_closure_scope(function_name)
+            .is_empty()
+        {
             return Ok(result);
         }
 
         result.push(Opcode::NewClosure, function_name.position.0);
 
         let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-            .closed_names
-            .get(function_name)
+            .annotations
+            .get_closure_scope(function_name)
             .unwrap();
 
         for closed_over_value in map_iter {
@@ -724,7 +721,7 @@ impl<'gc> Compiler<'gc> {
                 }
             },
 
-            Expr::IfExpr(cond, then_body, else_body) => {
+            Expr::If(cond, then_body, else_body) => {
                 self.require_value();
                 let condition = self.visit_expr(cond)?;
                 self.pop_requirement();
@@ -942,8 +939,8 @@ impl<'gc> Compiler<'gc> {
         }
 
         let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-            .variable_types
-            .get(block_begin)
+            .annotations
+            .get_block_scope(block_begin)
             .unwrap();
 
         for (name, var_type) in map_iter {

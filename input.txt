@@ -1,14 +1,5 @@
-#1 base allocation - script
-#1 allocation - boxing here
-var a = 2
+#argument a shadows function a
+#as a result, call inside function is performed on argument instead of treating it like recursive
+def a(a) = a()
 
-#trigger enough allocations (10 in debug-gc)
-#2 allocations here for each definition - creation of function object and creation of closure
-def f1 = a
-def f2 = a
-def f3 = a
-def f4 = a
-
-#this should trigger quick pass
-#1 compile-time allocation - creation of string object
-print "is it working?"
+print a(() => 1)
