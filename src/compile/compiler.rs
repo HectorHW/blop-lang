@@ -71,7 +71,7 @@ impl<'gc> Compiler<'gc> {
         };
         compiler.new_scope(block_identifier);
 
-        compiler.require_nothing();
+        compiler.require_value();
         let mut blob = compiler.visit_expr(program)?;
         compiler.pop_requirement();
 
@@ -424,54 +424,60 @@ impl<'gc> Compiler<'gc> {
 
             Stmt::Assignment(target, expr) => {
                 let varname = target.get_string().unwrap();
-
-                let (var_type, var_idx) = self.lookup_local(varname).ok_or(format!(
-                    "assignment to undefined variable `{}` at {}",
-                    varname, target.position
-                ))?;
-
-                if self.current_function().is_some() {
-                    //compiling some function
-                    if var_type != VariableType::Closed && var_idx == 0 {
-                        //slot 0 - current function
-                        return Err(format!(
-                            "cannot assign to function inside itself. Maybe try shadowing? [{}]",
-                            target.position
-                        ));
+                //if working with local variable, we may need to load pointer for box storing
+                if let Some((var_type, var_idx)) = self.lookup_local(varname) {
+                    if self.current_function().is_some() {
+                        //compiling some function
+                        if var_type != VariableType::Closed && var_idx == 0 {
+                            //slot 0 - current function
+                            return Err(format!(
+                                "cannot assign to function inside itself. Maybe try shadowing? [{}]",
+                                target.position
+                            ));
+                        }
+                    }
+                    //maybe we need to load pointer
+                    match var_type {
+                        VariableType::Boxed => {
+                            result.push(Opcode::LoadLocal(var_idx as u16), target.position.0);
+                        }
+                        VariableType::Closed => {
+                            result
+                                .push(Opcode::LoadClosureValue(var_idx as u16), target.position.0);
+                        }
+                        VariableType::Normal => {
+                            //nothing
+                        }
                     }
                 }
-                //maybe we need to load pointer
-                match var_type {
-                    VariableType::Boxed => {
-                        result.push(Opcode::LoadLocal(var_idx as u16), target.position.0);
-                    }
-                    VariableType::Closed => {
-                        result.push(Opcode::LoadClosureValue(var_idx as u16), target.position.0);
-                    }
-                    VariableType::Normal => {
-                        //nothing
-                    }
-                }
-
+                //compile assignment target
                 self.require_value();
                 let expr_body = self.visit_expr(expr)?;
                 self.pop_requirement();
 
                 result.append(expr_body);
 
-                match var_type {
-                    VariableType::Normal => {
-                        result.push(Opcode::StoreLocal(var_idx as u16), target.position.0);
-                        //TODO extension
+                //value is now on stack
+                if let Some((var_type, var_idx)) = self.lookup_local(varname) {
+                    //if we are storing it in local slot, emit instruction depending on type
+                    match var_type {
+                        VariableType::Normal => {
+                            result.push(Opcode::StoreLocal(var_idx as u16), target.position.0);
+                            //TODO extension
+                        }
+                        VariableType::Boxed => {
+                            result.push(Opcode::StoreBox, target.position.0);
+                        }
+                        VariableType::Closed => {
+                            result.push(Opcode::StoreBox, target.position.0);
+                        }
                     }
-                    VariableType::Boxed => {
-                        result.push(Opcode::StoreBox, target.position.0);
-                    }
-                    VariableType::Closed => {
-                        result.push(Opcode::StoreBox, target.position.0);
-                    }
+                } else {
+                    //otherwise, just put it in global name
+                    let idx = result.get_or_create_name(varname);
+                    result.push(Opcode::StoreGLobal(idx as u16), target.position.0);
                 }
-
+                //in case we need some result value
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0), target.position.0);
                 }

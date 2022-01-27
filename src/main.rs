@@ -6,6 +6,7 @@ use crate::execution::vm::VM;
 use crate::parsing::ast::Expr;
 use peg::error::ParseError;
 use std::env;
+use std::io::{stdin, BufRead};
 #[cfg(feature = "bench")]
 use std::time::Instant;
 
@@ -21,7 +22,7 @@ mod test;
 fn main() {
     let args = env::args().collect::<Vec<_>>();
     if args.len() != 2 {
-        eprintln!("please provide file to run as argument.");
+        run_repl();
         return;
     }
     let filename = args.get(1).unwrap();
@@ -92,14 +93,17 @@ fn main() {
     #[cfg(feature = "bench")]
     let start_time = Instant::now();
 
-    vm.run(entry_point).unwrap_or_else(|error| {
-        println!(
-            "error {:?} at instruction {}\nat line {}",
-            error,
-            error.chunk.unwrap_function().unwrap().code[error.opcode_index],
-            error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index],
-        );
-    }); /**/
+    let _ = vm
+        .run(entry_point)
+        .map_err(|error| {
+            println!(
+                "error {:?} at instruction {}\nat line {}",
+                error,
+                error.chunk.unwrap_function().unwrap().code[error.opcode_index],
+                error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index],
+            );
+        })
+        .unwrap(); /**/
     #[cfg(feature = "bench")]
     {
         let end_time = Instant::now();
@@ -129,19 +133,67 @@ pub fn run_file(filename: &str) -> Result<(), String> {
 
 type CompilationResult = Value;
 
+pub fn compile_program(program: String, gc: &mut GC) -> Result<CompilationResult, String> {
+    let file_content = normalize_string(program);
+    let tokens = parsing::lexer::tokenize(&file_content)?;
+    use parsing::parser::program_parser;
+    let statements: Expr = program_parser::program(&tokens)
+        .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
+    let (statements, annotations) = compile::checks::check_optimize(statements)?;
+    let chunks = Compiler::compile(&statements, annotations, gc)?;
+    Ok(chunks)
+}
+
 pub fn compile_file(filename: &str, gc: &mut GC) -> Result<CompilationResult, String> {
     let file_content = std::fs::read_to_string(filename)
         .map_err(|_e| format!("failed to read file {}", filename))?;
-    let file_content = normalize_string(file_content);
-    let tokens = parsing::lexer::tokenize(&file_content)?;
-    use parsing::parser::program_parser;
 
-    let statements: Expr = program_parser::program(&tokens)
-        .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
+    compile_program(file_content, gc)
+}
 
-    let (statements, annotations) = compile::checks::check_optimize(statements).unwrap();
+pub fn run_repl() {
+    let stdin = stdin();
+    let mut stdin = stdin.lock();
+    let mut input = String::new();
+    let mut buffer = String::new();
 
-    //let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
-    let chunks = Compiler::compile(&statements, annotations, gc)?;
-    Ok(chunks)
+    let mut gc = unsafe { GC::default_gc() };
+    //VM is guranteed to work separately from compiler, so two borrows actually do not happen
+    let mut vm = VM::new(unsafe { (&mut gc as *mut GC).as_mut().unwrap() });
+
+    loop {
+        buffer.clear();
+        stdin.read_line(&mut buffer).unwrap();
+        match buffer.as_str().trim() {
+            "exit" => {
+                break;
+            }
+
+            x if x.is_empty() => {
+                println!("```\n{}\n```", input);
+
+                match compile_program(input, &mut gc).and_then(|entry_point| {
+                    #[cfg(debug_assertions)]
+                    println!("{}", entry_point.unwrap_function().unwrap());
+                    println!("running...");
+                    vm.run(entry_point).map_err(|e| format!("{:?}", e))
+                }) {
+                    Ok(value) => {
+                        println!("Ok. result: {}", value);
+                    }
+                    Err(e) => {
+                        println!("error!");
+                        println!("{}", e);
+                    }
+                }
+                input = String::new();
+            }
+
+            _any_other => {
+                input.push('\n');
+                input.push_str(buffer.as_str());
+                buffer.clear();
+            }
+        }
+    }
 }

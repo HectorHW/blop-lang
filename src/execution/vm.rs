@@ -78,8 +78,15 @@ impl<'gc> VM<'gc> {
         old_stack_size
     }
 
-    pub fn run(&mut self, entry_point: StackObject) -> Result<()> {
+    pub fn reset_stacks(&mut self) {
+        self.call_stack.clear();
+        self.stack.clear();
+        self.locals_offset = 0;
+    }
+
+    pub fn run(&mut self, entry_point: StackObject) -> Result<StackObject> {
         use InterpretErrorKind::*;
+        self.reset_stacks();
         let mut ip = 0;
         let mut current_chunk = entry_point;
 
@@ -98,6 +105,16 @@ impl<'gc> VM<'gc> {
                     kind: $e,
                 }
             };
+        }
+
+        macro_rules! checked_stack_pop {
+            () => {{
+                self.stack.pop().ok_or(InterpretError {
+                    opcode_index: ip,
+                    chunk: current_chunk.clone(),
+                    kind: StackUnderflow,
+                })
+            }};
         }
 
         while ip < current_chunk.unwrap_function().unwrap().code.len() {
@@ -142,10 +159,9 @@ impl<'gc> VM<'gc> {
                 }
 
                 InstructionExecution::Termination => {
-                    self.stack.clear();
-                    self.call_stack.clear();
-                    self.locals_offset = 0;
-                    return Ok(());
+                    let value = checked_stack_pop!()?;
+                    //return immediately, without possibly triggering gc
+                    return Ok(value);
                 }
             }
 
@@ -173,8 +189,8 @@ impl<'gc> VM<'gc> {
                 kind: InterpretErrorKind::MissedReturn,
             });
         }
-
-        Ok(())
+        //function will always terminate through InstructionExecution::Termination
+        unreachable!()
     }
 
     #[inline(always)]
