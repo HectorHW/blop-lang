@@ -59,15 +59,14 @@ fn main() {
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
 
-    let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
+    let (statements, annotations) = compile::checks::check_optimize(statements).unwrap();
 
-    let statements = compile::syntax_level_opt::optimize(statements);
+    //let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
 
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
     let mut gc = unsafe { GC::default_gc() };
-    let entry_point =
-        Compiler::compile(&statements, variable_types, closed_names, &mut gc).unwrap();
+    let entry_point = Compiler::compile(&statements, annotations, &mut gc).unwrap();
 
     #[cfg(feature = "print-chunk")]
     {
@@ -137,11 +136,12 @@ pub fn compile_file(filename: &str, gc: &mut GC) -> Result<CompilationResult, St
     let tokens = parsing::lexer::tokenize(&file_content)?;
     use parsing::parser::program_parser;
 
-    let statements: Box<Expr> = program_parser::program(&tokens)
+    let statements: Expr = program_parser::program(&tokens)
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
 
-    let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
-    let statements = compile::syntax_level_opt::optimize(statements);
-    let chunks = Compiler::compile(&statements, variable_types, closed_names, gc)?;
+    let (statements, annotations) = compile::checks::check_optimize(statements).unwrap();
+
+    //let (variable_types, closed_names) = compile::syntax_level_check::check(&statements)?;
+    let chunks = Compiler::compile(&statements, annotations, gc)?;
     Ok(chunks)
 }
