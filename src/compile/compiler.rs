@@ -16,7 +16,7 @@ enum ValueRequirement {
 
 lazy_static! {
     static ref SCRIPT_TOKEN: Token = Token {
-        kind: TokenKind::Name("<script>".to_string()),
+        kind: TokenKind::Name("`script`".to_string()),
         position: Index(0, 0),
     };
 }
@@ -896,14 +896,17 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             stmt(return=return)
         */
 
+        let fictive_variable_name = "`_`";
+
         self.new_scope();
 
         let mut result = AnnotatedCodeBlob::new();
 
         if self.needs_value() && !self.needs_return_value() {
             //if we will return after that, then no tmp slot needed, value will just stay on top of stack
-            self.declare_local("_", VariableType::Normal).unwrap();
-            self.define_local("_");
+            self.declare_local(fictive_variable_name, VariableType::Normal)
+                .unwrap();
+            self.define_local(fictive_variable_name);
             result += (Opcode::LoadImmediateInt(0), block_begin.position.0); // _ variable
         }
 
@@ -933,7 +936,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
         result.append(last_statement);
 
         if self.needs_value() && !self.needs_return_value() {
-            let (_, fictional_slot) = self.lookup_local("_").unwrap();
+            let (_, fictional_slot) = self.lookup_local(fictive_variable_name).unwrap();
             result += (
                 Opcode::StoreLocal(fictional_slot as u16),
                 block_end.position.0,
