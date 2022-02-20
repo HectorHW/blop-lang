@@ -72,6 +72,7 @@ impl<'gc> VM<'gc> {
         }
     }
 
+    #[cfg(test)]
     pub fn override_stack_limit(&mut self, new_limit: usize) -> usize {
         let old_stack_size = self.stack_max_size;
         self.stack_max_size = new_limit;
@@ -785,6 +786,6 @@ impl<'gc> VM<'gc> {
         if value.unwrap_partial().is_some() {
             return VM::get_chunk(value.unwrap_partial().unwrap().target.clone());
         }
-        return None;
+        None
     }
 }

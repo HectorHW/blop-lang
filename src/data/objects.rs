@@ -50,13 +50,7 @@ impl Partial {
     pub fn count_blanks(&self) -> usize {
         self.args
             .iter()
-            .filter(|value| {
-                if let StackObject::Blank = value {
-                    true
-                } else {
-                    false
-                }
-            })
+            .filter(|value| matches!(value, StackObject::Blank))
             .count()
     }
 
@@ -495,7 +489,7 @@ impl Display for OwnedObject {
 
 impl PartialEq for OwnedObject {
     fn eq(&self, other: &Self) -> bool {
-        &self.item == &other.item
+        self.item == other.item
     }
 }
 

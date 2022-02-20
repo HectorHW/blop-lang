@@ -320,8 +320,9 @@ mod chunk_pretty_printer {
             if arrow_start > arrow_end {
                 std::mem::swap(&mut arrow_start, &mut arrow_end);
             }
-            for i in arrow_start + 1..arrow_end {
-                draw_at_char(&mut lines[i], 0, b'|');
+
+            for line in &mut lines[arrow_start + 1..arrow_end] {
+                draw_at_char(line, 0, b'|');
             }
         }
     }
@@ -340,7 +341,7 @@ mod chunk_pretty_printer {
         true
     }
 
-    fn draw_at_char(s: &mut String, idx: usize, c: u8) {
+    fn draw_at_char(s: &mut str, idx: usize, c: u8) {
         if !c.is_ascii() {
             panic!()
         }
