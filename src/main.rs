@@ -12,6 +12,9 @@ use std::time::Instant;
 
 extern crate indexmap;
 
+#[macro_use]
+extern crate lazy_static;
+
 mod compile;
 mod data;
 mod execution;

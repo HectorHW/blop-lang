@@ -98,6 +98,15 @@ fn test_tail_call_optimization_application() {
     //    crate::compile::syntax_level_check::check(&statements).unwrap();
     let mut gc = unsafe { GC::default_gc() };
     let entry = Compiler::compile(&statements, annotations, &mut gc).unwrap();
+    println!(
+        "{}",
+        entry.unwrap_function().unwrap().constants[0]
+            .unwrap_function()
+            .unwrap()
+            .constants[0]
+            .unwrap_function()
+            .unwrap()
+    );
     let mut vm = VM::new(&mut gc);
     vm.override_stack_limit(20); //should be just fine (and is definetly <1000)
     vm.run(entry).unwrap();
