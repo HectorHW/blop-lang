@@ -20,7 +20,6 @@ pub struct Compiler<'gc> {
     value_requirements: Vec<ValueRequirement>,
     total_variables: usize,
     total_closed_variables: usize,
-    current_chunk_idx: Vec<usize>,
     current_block: Vec<Token>,
     _current_function: Vec<FunctionCompilationContext>,
     annotations: Annotations,
@@ -35,7 +34,6 @@ struct FunctionCompilerState {
 }
 
 struct FunctionCompilationContext {
-    function_name: Token,
     arity: usize,
 }
 
@@ -46,7 +44,6 @@ impl<'gc> Compiler<'gc> {
             value_requirements: vec![],
             total_variables: 0,
             total_closed_variables: 0,
-            current_chunk_idx: vec![0],
             current_block: vec![],
             _current_function: vec![],
             annotations,
@@ -202,11 +199,7 @@ impl<'gc> Compiler<'gc> {
         items_in_scope
     }
 
-    fn create_function_compilation_state(
-        &mut self,
-        name: &Token,
-        arity: usize,
-    ) -> FunctionCompilerState {
+    fn create_function_compilation_state(&mut self, arity: usize) -> FunctionCompilerState {
         let mut scope_stack = vec![];
         std::mem::swap(&mut self.names, &mut scope_stack);
         let previous_state = FunctionCompilerState {
@@ -218,10 +211,8 @@ impl<'gc> Compiler<'gc> {
         self.total_variables = 0;
         self.total_closed_variables = 0;
 
-        self._current_function.push(FunctionCompilationContext {
-            function_name: name.clone(),
-            arity,
-        });
+        self._current_function
+            .push(FunctionCompilationContext { arity });
 
         previous_state
     }
@@ -243,7 +234,7 @@ impl<'gc> Compiler<'gc> {
     ) -> Result<StackObject, String> {
         //save current compiler
 
-        let prev_state = self.create_function_compilation_state(name, args.len());
+        let prev_state = self.create_function_compilation_state(args.len());
 
         //compile body
 
