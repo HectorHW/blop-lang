@@ -910,12 +910,9 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             result += (Opcode::LoadImmediateInt(0), block_begin.position.0); // _ variable
         }
 
-        let map_iter = (unsafe { (self as *const Compiler).as_ref().unwrap() })
-            .annotations
-            .get_block_scope(block_begin)
-            .unwrap();
+        let predeclared_names = self.annotations.get_block_scope(block_begin).unwrap();
 
-        for (name, var_type) in map_iter {
+        for (name, var_type) in predeclared_names {
             if let VariableType::Boxed = var_type {
                 self.declare_local(name, VariableType::Boxed);
                 //do not define yet
