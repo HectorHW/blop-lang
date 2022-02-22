@@ -1,3 +1,5 @@
+#![allow(clippy::boxed_local)]
+
 use crate::parsing::ast::Stmt;
 use crate::parsing::lexer::Token;
 use crate::Expr;

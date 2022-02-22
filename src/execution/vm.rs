@@ -1,9 +1,10 @@
 use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, Value, ValueBox};
-use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+
+use super::builtins::{builtin_factory, BuiltinMap};
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
@@ -15,6 +16,7 @@ pub struct VM<'gc> {
     locals_offset: usize,
     stack_max_size: usize,
     pub gc: &'gc mut GC,
+    builtins: BuiltinMap,
 }
 
 pub struct CallStackValue {
@@ -69,6 +71,7 @@ impl<'gc> VM<'gc> {
             locals_offset: 0,
             gc,
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
+            builtins: builtin_factory(),
         }
     }
 
@@ -367,7 +370,7 @@ impl<'gc> VM<'gc> {
                     .globals
                     .get(key)
                     .cloned()
-                    .or_else(|| get_builtin(key))
+                    .or_else(|| self.builtins.get_builtin(key))
                     .ok_or(runtime_error!(InterpretErrorKind::NameError {
                         name: key.clone()
                     }))?;
@@ -563,11 +566,11 @@ impl<'gc> VM<'gc> {
                         .unwrap();
                 }
 
-                if let Value::Builtin(name) = object {
+                if let Value::Builtin(name) = &object {
                     let final_length = self.stack.len().saturating_sub(arity);
                     let args = self.stack.split_off(final_length);
                     self.stack.pop(); //remove builtin
-                    let result = apply_builtin(name, &args);
+                    let result = self.builtins.apply_builtin(name.as_ref(), args);
                     let result = result.map_err(|e| {
                         runtime_error!(InterpretErrorKind::NativeError { message: e })
                     })?;
