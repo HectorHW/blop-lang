@@ -570,7 +570,11 @@ impl<'gc> VM<'gc> {
                     let final_length = self.stack.len().saturating_sub(arity);
                     let args = self.stack.split_off(final_length);
                     self.stack.pop(); //remove builtin
-                    let result = self.builtins.apply_builtin(name.as_ref(), args);
+
+                    let builtins =
+                        unsafe { (&self.builtins as *const BuiltinMap).as_ref().unwrap() };
+
+                    let result = builtins.apply_builtin(name.as_ref(), args, self);
                     let result = result.map_err(|e| {
                         runtime_error!(InterpretErrorKind::NativeError { message: e })
                     })?;

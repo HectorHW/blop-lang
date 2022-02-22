@@ -1,7 +1,11 @@
+///
+/// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
 use crate::data::objects::{StackObject, VVec, Value};
 use std::collections::HashMap;
 
-type BuiltinFuction = fn(Vec<Value>) -> BuiltinResult;
+use super::vm::VM;
+
+type BuiltinFuction = fn(Vec<Value>, &mut VM) -> BuiltinResult;
 
 pub struct BuiltinMap(HashMap<Box<str>, BuiltinFuction>);
 
@@ -12,13 +16,13 @@ impl BuiltinMap {
         BuiltinMap(Default::default())
     }
 
-    pub(self) fn add_builtin(&mut self, name: &'static str, f: fn(VVec) -> BuiltinResult) {
+    pub(self) fn add_builtin(&mut self, name: &'static str, f: BuiltinFuction) {
         self.0.insert(name.to_owned().into_boxed_str(), f);
     }
 
-    pub fn apply_builtin(&self, name: &str, args: VVec) -> BuiltinResult {
+    pub fn apply_builtin(&self, name: &str, args: VVec, vm: &mut VM) -> BuiltinResult {
         match self.0.get(name) {
-            Some(builtin) => builtin(args),
+            Some(builtin) => builtin(args, vm),
 
             None => Err(format!("could not find builtin with name {}", name)),
         }
@@ -54,7 +58,7 @@ pub fn builtin_factory() -> BuiltinMap {
         };
     }
 
-    builtin!("sum", |args| {
+    builtin!("sum", |args, _vm| {
         match args
             .iter()
             .enumerate()
@@ -75,7 +79,7 @@ pub fn builtin_factory() -> BuiltinMap {
         ))
     });
 
-    builtin!("int", |args| {
+    builtin!("int", |args, _vm| {
         require_arity!(args, 1);
         if args[0].unwrap_any_str().is_none() {
             return Err("expected string-like in int".to_string());
@@ -87,6 +91,12 @@ pub fn builtin_factory() -> BuiltinMap {
                 .parse::<i64>()
                 .map_err(|_e| format!("failed to parse {}", args[0]))?,
         ))
+    });
+
+    #[cfg(test)]
+    builtin!("set_stack_limit", |args, vm| {
+        vm.override_stack_limit(args[0].unwrap_int().unwrap() as usize);
+        Ok(Value::Int(0))
     });
 
     map
