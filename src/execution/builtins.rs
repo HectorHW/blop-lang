@@ -53,26 +53,23 @@ pub fn builtin_factory() -> BuiltinMap {
     }
 
     macro_rules! builtin {
-        ($name:expr, $combinator: expr) => {
-            map.add_builtin($name, $combinator)
+        ($name:expr, $function: expr) => {
+            map.add_builtin($name, $function)
         };
     }
 
     builtin!("sum", |args, _vm| {
-        match args
+        if let Some((idx, obj)) = args
             .iter()
             .enumerate()
             .find(|(_idx, v)| v.unwrap_int().is_none())
         {
-            Some((idx, obj)) => {
-                return Err(format!(
-                    "expected all args of type int, got {} arg of {}",
-                    idx,
-                    obj.type_string()
-                ));
-            }
-            None => {}
-        };
+            return Err(format!(
+                "expected all args of type int, got {} arg of {}",
+                idx,
+                obj.type_string()
+            ));
+        }
 
         Ok(Value::Int(
             args.into_iter().map(|v| v.unwrap_int().unwrap()).sum(),
