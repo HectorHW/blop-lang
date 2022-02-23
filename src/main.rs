@@ -199,9 +199,7 @@ pub fn run_repl() {
             }
 
             _any_other => {
-                input.push('\n');
                 input.push_str(buffer.as_str());
-                buffer.clear();
             }
         }
     }
