@@ -19,6 +19,7 @@ pub enum Opcode {
     LoadGlobal(u16),
     LoadLocal(u16),
     StoreLocal(u16),
+    StoreGLobal(u16),
 
     NewBox,
     LoadBox,
@@ -77,6 +78,7 @@ impl Display for Opcode {
                 LoadConst(a) => format!("LoadConst[{}]", a),
                 LoadImmediateInt(i) => format!("LoadImmediateInt[{}]", i),
                 LoadGlobal(a) => format!("LoadGlobal[{}]", a),
+                StoreGLobal(a) => format!("StoreGlobal[{}]", a),
                 StoreLocal(a) => format!("StoreLocal[{}]", a),
                 Add => "Add".to_string(),
                 Sub => "Sub".to_string(),
@@ -202,6 +204,14 @@ mod chunk_pretty_printer {
                         )
                     }
 
+                    Opcode::StoreGLobal(idx) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", Opcode::StoreGLobal(*idx)),
+                            chunk.global_names[(*idx) as usize]
+                        )
+                    }
+
                     Opcode::LoadImmediateInt(n) => {
                         format!("{:<21} (value {})", "LoadImmediateInt", n)
                     }
@@ -310,8 +320,9 @@ mod chunk_pretty_printer {
             if arrow_start > arrow_end {
                 std::mem::swap(&mut arrow_start, &mut arrow_end);
             }
-            for i in arrow_start + 1..arrow_end {
-                draw_at_char(&mut lines[i], 0, b'|');
+
+            for line in &mut lines[arrow_start + 1..arrow_end] {
+                draw_at_char(line, 0, b'|');
             }
         }
     }
@@ -330,7 +341,7 @@ mod chunk_pretty_printer {
         true
     }
 
-    fn draw_at_char(s: &mut String, idx: usize, c: u8) {
+    fn draw_at_char(s: &mut str, idx: usize, c: u8) {
         if !c.is_ascii() {
             panic!()
         }
