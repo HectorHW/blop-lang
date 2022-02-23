@@ -1,6 +1,7 @@
 use crate::compile::compiler::Compiler;
 use crate::data::gc::GC;
 use crate::data::objects::Value;
+use crate::execution::builtins::builtin_factory;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::VM;
 use crate::parsing::ast::Expr;
@@ -89,7 +90,9 @@ fn main() {
         }
     }
 
-    let mut vm = VM::new(&mut gc);
+    let builtins = builtin_factory();
+
+    let mut vm = VM::new(&mut gc, &builtins);
 
     println!("running");
 
@@ -122,7 +125,9 @@ pub fn run_file(filename: &str) -> Result<(), String> {
     let mut gc = unsafe { GC::default_gc() };
 
     let entry_point = compile_file(filename, &mut gc)?;
-    let mut vm = VM::new(&mut gc);
+    let builtins = builtin_factory();
+
+    let mut vm = VM::new(&mut gc, &builtins);
     vm.run(entry_point).map_err(|error| {
         format!(
             "error {:?} at instruction {}\nat line {}",
@@ -161,8 +166,9 @@ pub fn run_repl() {
     let mut buffer = String::new();
 
     let mut gc = unsafe { GC::default_gc() };
+    let builtins = builtin_factory();
     //VM is guranteed to work separately from compiler, so two borrows actually do not happen
-    let mut vm = VM::new(unsafe { (&mut gc as *mut GC).as_mut().unwrap() });
+    let mut vm = VM::new(unsafe { (&mut gc as *mut GC).as_mut().unwrap() }, &builtins);
 
     loop {
         buffer.clear();

@@ -4,19 +4,19 @@ use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use super::builtins::{builtin_factory, BuiltinMap};
+use super::builtins::BuiltinMap;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
 
-pub struct VM<'gc> {
+pub struct VM<'gc, 'builtins> {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
     pub(super) globals: HashMap<String, Value>,
     locals_offset: usize,
     stack_max_size: usize,
     pub gc: &'gc mut GC,
-    builtins: BuiltinMap,
+    builtins: &'builtins BuiltinMap,
 }
 
 pub struct CallStackValue {
@@ -62,8 +62,8 @@ enum InstructionExecution {
     Termination,
 }
 
-impl<'gc> VM<'gc> {
-    pub fn new(gc: &'gc mut GC) -> VM<'gc> {
+impl<'gc, 'builtins> VM<'gc, 'builtins> {
+    pub fn new(gc: &'gc mut GC, builtins: &'builtins BuiltinMap) -> VM<'gc, 'builtins> {
         VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
@@ -71,7 +71,7 @@ impl<'gc> VM<'gc> {
             locals_offset: 0,
             gc,
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
-            builtins: builtin_factory(),
+            builtins,
         }
     }
 
@@ -571,8 +571,7 @@ impl<'gc> VM<'gc> {
                     let args = self.stack.split_off(final_length);
                     self.stack.pop(); //remove builtin
 
-                    let builtins =
-                        unsafe { (&self.builtins as *const BuiltinMap).as_ref().unwrap() };
+                    let builtins = self.builtins;
 
                     let result = builtins.apply_builtin(name.as_ref(), args, self);
                     let result = result.map_err(|e| {
