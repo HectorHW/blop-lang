@@ -75,6 +75,7 @@ impl AnnotatedCodeBlob {
 
     fn shift_names(mut self, transformation: HashMap<u16, u16>) -> AnnotatedCodeBlob {
         for code in &mut self.code {
+            #[allow(clippy::single_match)]
             match code {
                 Opcode::LoadGlobal(idx) => {
                     *idx = *transformation.get(idx).unwrap();
@@ -87,6 +88,7 @@ impl AnnotatedCodeBlob {
 
     fn shift_constants(mut self, transformation: HashMap<u16, u16>) -> AnnotatedCodeBlob {
         for code in &mut self.code {
+            #[allow(clippy::single_match)]
             match code {
                 Opcode::LoadConst(idx) => {
                     *idx = *transformation.get(idx).unwrap();

@@ -37,7 +37,7 @@ impl Clone for StackObject {
                 StackObject::HeapObject(*ptr)
             }
 
-            StackObject::Builtin(s) => StackObject::Builtin(s),
+            StackObject::Builtin(s) => StackObject::Builtin(s.clone()),
             StackObject::Blank => StackObject::Blank,
         }
     }
@@ -534,7 +534,7 @@ impl GC {
                 }
             }
 
-            StackObject::Builtin(s) => StackObject::Builtin(s),
+            StackObject::Builtin(s) => StackObject::Builtin(s.clone()),
             StackObject::Blank => StackObject::Blank,
         }
     }
@@ -674,9 +674,7 @@ impl GC {
     }
 
     pub(crate) fn items(&self) -> impl Iterator<Item = &'_ Pin<Box<OwnedObject>>> {
-        (&self.young_objects)
-            .iter()
-            .chain((&self.old_objects).iter())
+        self.young_objects.iter().chain(self.old_objects.iter())
     }
 }
 

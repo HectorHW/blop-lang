@@ -1,20 +1,22 @@
 use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, Value, ValueBox};
-use crate::execution::builtins::{apply_builtin, get_builtin};
 use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use super::builtins::BuiltinMap;
+
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
 
-pub struct VM<'gc> {
+pub struct VM<'gc, 'builtins> {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
     pub(super) globals: HashMap<String, Value>,
     locals_offset: usize,
     stack_max_size: usize,
     pub gc: &'gc mut GC,
+    builtins: &'builtins BuiltinMap,
 }
 
 pub struct CallStackValue {
@@ -60,8 +62,8 @@ enum InstructionExecution {
     Termination,
 }
 
-impl<'gc> VM<'gc> {
-    pub fn new(gc: &'gc mut GC) -> VM<'gc> {
+impl<'gc, 'builtins> VM<'gc, 'builtins> {
+    pub fn new(gc: &'gc mut GC, builtins: &'builtins BuiltinMap) -> VM<'gc, 'builtins> {
         VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
@@ -69,17 +71,26 @@ impl<'gc> VM<'gc> {
             locals_offset: 0,
             gc,
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
+            builtins,
         }
     }
 
+    #[cfg(test)]
     pub fn override_stack_limit(&mut self, new_limit: usize) -> usize {
         let old_stack_size = self.stack_max_size;
         self.stack_max_size = new_limit;
         old_stack_size
     }
 
-    pub fn run(&mut self, entry_point: StackObject) -> Result<()> {
+    pub fn reset_stacks(&mut self) {
+        self.call_stack.clear();
+        self.stack.clear();
+        self.locals_offset = 0;
+    }
+
+    pub fn run(&mut self, entry_point: StackObject) -> Result<StackObject> {
         use InterpretErrorKind::*;
+        self.reset_stacks();
         let mut ip = 0;
         let mut current_chunk = entry_point;
 
@@ -98,6 +109,16 @@ impl<'gc> VM<'gc> {
                     kind: $e,
                 }
             };
+        }
+
+        macro_rules! checked_stack_pop {
+            () => {{
+                self.stack.pop().ok_or(InterpretError {
+                    opcode_index: ip,
+                    chunk: current_chunk.clone(),
+                    kind: StackUnderflow,
+                })
+            }};
         }
 
         while ip < current_chunk.unwrap_function().unwrap().code.len() {
@@ -141,7 +162,11 @@ impl<'gc> VM<'gc> {
                     current_chunk = new_chunk_id;
                 }
 
-                InstructionExecution::Termination => return Ok(()),
+                InstructionExecution::Termination => {
+                    let value = checked_stack_pop!()?;
+                    //return immediately, without possibly triggering gc
+                    return Ok(value);
+                }
             }
 
             if self.stack.len() > self.stack_max_size || self.call_stack.len() > self.stack_max_size
@@ -151,7 +176,12 @@ impl<'gc> VM<'gc> {
             }
             if self.gc.needs_collection() {
                 unsafe {
-                    self.gc.mark_and_sweep(self.stack.iter(), &*self.call_stack);
+                    self.gc.mark_and_sweep(
+                        self.stack
+                            .iter()
+                            .chain(self.globals.iter().map(|(_k, v)| v)),
+                        &*self.call_stack,
+                    );
                 }
             }
         }
@@ -163,8 +193,8 @@ impl<'gc> VM<'gc> {
                 kind: InterpretErrorKind::MissedReturn,
             });
         }
-
-        Ok(())
+        //function will always terminate through InstructionExecution::Termination
+        unreachable!()
     }
 
     #[inline(always)]
@@ -340,12 +370,23 @@ impl<'gc> VM<'gc> {
                     .globals
                     .get(key)
                     .cloned()
-                    .or_else(|| get_builtin(key))
+                    .or_else(|| self.builtins.get_builtin(key))
                     .ok_or(runtime_error!(InterpretErrorKind::NameError {
                         name: key.clone()
                     }))?;
 
                 self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::StoreGLobal(idx) => {
+                let key = chunk
+                    .global_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                let value = checked_stack_pop!()?;
+
+                self.globals.insert(key.to_string(), value);
                 InstructionExecution::NextInstruction
             }
 
@@ -525,11 +566,14 @@ impl<'gc> VM<'gc> {
                         .unwrap();
                 }
 
-                if let Value::Builtin(name) = object {
+                if let Value::Builtin(name) = &object {
                     let final_length = self.stack.len().saturating_sub(arity);
                     let args = self.stack.split_off(final_length);
                     self.stack.pop(); //remove builtin
-                    let result = apply_builtin(name, &args);
+
+                    let builtins = self.builtins;
+
+                    let result = builtins.apply_builtin(name.as_ref(), args, self);
                     let result = result.map_err(|e| {
                         runtime_error!(InterpretErrorKind::NativeError { message: e })
                     })?;
@@ -748,6 +792,6 @@ impl<'gc> VM<'gc> {
         if value.unwrap_partial().is_some() {
             return VM::get_chunk(value.unwrap_partial().unwrap().target.clone());
         }
-        return None;
+        None
     }
 }

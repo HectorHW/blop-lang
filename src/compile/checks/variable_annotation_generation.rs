@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub struct AnnotationGenerator<'a> {
     annotations: &'a mut Annotations,
 
-    scopes: Vec<(ScopeType, Token, HashMap<String, bool>)>
+    scopes: Vec<(ScopeType, Token, HashMap<String, bool>)>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -16,7 +16,6 @@ enum ScopeType {
     Block,
     Function,
 }
-
 
 impl<'a> AnnotationGenerator<'a> {
     pub fn generate_annotations(
@@ -157,7 +156,7 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
             self.declare_name(arg_name);
             self.define_name(arg_name);
         }
-        self.define_name(&name);
+        self.define_name(name);
         self.visit_expr(body)?;
         self.pop_scope();
 
