@@ -1,0 +1,3 @@
+var pair = struct("pair", "elem1", "elem2")
+
+print pair

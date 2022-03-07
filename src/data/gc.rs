@@ -1,6 +1,6 @@
 // this module defines api for working with objects from memory side
 
-use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
+use super::objects::{OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, VMap, VVec};
 use crate::data::marked_counter::UNMARKED_ONE;
 use crate::data::objects::{Closure, Partial, Value, ValueBox};
 use crate::execution::chunk::Chunk;
@@ -113,6 +113,7 @@ impl OwnedObject {
                     constant.mark(value);
                 }
             }
+            OwnedObjectItem::StructDescriptor(..) => {} //has no children
         }
     }
 
@@ -174,6 +175,8 @@ impl OwnedObject {
                 chunk.constants.clear();
                 f
             }
+
+            OwnedObjectItem::StructDescriptor(..) => false,
         }
     }
 
@@ -336,6 +339,19 @@ impl GCAlloc for Chunk {
     fn store(_obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Function(_obj),
+            marker: UNMARKED_ONE,
+        }
+    }
+}
+
+impl GCAlloc for StructDescriptor {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::StructDescriptor(obj),
             marker: UNMARKED_ONE,
         }
     }

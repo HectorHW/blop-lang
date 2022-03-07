@@ -80,6 +80,12 @@ impl Partial {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructDescriptor {
+    pub name: String,
+    pub fields: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnedObjectItem {
     ConstantString(String),
     MutableString(String),
@@ -89,6 +95,7 @@ pub enum OwnedObjectItem {
     Closure(Closure),
     Function(Chunk),
     Partial(Partial),
+    StructDescriptor(StructDescriptor),
 }
 
 pub type VVec = Vec<StackObject>;
@@ -395,6 +402,7 @@ impl OwnedObject {
             OwnedObjectItem::Closure(_) => "Closure".to_string(),
             OwnedObjectItem::Partial(_) => "Partial".to_string(),
             OwnedObjectItem::Function(..) => "Function".to_string(),
+            OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor".to_string(),
         }
     }
 }
@@ -450,6 +458,9 @@ impl Debug for OwnedObject {
                     chunk.arity
                 )
             }
+            OwnedObjectItem::StructDescriptor(desc) => {
+                format!("{:?}", desc)
+            }
         };
 
         write!(f, "object [{}], RC={}", content, self.marker.counter())
@@ -482,6 +493,9 @@ impl Display for OwnedObject {
                     chunk.name.get_string().unwrap(),
                     chunk.arity
                 )
+            }
+            OwnedObjectItem::StructDescriptor(StructDescriptor { name, fields }) => {
+                write!(f, "Struct {name} = {}", fields.join(" * "))
             }
         }
     }
