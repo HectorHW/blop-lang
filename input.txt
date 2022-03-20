@@ -1,5 +1,0 @@
-#argument a shadows function a
-#as a result, call inside function is performed on argument instead of treating it like recursive
-def a(a) = a()
-
-print a(() => 1)
