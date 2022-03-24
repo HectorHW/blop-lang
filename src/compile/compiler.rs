@@ -914,6 +914,22 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     result.push(Opcode::Pop(1), prop.position.0);
                 }
             }
+
+            Expr::PropertyTest(target, prop) => {
+                self.require_value();
+                let target = self.visit_expr(target.as_ref())?;
+                self.pop_requirement();
+
+                result.append(target);
+
+                let idx = self.get_or_create_name(prop.get_string().unwrap());
+
+                result.push(Opcode::TestProperty(idx as u16), prop.position.0);
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), prop.position.0);
+                }
+            }
         }
 
         Ok(result)

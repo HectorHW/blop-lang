@@ -387,24 +387,13 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     .get(idx as usize)
                     .ok_or(runtime_error!(OperandIndexing))?;
 
-                match pointer {
-                    obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
-                        let instance = obj.unwrap_struct_instance().unwrap();
-                        let value = if let Some(f) = instance.fields.get(key) {
-                            f.clone()
-                        } else {
-                            return Err(runtime_error!(InterpretErrorKind::AttributeError {
-                                object: obj,
-                                missed_field: key.to_string()
-                            }));
-                        };
-
-                        self.stack.push(value);
+                match VM::get_property(&pointer, key) {
+                    Some(field) => {
+                        self.stack.push(field.clone());
                     }
-
-                    other => {
+                    None => {
                         return Err(runtime_error!(InterpretErrorKind::AttributeError {
-                            object: other,
+                            object: pointer,
                             missed_field: key.to_string()
                         }))
                     }
@@ -483,6 +472,21 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
             Opcode::TestLessEqual => {
                 comparison_operator!(Some(Ordering::Equal | Ordering::Less))
+            }
+
+            Opcode::TestProperty(idx) => {
+                let key = chunk
+                    .global_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                let pointer = checked_stack_pop!()?;
+                self.stack
+                    .push(Value::Int(if VM::get_property(&pointer, key).is_some() {
+                        1
+                    } else {
+                        0
+                    }));
+                InstructionExecution::NextInstruction
             }
 
             Opcode::JumpIfFalse(delta) => {
@@ -836,6 +840,17 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             return Err(());
         }
         Ok(())
+    }
+
+    fn get_property<'v, 'k>(pointer: &'v Value, key: &'k str) -> Option<&'v Value> {
+        match pointer {
+            obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
+                let instance = obj.unwrap_struct_instance().unwrap();
+                instance.fields.get(key)
+            }
+
+            _other => None,
+        }
     }
 
     fn is_callable(value: &StackObject) -> bool {

@@ -81,6 +81,7 @@ pub(super) trait Rewriter<E> {
                 self.visit_anon_function_expr(args, arrow, body)
             }
             Expr::PropertyAccess(target, prop) => self.visit_property_access(target, prop),
+            Expr::PropertyTest(target, prop) => self.visit_property_check(target, prop),
         }
     }
 
@@ -175,6 +176,11 @@ pub(super) trait Rewriter<E> {
     fn visit_property_access(&mut self, target: Box<Expr>, property: Token) -> Result<Expr, E> {
         let target = Box::new(self.visit_expr(*target)?);
         Ok(Expr::PropertyAccess(target, property))
+    }
+
+    fn visit_property_check(&mut self, target: Box<Expr>, property: Token) -> Result<Expr, E> {
+        let target = Box::new(self.visit_expr(*target)?);
+        Ok(Expr::PropertyTest(target, property))
     }
 
     fn visit_anon_function_expr(

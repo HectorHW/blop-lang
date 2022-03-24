@@ -29,6 +29,7 @@ pub enum Expr {
     PartialCall(Box<Expr>, Vec<Option<Expr>>),
     AnonFunction(Vec<Token>, Token, Box<Expr>),
     PropertyAccess(Box<Expr>, Token),
+    PropertyTest(Box<Expr>, Token),
 }
 
 pub type Program = Expr;

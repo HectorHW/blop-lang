@@ -53,6 +53,8 @@ pub enum Opcode {
     TestLess,
     TestLessEqual,
 
+    TestProperty(u16),
+
     LogicalNot,
 
     JumpIfFalse(u16),
@@ -84,6 +86,7 @@ impl Display for Opcode {
                 StoreGLobal(a) => format!("StoreGlobal[{}]", a),
                 StoreLocal(a) => format!("StoreLocal[{}]", a),
                 LoadField(a) => format!("LoadField[{}]", a),
+                TestProperty(a) => format!("TestProperty[{}]", a),
                 Add => "Add".to_string(),
                 Sub => "Sub".to_string(),
                 Div => "Div".to_string(),
@@ -214,6 +217,14 @@ mod chunk_pretty_printer {
                     }
 
                     instr @ Opcode::LoadField(idx) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", instr),
+                            chunk.global_names[(*idx) as usize]
+                        )
+                    }
+
+                    instr @ Opcode::TestProperty(idx) => {
                         format!(
                             "{:<21} ({})",
                             format!("{}", instr),

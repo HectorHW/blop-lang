@@ -42,6 +42,7 @@ pub enum TokenKind {
 
     Comma,
     Dot,
+    QuestionMark,
 
     CompareEquals,
     CompareNotEquals,
@@ -102,6 +103,7 @@ impl Display for TokenKind {
                 TokenKind::Def => "(def)".to_string(),
                 TokenKind::Comma => "<,>".to_string(),
                 TokenKind::Dot => "<.>".to_string(),
+                TokenKind::QuestionMark => "<?>".to_string(),
                 TokenKind::Elif => "(elif)".to_string(),
                 TokenKind::Mod => "(mod)".to_string(),
                 TokenKind::Power => "(**)".to_string(),
@@ -317,6 +319,11 @@ impl<'input> Lexer<'input> {
 
                 '.' => {
                     result.push(token!(Dot));
+                    self.input_iterator.next();
+                }
+
+                '?' => {
+                    result.push(token!(QuestionMark));
                     self.input_iterator.next();
                 }
 

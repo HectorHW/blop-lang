@@ -1,5 +1,7 @@
 var pair = struct("pair", "elem1", "elem2")
 
+#simple field access
+
 var instance = pair(1, 2)
 
 print instance.elem1
@@ -7,3 +9,13 @@ assert instance.elem1==1
 
 print instance.elem2
 assert instance.elem2==2
+
+instance = pair(pair(1, 2), pair(3, pair(4, 5)))
+
+#complex field access
+assert instance.elem2.elem1 == 3
+assert instance.elem2.elem2.elem1 == 4
+
+#field existance check
+assert instance?elem1
+assert not instance?other_field

@@ -18,6 +18,7 @@ enum CallVariant {
     Normal(Vec<Expr>),
     Partial(Vec<Option<Expr>>),
     Property(Token),
+    PropertyTest(Token),
 }
 
 peg::parser! {
@@ -183,6 +184,10 @@ peg::parser! {
                     CallVariant::Property(prop) => {
                         res = Expr::PropertyAccess(Box::new(res), prop)
                     }
+
+                    CallVariant::PropertyTest(prop) => {
+                        res = Expr::PropertyTest(Box::new(res), prop)
+                    }
                 }
             }
                 res
@@ -205,6 +210,8 @@ peg::parser! {
 
         rule property_access() -> CallVariant =
             [t!(Dot)] property_name: name() {CallVariant::Property(property_name)}
+        /
+            [t!(QuestionMark)] property_name: name() {CallVariant::PropertyTest(property_name)}
 
         rule term() -> Expr
             = [num@t!(Number(..))] {Expr::Number(num)}
