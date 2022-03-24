@@ -1,5 +1,6 @@
 use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
 use crate::Chunk;
+use indexmap::IndexMap;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -102,7 +103,7 @@ impl StructDescriptor {
                 .iter()
                 .cloned()
                 .zip(args.into_iter())
-                .collect::<HashMap<String, Value>>(),
+                .collect::<IndexMap<String, Value>>(),
         })
     }
 }
@@ -110,7 +111,7 @@ impl StructDescriptor {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructInstance {
     pub descriptor: Value,
-    pub fields: HashMap<String, Value>,
+    pub fields: IndexMap<String, Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
