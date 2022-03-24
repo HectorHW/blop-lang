@@ -49,7 +49,7 @@ pub enum InterpretErrorKind {
     MissedReturn,
     NameError { name: String },
     NativeError { message: String },
-    AttributeError { message: String },
+    AttributeError { object: Value, missed_field: String },
 }
 
 enum InstructionExecution {
@@ -390,21 +390,22 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 match pointer {
                     obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
                         let instance = obj.unwrap_struct_instance().unwrap();
-                        let value = instance.fields.get(key).ok_or_else(|| {
-                            runtime_error!(InterpretErrorKind::AttributeError {
-                                message: format!("cannot get field `{}` of {}", key, obj)
-                            })
-                        })?;
-                        self.stack.push(value.clone());
+                        let value = if let Some(f) = instance.fields.get(key) {
+                            f.clone()
+                        } else {
+                            return Err(runtime_error!(InterpretErrorKind::AttributeError {
+                                object: obj,
+                                missed_field: key.to_string()
+                            }));
+                        };
+
+                        self.stack.push(value);
                     }
 
                     other => {
                         return Err(runtime_error!(InterpretErrorKind::AttributeError {
-                            message: format!(
-                                "cannot get field `{}` of {}",
-                                key,
-                                other.type_string()
-                            )
+                            object: other,
+                            missed_field: key.to_string()
                         }))
                     }
                 }
