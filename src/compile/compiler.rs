@@ -1,7 +1,7 @@
 use crate::compile::checks::{Annotations, VariableType};
 use crate::data::gc::GC;
 use crate::data::objects::{StackObject, Value};
-use crate::execution::chunk::Opcode;
+use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use std::collections::HashMap;
@@ -21,12 +21,13 @@ lazy_static! {
     };
 }
 
-pub struct Compiler<'gc, 'annotations> {
+pub struct Compiler<'gc, 'annotations, 'chunk> {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
     total_variables: usize,
     total_closed_variables: usize,
     function_context: FunctionCompilationContext,
+    current_chunk: &'chunk mut Chunk,
     annotations: &'annotations Annotations,
     gc: &'gc mut GC,
 }
@@ -36,13 +37,14 @@ struct FunctionCompilationContext {
     name: Token,
 }
 
-impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
+impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     fn new(
         annotations: &'annotations Annotations,
         gc: &'gc mut GC,
         function_name: Token,
         function_arity: usize,
-    ) -> Compiler<'gc, 'annotations> {
+        chunk: &'chunk mut Chunk,
+    ) -> Compiler<'gc, 'annotations, 'chunk> {
         Compiler {
             names: vec![],
             value_requirements: vec![],
@@ -52,6 +54,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                 arity: function_arity,
                 name: function_name,
             },
+            current_chunk: chunk,
             annotations,
             gc,
         }
@@ -62,7 +65,15 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
         annotations: Annotations,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut compiler = Compiler::new(&annotations, gc, SCRIPT_TOKEN.clone(), 0);
+        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), 0);
+
+        let mut compiler = Compiler::new(
+            &annotations,
+            gc,
+            SCRIPT_TOKEN.clone(),
+            0,
+            &mut program_chunk,
+        );
 
         compiler.new_scope();
 
@@ -71,14 +82,10 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
         compiler.pop_requirement();
 
         blob += (Opcode::Return, 0);
-        let program_chunk = blob.into_chunk(
-            Token {
-                kind: TokenKind::Name("<script>".to_string()),
-                position: Index(0, 0),
-            },
-            0,
-        );
-        let pointer = compiler.gc.store(program_chunk);
+
+        program_chunk.append(blob);
+
+        let pointer = gc.store(program_chunk);
         Ok(pointer)
     }
 
@@ -110,6 +117,26 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             Some(ValueRequirement::ReturnValue) => true,
             _other => false,
         }
+    }
+
+    fn get_or_create_name(&mut self, name: &str) -> usize {
+        for (i, item) in self.current_chunk.global_names.iter().enumerate() {
+            if item == name {
+                return i;
+            }
+        }
+        self.current_chunk.global_names.push(name.to_string());
+        self.current_chunk.global_names.len() - 1
+    }
+
+    fn get_or_create_constant(&mut self, constant: Value) -> usize {
+        for (i, item) in self.current_chunk.constants.iter().enumerate() {
+            if item == &constant {
+                return i;
+            }
+        }
+        self.current_chunk.constants.push(constant);
+        self.current_chunk.constants.len() - 1
     }
 
     /// looks up variable by name, considering only well-defined variables
@@ -200,7 +227,15 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
     ) -> Result<StackObject, String> {
         //save current compiler
 
-        let mut inner_compiler = Compiler::new(self.annotations, self.gc, name.clone(), args.len());
+        let mut chunk = Chunk::new(name.clone(), args.len());
+
+        let mut inner_compiler = Compiler::new(
+            self.annotations,
+            self.gc,
+            name.clone(),
+            args.len(),
+            &mut chunk,
+        );
 
         //compile body
 
@@ -278,7 +313,8 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
 
         current_chunk += (Opcode::Return, return_index);
 
-        let chunk = current_chunk.into_chunk(name.clone(), args.len());
+        chunk.append(current_chunk);
+
         let pointer = self.gc.store(chunk);
         Ok(pointer)
     }
@@ -437,7 +473,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                     }
                 } else {
                     //otherwise, just put it in global name
-                    let idx = result.get_or_create_name(varname);
+                    let idx = self.get_or_create_name(varname);
                     result.push(Opcode::StoreGLobal(idx as u16), target.position.0);
                 }
                 //in case we need some result value
@@ -469,7 +505,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             } => {
                 let new_chunk_idx = self.compile_function(function_name, args, body)?;
 
-                let const_idx = result.get_or_create_constant(new_chunk_idx);
+                let const_idx = self.get_or_create_constant(new_chunk_idx);
 
                 if let Some((_, idx)) = self.lookup_block(function_name.get_string().unwrap()) {
                     //load pointer
@@ -535,7 +571,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                 if n >= (i16::MIN as i64) && n <= (i16::MAX as i64) {
                     result += (Opcode::LoadImmediateInt(n as i16), token.position.0);
                 } else {
-                    let constant_index = result.get_or_create_constant(Value::Int(n));
+                    let constant_index = self.get_or_create_constant(Value::Int(n));
                     result += (Opcode::LoadConst(constant_index as u16), token.position.0);
                     //TODO extension
                 }
@@ -545,7 +581,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             }
             Expr::ConstString(s) => {
                 let obj_ptr = self.gc.new_const_string(s.get_string().unwrap());
-                let constant_index = result.get_or_create_constant(obj_ptr);
+                let constant_index = self.get_or_create_constant(obj_ptr);
                 result.push(Opcode::LoadConst(constant_index as u16), s.position.0);
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), s.position.0);
@@ -680,7 +716,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
 
                 None => {
                     //global
-                    let idx = result.get_or_create_name(n.get_string().unwrap());
+                    let idx = self.get_or_create_name(n.get_string().unwrap());
 
                     result.push(Opcode::LoadGlobal(idx as u16), n.position.0);
 
@@ -851,7 +887,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             Expr::AnonFunction(args, name, body) => {
                 let new_chunk_idx = self.compile_function(name, args, body)?;
 
-                let const_idx = result.get_or_create_constant(new_chunk_idx);
+                let const_idx = self.get_or_create_constant(new_chunk_idx);
 
                 result.push(Opcode::LoadConst(const_idx as u16), name.position.0); //code block
 
@@ -861,6 +897,21 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
 
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), name.position.0);
+                }
+            }
+            Expr::PropertyAccess(target, prop) => {
+                self.require_value();
+                let target = self.visit_expr(target.as_ref())?;
+                self.pop_requirement();
+
+                result.append(target);
+
+                let idx = self.get_or_create_name(prop.get_string().unwrap());
+
+                result.push(Opcode::LoadField(idx as u16), prop.position.0);
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), prop.position.0);
                 }
             }
         }

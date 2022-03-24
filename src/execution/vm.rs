@@ -49,6 +49,7 @@ pub enum InterpretErrorKind {
     MissedReturn,
     NameError { name: String },
     NativeError { message: String },
+    AttributeError { message: String },
 }
 
 enum InstructionExecution {
@@ -379,6 +380,38 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 InstructionExecution::NextInstruction
             }
 
+            Opcode::LoadField(idx) => {
+                let pointer = checked_stack_pop!()?;
+                let key = chunk
+                    .global_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+
+                match pointer {
+                    obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
+                        let instance = obj.unwrap_struct_instance().unwrap();
+                        let value = instance.fields.get(key).ok_or_else(|| {
+                            runtime_error!(InterpretErrorKind::AttributeError {
+                                message: format!("cannot get field `{}` of {}", key, obj)
+                            })
+                        })?;
+                        self.stack.push(value.clone());
+                    }
+
+                    other => {
+                        return Err(runtime_error!(InterpretErrorKind::AttributeError {
+                            message: format!(
+                                "cannot get field `{}` of {}",
+                                key,
+                                other.type_string()
+                            )
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
             Opcode::StoreGLobal(idx) => {
                 let key = chunk
                     .global_names
@@ -566,45 +599,74 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         .unwrap();
                 }
 
-                if let Value::Builtin(name) = &object {
-                    let final_length = self.stack.len().saturating_sub(arity);
-                    let args = self.stack.split_off(final_length);
-                    self.stack.pop(); //remove builtin
+                match &object {
+                    Value::Builtin(name) => {
+                        let final_length = self.stack.len().saturating_sub(arity);
+                        let args = self.stack.split_off(final_length);
+                        self.stack.pop(); //remove builtin
 
-                    let builtins = self.builtins;
+                        let builtins = self.builtins;
 
-                    let result = builtins.apply_builtin(name.as_ref(), args, self);
-                    let result = result.map_err(|e| {
-                        runtime_error!(InterpretErrorKind::NativeError { message: e })
-                    })?;
-                    self.stack.push(result);
-                    InstructionExecution::NextInstruction
-                } else {
-                    let new_chunk = VM::get_chunk(object.clone()).ok_or_else(|| {
-                        runtime_error!(TypeError {
-                            message: format!("expected function but got {}", object.type_string())
-                        })
-                    })?;
+                        let result = builtins.apply_builtin(name.as_ref(), args, self);
+                        let result = result.map_err(|e| {
+                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                        })?;
+                        self.stack.push(result);
+                        InstructionExecution::NextInstruction
+                    }
 
-                    self.call_stack.push(CallStackValue {
-                        return_chunk: current_chunk.clone(),
-                        return_ip: ip + 1,
-                        return_locals_offset: self.locals_offset,
-                        return_stack_size: self.stack.len() - 1 - arity,
-                    });
+                    obj @ Value::HeapObject(..) if obj.unwrap_struct_descriptor().is_some() => {
+                        let final_length = self.stack.len().saturating_sub(arity);
+                        let args = self.stack.split_off(final_length);
+                        self.stack.pop(); //remove descriptor
 
-                    self.locals_offset = self.stack.len() - 1 - arity;
+                        let descriptor = obj.unwrap_struct_descriptor().unwrap();
 
-                    if arity as usize != new_chunk.unwrap_function().unwrap().arity {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "mismatched arguments: expected {} but got {}",
-                                new_chunk.unwrap_function().unwrap().arity,
-                                arity
-                            )
-                        }));
-                    } else {
-                        InstructionExecution::EnterChunk(new_chunk)
+                        let instance = descriptor.make_instance(obj.clone(), args).map_err(
+                            |(expected, got)| {
+                                runtime_error!(TypeError {
+                                    message: format!(
+                                        "struct field mismatch: expected {}, got {}",
+                                        expected, got
+                                    )
+                                })
+                            },
+                        )?;
+                        let ptr = self.gc.store(instance);
+                        self.stack.push(ptr);
+                        InstructionExecution::NextInstruction
+                    }
+
+                    _ => {
+                        let new_chunk = VM::get_chunk(object.clone()).ok_or_else(|| {
+                            runtime_error!(TypeError {
+                                message: format!(
+                                    "expected function but got {}",
+                                    object.type_string()
+                                )
+                            })
+                        })?;
+
+                        self.call_stack.push(CallStackValue {
+                            return_chunk: current_chunk.clone(),
+                            return_ip: ip + 1,
+                            return_locals_offset: self.locals_offset,
+                            return_stack_size: self.stack.len() - 1 - arity,
+                        });
+
+                        self.locals_offset = self.stack.len() - 1 - arity;
+
+                        if arity as usize != new_chunk.unwrap_function().unwrap().arity {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "mismatched arguments: expected {} but got {}",
+                                    new_chunk.unwrap_function().unwrap().arity,
+                                    arity
+                                )
+                            }));
+                        } else {
+                            InstructionExecution::EnterChunk(new_chunk)
+                        }
                     }
                 }
             }

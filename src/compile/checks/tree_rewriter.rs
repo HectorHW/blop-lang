@@ -80,6 +80,7 @@ pub(super) trait Rewriter<E> {
             Expr::AnonFunction(args, arrow, body) => {
                 self.visit_anon_function_expr(args, arrow, body)
             }
+            Expr::PropertyAccess(target, prop) => self.visit_property_access(target, prop),
         }
     }
 
@@ -169,6 +170,11 @@ pub(super) trait Rewriter<E> {
             });
         }
         Ok(Expr::PartialCall(target, processed_args))
+    }
+
+    fn visit_property_access(&mut self, target: Box<Expr>, property: Token) -> Result<Expr, E> {
+        let target = Box::new(self.visit_expr(*target)?);
+        Ok(Expr::PropertyAccess(target, property))
     }
 
     fn visit_anon_function_expr(

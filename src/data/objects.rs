@@ -85,6 +85,34 @@ pub struct StructDescriptor {
     pub fields: Vec<String>,
 }
 
+impl StructDescriptor {
+    pub fn make_instance(
+        &self,
+        descriptor_ptr: Value,
+        args: Vec<Value>,
+    ) -> Result<StructInstance, (usize, usize)> {
+        if args.len() != self.fields.len() {
+            return Err((self.fields.len(), args.len()));
+        }
+
+        Ok(StructInstance {
+            descriptor: descriptor_ptr,
+            fields: self
+                .fields
+                .iter()
+                .cloned()
+                .zip(args.into_iter())
+                .collect::<HashMap<String, Value>>(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructInstance {
+    pub descriptor: Value,
+    pub fields: HashMap<String, Value>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnedObjectItem {
     ConstantString(String),
@@ -96,6 +124,7 @@ pub enum OwnedObjectItem {
     Function(Chunk),
     Partial(Partial),
     StructDescriptor(StructDescriptor),
+    StructInstance(StructInstance),
 }
 
 pub type VVec = Vec<StackObject>;
@@ -287,6 +316,20 @@ impl StackObject {
         }
     }
 
+    pub fn unwrap_struct_descriptor(&self) -> Option<&mut StructDescriptor> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::StructDescriptor(d)) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_struct_instance(&self) -> Option<&mut StructInstance> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::StructInstance(i)) => Some(i),
+            _ => None,
+        }
+    }
+
     pub fn unwrap_any_str(&self) -> Option<&str> {
         match self.as_heap_object() {
             Some(OwnedObjectItem::MutableString(m)) => Some(m.as_str()),
@@ -403,6 +446,7 @@ impl OwnedObject {
             OwnedObjectItem::Partial(_) => "Partial".to_string(),
             OwnedObjectItem::Function(..) => "Function".to_string(),
             OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor".to_string(),
+            OwnedObjectItem::StructInstance(..) => "Struct".to_string(),
         }
     }
 }
@@ -461,6 +505,13 @@ impl Debug for OwnedObject {
             OwnedObjectItem::StructDescriptor(desc) => {
                 format!("{:?}", desc)
             }
+
+            OwnedObjectItem::StructInstance(instance) => {
+                format!(
+                    "instance of {:?}: {:?}",
+                    instance.descriptor, instance.fields
+                )
+            }
         };
 
         write!(f, "object [{}], RC={}", content, self.marker.counter())
@@ -496,6 +547,18 @@ impl Display for OwnedObject {
             }
             OwnedObjectItem::StructDescriptor(StructDescriptor { name, fields }) => {
                 write!(f, "Struct {name} = {}", fields.join(" * "))
+            }
+            OwnedObjectItem::StructInstance(StructInstance { descriptor, fields }) => {
+                write!(
+                    f,
+                    "{}[{}]",
+                    descriptor.unwrap_struct_descriptor().unwrap().name,
+                    fields
+                        .iter()
+                        .map(|(k, v)| { format!("{}={}", k, v) })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
         }
     }

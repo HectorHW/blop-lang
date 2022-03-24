@@ -72,6 +72,7 @@ pub(super) trait Visitor<E> {
             Expr::AnonFunction(args, arrow, body) => {
                 self.visit_anon_function_expr(args, arrow, body)
             }
+            Expr::PropertyAccess(target, prop) => self.visit_property_access(target.as_ref(), prop),
         }
     }
 
@@ -152,6 +153,11 @@ pub(super) trait Visitor<E> {
         body: &Expr,
     ) -> Result<(), E> {
         self.visit_expr(body)?;
+        Ok(())
+    }
+
+    fn visit_property_access(&mut self, target: &Expr, property: &Token) -> Result<(), E> {
+        self.visit_expr(target)?;
         Ok(())
     }
 }

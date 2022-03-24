@@ -1,3 +1,4 @@
+use crate::compile::code_blob::AnnotatedCodeBlob;
 use crate::data::objects::Value;
 use crate::parsing::lexer::{Token, TokenKind};
 use std::fmt::{Display, Formatter};
@@ -20,6 +21,8 @@ pub enum Opcode {
     LoadLocal(u16),
     StoreLocal(u16),
     StoreGLobal(u16),
+
+    LoadField(u16),
 
     NewBox,
     LoadBox,
@@ -80,6 +83,7 @@ impl Display for Opcode {
                 LoadGlobal(a) => format!("LoadGlobal[{}]", a),
                 StoreGLobal(a) => format!("StoreGlobal[{}]", a),
                 StoreLocal(a) => format!("StoreLocal[{}]", a),
+                LoadField(a) => format!("LoadField[{}]", a),
                 Add => "Add".to_string(),
                 Sub => "Sub".to_string(),
                 Div => "Div".to_string(),
@@ -133,6 +137,11 @@ impl Chunk {
             arity,
             opcode_to_line: vec![],
         }
+    }
+
+    pub fn append(&mut self, mut blob: AnnotatedCodeBlob) {
+        self.code.append(&mut blob.code);
+        self.opcode_to_line.append(&mut blob.indices);
     }
 }
 
@@ -200,6 +209,14 @@ mod chunk_pretty_printer {
                         format!(
                             "{:<21} ({})",
                             format!("{}", Opcode::LoadGlobal(*idx)),
+                            chunk.global_names[(*idx) as usize]
+                        )
+                    }
+
+                    instr @ Opcode::LoadField(idx) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", instr),
                             chunk.global_names[(*idx) as usize]
                         )
                     }

@@ -1,3 +1,9 @@
 var pair = struct("pair", "elem1", "elem2")
 
-print pair
+var instance = pair(1, 2)
+
+print instance.elem1
+assert instance.elem1==1
+
+print instance.elem2
+assert instance.elem2==2

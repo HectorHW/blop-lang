@@ -17,6 +17,7 @@ macro_rules! bin {
 enum CallVariant {
     Normal(Vec<Expr>),
     Partial(Vec<Option<Expr>>),
+    Property(Token),
 }
 
 peg::parser! {
@@ -169,7 +170,7 @@ peg::parser! {
         }
 
         rule call() -> Expr =
-            target:term() calls:call_parens()* {
+            target:term() calls:call_right_side()* {
                 let mut res = target;
                 for parens in calls {
                 match parens {
@@ -179,11 +180,18 @@ peg::parser! {
                     CallVariant::Partial(args) => {
                         res = Expr::PartialCall(Box::new(res), args)
                     }
+                    CallVariant::Property(prop) => {
+                        res = Expr::PropertyAccess(Box::new(res), prop)
+                    }
                 }
             }
                 res
             }
             / term()
+
+        rule call_right_side() -> CallVariant =
+            property_access()
+            / call_parens()
 
         rule call_parens() -> CallVariant =
             [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {CallVariant::Normal(args)}
@@ -194,6 +202,9 @@ peg::parser! {
         rule maybe_argument() -> Option<Expr> =
             e:simple_expr() {Some(e)}
         / [t!(Blank)] {None}
+
+        rule property_access() -> CallVariant =
+            [t!(Dot)] property_name: name() {CallVariant::Property(property_name)}
 
         rule term() -> Expr
             = [num@t!(Number(..))] {Expr::Number(num)}

@@ -1,7 +1,4 @@
-use crate::data::objects::Value;
-use crate::execution::chunk::{Chunk, Opcode};
-use crate::parsing::lexer::Token;
-use std::collections::HashMap;
+use crate::execution::chunk::Opcode;
 use std::ops::{Add, AddAssign};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -14,8 +11,6 @@ enum Relativity {
 pub struct AnnotatedCodeBlob {
     pub code: Vec<Opcode>,
     pub indices: Vec<usize>,
-    pub constants: Vec<Value>,
-    pub global_names: Vec<String>,
     relativity: Vec<Relativity>,
 }
 
@@ -53,52 +48,6 @@ impl AnnotatedCodeBlob {
         self.indices.last().cloned()
     }
 
-    pub fn get_or_create_name(&mut self, name: &str) -> usize {
-        for (i, item) in self.global_names.iter().enumerate() {
-            if item == name {
-                return i;
-            }
-        }
-        self.global_names.push(name.to_string());
-        self.global_names.len() - 1
-    }
-
-    pub fn get_or_create_constant(&mut self, constant: Value) -> usize {
-        for (i, item) in self.constants.iter().enumerate() {
-            if item == &constant {
-                return i;
-            }
-        }
-        self.constants.push(constant);
-        self.constants.len() - 1
-    }
-
-    fn shift_names(mut self, transformation: HashMap<u16, u16>) -> AnnotatedCodeBlob {
-        for code in &mut self.code {
-            #[allow(clippy::single_match)]
-            match code {
-                Opcode::LoadGlobal(idx) => {
-                    *idx = *transformation.get(idx).unwrap();
-                }
-                _ => {}
-            }
-        }
-        self
-    }
-
-    fn shift_constants(mut self, transformation: HashMap<u16, u16>) -> AnnotatedCodeBlob {
-        for code in &mut self.code {
-            #[allow(clippy::single_match)]
-            match code {
-                Opcode::LoadConst(idx) => {
-                    *idx = *transformation.get(idx).unwrap();
-                }
-                _ => {}
-            }
-        }
-        self
-    }
-
     fn shift_positioned_code(mut self, offset: usize) -> AnnotatedCodeBlob {
         for (code, relativity) in self.code.iter_mut().zip(self.relativity.iter()) {
             match code {
@@ -115,42 +64,12 @@ impl AnnotatedCodeBlob {
         self
     }
 
-    pub fn fuse(mut self, mut other: AnnotatedCodeBlob) -> AnnotatedCodeBlob {
-        let mut naming_transform_map: HashMap<u16, u16> = HashMap::new();
-        for (i, name) in other.global_names.iter().enumerate() {
-            let index_in_first = self.get_or_create_name(name);
-            naming_transform_map.insert(i as u16, index_in_first as u16);
-        }
-
-        let mut constant_transform_map: HashMap<u16, u16> = HashMap::new();
-        let mut other_constants = vec![];
-        std::mem::swap(&mut other_constants, &mut other.constants);
-        for (i, constant) in other_constants.into_iter().enumerate() {
-            let index_in_first = self.get_or_create_constant(constant);
-            constant_transform_map.insert(i as u16, index_in_first as u16);
-        }
-
+    pub fn fuse(mut self, other: AnnotatedCodeBlob) -> AnnotatedCodeBlob {
         let instruction_offset = self.code.len();
 
-        self._append(
-            other
-                .shift_constants(constant_transform_map)
-                .shift_names(naming_transform_map)
-                .shift_positioned_code(instruction_offset),
-        );
+        self._append(other.shift_positioned_code(instruction_offset));
 
         self
-    }
-
-    pub fn into_chunk(self, name: Token, arity: usize) -> Chunk {
-        Chunk {
-            constants: self.constants,
-            global_names: self.global_names,
-            code: self.code,
-            name,
-            arity,
-            opcode_to_line: self.indices,
-        }
     }
 }
 

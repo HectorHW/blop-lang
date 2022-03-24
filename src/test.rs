@@ -85,3 +85,5 @@ test_file! {operators}
 test_file! {lambdas}
 
 test_file! {partials}
+
+test_file! {structures}

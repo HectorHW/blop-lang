@@ -1,6 +1,8 @@
 // this module defines api for working with objects from memory side
 
-use super::objects::{OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, VMap, VVec};
+use super::objects::{
+    OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance, VMap, VVec,
+};
 use crate::data::marked_counter::UNMARKED_ONE;
 use crate::data::objects::{Closure, Partial, Value, ValueBox};
 use crate::execution::chunk::Chunk;
@@ -114,6 +116,13 @@ impl OwnedObject {
                 }
             }
             OwnedObjectItem::StructDescriptor(..) => {} //has no children
+
+            OwnedObjectItem::StructInstance(s) => {
+                s.descriptor.mark(value);
+                for field in s.fields.values() {
+                    field.mark(value);
+                }
+            }
         }
     }
 
@@ -177,6 +186,11 @@ impl OwnedObject {
             }
 
             OwnedObjectItem::StructDescriptor(..) => false,
+            OwnedObjectItem::StructInstance(s) => {
+                s.descriptor = StackObject::Int(0);
+                s.fields.clear();
+                true
+            }
         }
     }
 
@@ -352,6 +366,19 @@ impl GCAlloc for StructDescriptor {
     fn store(obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::StructDescriptor(obj),
+            marker: UNMARKED_ONE,
+        }
+    }
+}
+
+impl GCAlloc for StructInstance {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::StructInstance(obj),
             marker: UNMARKED_ONE,
         }
     }
