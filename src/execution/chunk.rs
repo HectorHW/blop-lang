@@ -23,6 +23,7 @@ pub enum Opcode {
     StoreGLobal(u16),
 
     LoadField(u16),
+    StoreField(u16),
 
     NewBox,
     LoadBox,
@@ -86,6 +87,7 @@ impl Display for Opcode {
                 StoreGLobal(a) => format!("StoreGlobal[{}]", a),
                 StoreLocal(a) => format!("StoreLocal[{}]", a),
                 LoadField(a) => format!("LoadField[{}]", a),
+                StoreField(a) => format!("StoreField[{}]", a),
                 TestProperty(a) => format!("TestProperty[{}]", a),
                 Add => "Add".to_string(),
                 Sub => "Sub".to_string(),
@@ -217,6 +219,14 @@ mod chunk_pretty_printer {
                     }
 
                     instr @ Opcode::LoadField(idx) => {
+                        format!(
+                            "{:<21} ({})",
+                            format!("{}", instr),
+                            chunk.global_names[(*idx) as usize]
+                        )
+                    }
+
+                    instr @ Opcode::StoreField(idx) => {
                         format!(
                             "{:<21} ({})",
                             format!("{}", instr),

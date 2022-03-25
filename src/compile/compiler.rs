@@ -482,6 +482,26 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 }
             }
 
+            Stmt::PropertyAssignment(target, value) => match target {
+                Expr::PropertyAccess(target, property) => {
+                    self.require_value();
+                    let target = self.visit_expr(target)?;
+                    let value = self.visit_expr(value)?;
+                    self.pop_requirement();
+
+                    result.append(target); //load pointer
+                    result.append(value); // value on top of pointer
+                    let name_idx = self.get_or_create_name(property.get_string().unwrap());
+                    result += (Opcode::StoreField(name_idx as u16), property.position.0);
+
+                    if self.needs_value() {
+                        result.push(Opcode::LoadImmediateInt(0), property.position.0);
+                    }
+                }
+
+                other => return Err(format!("unsupported assignment target {:?}", other)),
+            },
+
             Stmt::Expression(e) => {
                 let body = self.visit_expr(e)?;
                 result.append(body);

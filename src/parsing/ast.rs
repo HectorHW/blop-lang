@@ -5,6 +5,7 @@ pub enum Stmt {
     Print(Token, Expr),
     VarDeclaration(Token, Option<Expr>),
     Assignment(Token, Expr),
+    PropertyAssignment(Expr, Expr),
     Expression(Expr),
     Assert(Token, Expr),
     Pass(Token),

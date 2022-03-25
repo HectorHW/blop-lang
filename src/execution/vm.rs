@@ -264,6 +264,15 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
         let chunk = current_chunk.unwrap_function().unwrap();
 
+        macro_rules! checked_get_name {
+            ($idx:expr) => {
+                chunk
+                    .global_names
+                    .get($idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))
+            };
+        }
+
         let jump = match chunk.code[ip] {
             Opcode::Print => {
                 let result = checked_stack_pop!()?;
@@ -390,6 +399,26 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 match VM::get_property(&pointer, key) {
                     Some(field) => {
                         self.stack.push(field.clone());
+                    }
+                    None => {
+                        return Err(runtime_error!(InterpretErrorKind::AttributeError {
+                            object: pointer,
+                            missed_field: key.to_string()
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::StoreField(idx) => {
+                let value = checked_stack_pop!()?;
+                let pointer = checked_stack_pop!()?;
+                let key = checked_get_name!(idx)?;
+
+                match VM::get_property_mut(&pointer, key) {
+                    Some(field) => {
+                        *field = value;
                     }
                     None => {
                         return Err(runtime_error!(InterpretErrorKind::AttributeError {
@@ -847,6 +876,17 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
                 let instance = obj.unwrap_struct_instance().unwrap();
                 instance.fields.get(key)
+            }
+
+            _other => None,
+        }
+    }
+
+    fn get_property_mut<'v, 'k>(pointer: &'v Value, key: &'k str) -> Option<&'v mut Value> {
+        match pointer {
+            obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
+                let instance = obj.unwrap_struct_instance().unwrap();
+                instance.fields.get_mut(key)
             }
 
             _other => None,

@@ -21,6 +21,11 @@ enum CallVariant {
     PropertyTest(Token),
 }
 
+enum AssignmentTarget {
+    Variable(Token),
+    Property(Expr),
+}
+
 peg::parser! {
     pub grammar program_parser() for [Token] {
         use TokenKind::*;
@@ -67,7 +72,29 @@ peg::parser! {
             [print_token@t!(Print)] e:expr() {Stmt::Print(print_token, e)}
 
         rule assignment_stmt() -> Stmt =
-            n:name() [t!(Equals)] e:expr() {Stmt::Assignment(n, e)}
+            target:assignment_target() [t!(Equals)] e:expr() {
+                match target {
+                    AssignmentTarget::Property(target) => {
+                        Stmt::PropertyAssignment(
+                            target, e)
+                    }
+                    AssignmentTarget::Variable(v) => {
+                        Stmt::Assignment(v, e)
+                    }
+                }
+
+                }
+
+        rule assignment_target() -> AssignmentTarget =
+        prop: property_access() {
+            AssignmentTarget::Property(prop)
+        }
+        /
+
+        n:name() {
+            AssignmentTarget::Variable(n)
+        }
+
 
         rule assert_stmt() -> Stmt =
             [a@t!(Assert)] e:expr() {Stmt::Assert(a, e)}
@@ -170,6 +197,14 @@ peg::parser! {
             n:call() {n}
         }
 
+        rule property_access() -> Expr =
+            target: call() {?
+                match target {
+                    e @ Expr::PropertyAccess(..) => Ok(e),
+                    _ => Err("property accesss or variable")
+                }
+            }
+
         rule call() -> Expr =
             target:term() calls:call_right_side()* {
                 let mut res = target;
@@ -195,7 +230,7 @@ peg::parser! {
             / term()
 
         rule call_right_side() -> CallVariant =
-            property_access()
+            call_property_access()
             / call_parens()
 
         rule call_parens() -> CallVariant =
@@ -208,7 +243,7 @@ peg::parser! {
             e:simple_expr() {Some(e)}
         / [t!(Blank)] {None}
 
-        rule property_access() -> CallVariant =
+        rule call_property_access() -> CallVariant =
             [t!(Dot)] property_name: name() {CallVariant::Property(property_name)}
         /
             [t!(QuestionMark)] property_name: name() {CallVariant::PropertyTest(property_name)}

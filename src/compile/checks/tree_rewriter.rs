@@ -16,6 +16,9 @@ pub(super) trait Rewriter<E> {
             Stmt::FunctionDeclaration { name, args, body } => {
                 self.visit_function_declaration_statement(name, args, body)
             }
+            Stmt::PropertyAssignment(target, value) => {
+                self.visit_property_assignment(target, value)
+            }
         }
     }
 
@@ -61,6 +64,13 @@ pub(super) trait Rewriter<E> {
             args,
             body: self.visit_expr(body)?,
         })
+    }
+
+    fn visit_property_assignment(&mut self, target: Expr, value: Expr) -> Result<Stmt, E> {
+        Ok(Stmt::PropertyAssignment(
+            self.visit_expr(target)?,
+            self.visit_expr(value)?,
+        ))
     }
 
     fn visit_expr(&mut self, expr: Expr) -> Result<Expr, E> {

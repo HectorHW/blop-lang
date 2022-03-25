@@ -19,3 +19,31 @@ assert instance.elem2.elem2.elem1 == 4
 #field existance check
 assert instance?elem1
 assert not instance?other_field
+
+#field assignment
+
+instance = pair(1, 2)
+instance.elem1 = 3
+assert instance.elem1 == 3
+assert instance.elem2 == 2
+
+instance.elem2 = pair(4, 5)
+assert instance.elem2.elem1 == 4
+
+#complex assignment
+instance.elem2.elem1 = 8
+assert instance.elem2.elem1 == 8
+
+instance.elem1 = pair(0, 0)
+
+#exressions in assignment target as pointers
+
+def first_field = 
+    instance.elem1
+
+first_field().elem2 = 9
+assert instance.elem1.elem2 == 9
+
+#only names and properties are allowed
+# will fail at parse stage
+#(instance.elem1 + 1) = 2
