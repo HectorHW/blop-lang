@@ -47,3 +47,8 @@ assert instance.elem1.elem2 == 9
 #only names and properties are allowed
 # will fail at parse stage
 #(instance.elem1 + 1) = 2
+
+instance.elem1 = "first"
+instance.elem2 = "second"
+
+print instance?elem1 and instance.elem1 or instance.elem2

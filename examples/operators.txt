@@ -34,4 +34,3 @@ assert 1<2 or should_not_execute()
 
 #and shortcircuited
 assert not (1==2 and should_not_execute())
-

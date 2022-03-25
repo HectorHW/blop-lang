@@ -372,10 +372,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::LoadGlobal(idx) => {
-                let key = chunk
-                    .global_names
-                    .get(idx as usize)
-                    .ok_or(runtime_error!(OperandIndexing))?;
+                let key = checked_get_name!(idx)?;
                 let value = self
                     .globals
                     .get(key)
@@ -391,10 +388,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
             Opcode::LoadField(idx) => {
                 let pointer = checked_stack_pop!()?;
-                let key = chunk
-                    .global_names
-                    .get(idx as usize)
-                    .ok_or(runtime_error!(OperandIndexing))?;
+                let key = checked_get_name!(idx)?;
 
                 match VM::get_property(&pointer, key) {
                     Some(field) => {
@@ -432,10 +426,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::StoreGLobal(idx) => {
-                let key = chunk
-                    .global_names
-                    .get(idx as usize)
-                    .ok_or(runtime_error!(OperandIndexing))?;
+                let key = checked_get_name!(idx)?;
                 let value = checked_stack_pop!()?;
 
                 self.globals.insert(key.to_string(), value);
@@ -518,34 +509,31 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 InstructionExecution::NextInstruction
             }
 
-            Opcode::JumpIfFalse(delta) => {
-                let value_to_test = as_int!(checked_stack_pop!()?)?;
-                let result = if value_to_test == 0 {
+            Opcode::JumpIfFalseOrPop(delta) => match checked_stack_pop!()? {
+                Value::Int(0) => {
                     let new_ip = ip + delta as usize;
                     if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
+                    self.stack.push(Value::Int(0));
                     InstructionExecution::LocalJump(new_ip)
-                } else {
-                    InstructionExecution::NextInstruction
-                };
-                self.stack.push(StackObject::Int(value_to_test));
-                result
-            }
-
-            Opcode::JumpIfTrue(delta) => {
-                let value_to_test = as_int!(checked_stack_pop!()?)?;
-                self.stack.push(StackObject::Int(value_to_test));
-                if value_to_test == 1 {
-                    let new_ip = ip + delta as usize;
-                    if new_ip >= chunk.code.len() {
-                        return Err(runtime_error!(JumpBounds));
-                    }
-                    InstructionExecution::LocalJump(new_ip)
-                } else {
-                    InstructionExecution::NextInstruction
                 }
-            }
+
+                _other => InstructionExecution::NextInstruction,
+            },
+
+            Opcode::JumpIfTrueOrPop(delta) => match checked_stack_pop!()? {
+                Value::Int(0) => InstructionExecution::NextInstruction,
+
+                other => {
+                    self.stack.push(other);
+                    let new_ip = ip + delta as usize;
+                    if new_ip >= chunk.code.len() {
+                        return Err(runtime_error!(JumpBounds));
+                    }
+                    InstructionExecution::LocalJump(new_ip)
+                }
+            },
 
             Opcode::JumpRelative(delta) => {
                 let new_ip = ip + delta as usize;
@@ -573,8 +561,11 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::LogicalNot => {
-                let value_to_test = as_int!(checked_stack_pop!()?)?;
-                self.stack.push(StackObject::Int(1 - value_to_test));
+                let value = checked_stack_pop!()?;
+                self.stack.push(match value {
+                    Value::Int(0) => Value::Int(1),
+                    _ => Value::Int(0),
+                });
                 InstructionExecution::NextInstruction
             }
 

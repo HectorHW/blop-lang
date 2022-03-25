@@ -58,8 +58,8 @@ pub enum Opcode {
 
     LogicalNot,
 
-    JumpIfFalse(u16),
-    JumpIfTrue(u16),
+    JumpIfFalseOrPop(u16),
+    JumpIfTrueOrPop(u16),
     JumpRelative(u16),
     JumpAbsolute(u16),
     Pop(u16),
@@ -103,8 +103,8 @@ impl Display for Opcode {
                 TestLess => "TestLess".to_string(),
                 TestLessEqual => "TestLessEqual".to_string(),
 
-                JumpIfFalse(delta) => format!("JumpIfFalse[{}]", delta),
-                JumpIfTrue(delta) => format!("JumpIfTrue[{}]", delta),
+                JumpIfFalseOrPop(delta) => format!("JumpIfFalse[{}]", delta),
+                JumpIfTrueOrPop(delta) => format!("JumpIfTrue[{}]", delta),
                 JumpRelative(delta) => format!("Jump[{}]", delta),
                 Pop(n) => format!("Pop[{}]", n),
                 Nop => "Nop".to_string(),
@@ -269,18 +269,18 @@ mod chunk_pretty_printer {
                         }
                     }
 
-                    Opcode::JumpIfFalse(delta) => {
+                    Opcode::JumpIfFalseOrPop(delta) => {
                         format!(
                             "{:<21} ({})",
-                            format!("{}", Opcode::JumpIfFalse(*delta)),
+                            format!("{}", Opcode::JumpIfFalseOrPop(*delta)),
                             i + *delta as usize
                         )
                     }
 
-                    Opcode::JumpIfTrue(delta) => {
+                    Opcode::JumpIfTrueOrPop(delta) => {
                         format!(
                             "{:<21} ({})",
-                            format!("{}", Opcode::JumpIfTrue(*delta)),
+                            format!("{}", Opcode::JumpIfTrueOrPop(*delta)),
                             i + *delta as usize
                         )
                     }
@@ -326,8 +326,8 @@ mod chunk_pretty_printer {
             .iter()
             .enumerate()
             .filter_map(|(pos, opcode)| match opcode {
-                Opcode::JumpIfFalse(delta)
-                | Opcode::JumpIfTrue(delta)
+                Opcode::JumpIfFalseOrPop(delta)
+                | Opcode::JumpIfTrueOrPop(delta)
                 | Opcode::JumpRelative(delta) => {
                     let start = pos;
                     let end = start + *delta as usize;

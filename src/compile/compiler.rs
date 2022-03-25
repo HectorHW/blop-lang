@@ -641,20 +641,17 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     evaluation scheme:
                     eval(A)
                     JumpIfTrue end_or
-                    pop(1)
                     eval(B)
                     end_or:
                      */
 
                     //eval (A)
                     result.append(a);
-                    //jump PAST (POP eval(B))
+                    //jump PAST eval(B)
                     result.push(
-                        Opcode::JumpIfTrue((b.code.len() + 1 + 1) as u16),
+                        Opcode::JumpIfTrueOrPop((b.code.len() + 1) as u16),
                         op.position.0,
                     );
-                    //pop
-                    result.push(Opcode::Pop(1), op.position.0);
                     //eval(B)
                     result.append(b);
                 } else if let TokenKind::And = op.kind {
@@ -662,21 +659,17 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     evaluation scheme:
                     eval(A)
                     JumpIfFalse end_and
-                    pop(1)
-                    eval(B)
                     eval(B)
                     end_or:
                      */
 
                     //eval (A)
                     result.append(a);
-                    //jump PAST (POP eval(B))
+                    //jump PAST eval(B)
                     result.push(
-                        Opcode::JumpIfFalse((b.code.len() + 1 + 1) as u16),
+                        Opcode::JumpIfFalseOrPop((b.code.len() + 1) as u16),
                         op.position.0,
                     );
-                    //pop
-                    result.push(Opcode::Pop(1), op.position.0);
                     //eval(B)
                     result.append(b);
                 } else {
@@ -776,11 +769,10 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 let else_body_size = else_body.code.len();
 
                 result.push(
-                    Opcode::JumpIfFalse((then_body_size + 1 + 1 + 1) as u16),
+                    Opcode::JumpIfFalseOrPop((then_body_size + 1 + 1) as u16),
                     *result.indices.last().unwrap(),
                 );
-                //instruction AFTER POP then_body and jump
-                result.push(Opcode::Pop(1), *then_body.indices.first().unwrap());
+                //instruction AFTER then_body and jump
 
                 result.append(then_body);
 
