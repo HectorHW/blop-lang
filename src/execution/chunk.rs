@@ -24,6 +24,8 @@ pub enum Opcode {
 
     LoadField(u16),
     StoreField(u16),
+    LoadFieldByIndex(u16),
+    StoreFieldByIndex(u16),
 
     NewBox,
     LoadBox,
@@ -88,6 +90,8 @@ impl Display for Opcode {
                 StoreLocal(a) => format!("StoreLocal[{}]", a),
                 LoadField(a) => format!("LoadField[{}]", a),
                 StoreField(a) => format!("StoreField[{}]", a),
+                LoadFieldByIndex(idx) => format!("LoadFieldByIdx[{}]", idx),
+                StoreFieldByIndex(idx) => format!("StoreFieldByIdx[{}]", idx),
                 TestProperty(a) => format!("TestProperty[{}]", a),
                 Add => "Add".to_string(),
                 Sub => "Sub".to_string(),

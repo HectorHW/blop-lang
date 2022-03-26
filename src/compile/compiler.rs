@@ -1,12 +1,12 @@
 use crate::compile::checks::{Annotations, VariableType};
+use crate::compile::code_blob::AnnotatedCodeBlob;
 use crate::data::gc::GC;
 use crate::data::objects::{StackObject, StructDescriptor, Value};
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
+use regex::Regex;
 use std::collections::HashMap;
-
-use crate::compile::code_blob::AnnotatedCodeBlob;
 
 enum ValueRequirement {
     Nothing,
@@ -19,6 +19,7 @@ lazy_static! {
         kind: TokenKind::Name("`script`".to_string()),
         position: Index(0, 0),
     };
+    static ref FIELD_INDEX_REGEX: Regex = Regex::new(r"^_(\d+)$").unwrap();
 }
 
 pub struct Compiler<'gc, 'annotations, 'chunk> {
@@ -392,6 +393,24 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         Ok(result)
     }
 
+    fn try_parse_special_field_access(property: &Token) -> Result<Option<u16>, String> {
+        if FIELD_INDEX_REGEX.is_match(property.get_string().unwrap()) {
+            let idx = (property.get_string().unwrap()[1..])
+                .parse::<u16>()
+                .map_err(|_e| {
+                    format!(
+                        "{}: index too big [{}]",
+                        property.get_string().unwrap(),
+                        property.position
+                    )
+                })?;
+
+            Ok(Some(idx))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
         match stmt {
@@ -527,8 +546,19 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                     result.append(target); //load pointer
                     result.append(value); // value on top of pointer
-                    let name_idx = self.get_or_create_name(property.get_string().unwrap());
-                    result += (Opcode::StoreField(name_idx as u16), property.position.0);
+
+                    //special field index access
+                    result += (
+                        match Compiler::try_parse_special_field_access(property)? {
+                            Some(idx) => Opcode::StoreFieldByIndex(idx),
+                            None => {
+                                let name_idx =
+                                    self.get_or_create_name(property.get_string().unwrap());
+                                Opcode::StoreField(name_idx as u16)
+                            }
+                        },
+                        property.position.0,
+                    );
 
                     if self.needs_value() {
                         result.push(Opcode::LoadImmediateInt(0), property.position.0);
@@ -930,9 +960,16 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 result.append(target);
 
-                let idx = self.get_or_create_name(prop.get_string().unwrap());
-
-                result.push(Opcode::LoadField(idx as u16), prop.position.0);
+                result += (
+                    match Compiler::try_parse_special_field_access(prop)? {
+                        Some(idx) => Opcode::LoadFieldByIndex(idx),
+                        None => {
+                            let idx = self.get_or_create_name(prop.get_string().unwrap());
+                            Opcode::LoadField(idx as u16)
+                        }
+                    },
+                    prop.position.0,
+                );
 
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), prop.position.0);

@@ -9,6 +9,15 @@ var instance = pair(1, 2)
 print instance.elem1
 assert instance.elem1==1
 
+#fields can be accessed using index via special syntax
+assert instance._0 == 1
+assert instance._1 == 2
+
+# and can also be assigned by index
+instance._0 = 0
+assert instance._0 == 0
+assert instance.elem1 == 0
+
 print instance.elem2
 assert instance.elem2==2
 

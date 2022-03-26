@@ -50,6 +50,7 @@ pub enum InterpretErrorKind {
     NameError { name: String },
     NativeError { message: String },
     AttributeError { object: Value, missed_field: String },
+    IndexAttributeError { object: Value, missed_idx: usize },
 }
 
 enum InstructionExecution {
@@ -418,6 +419,42 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         return Err(runtime_error!(InterpretErrorKind::AttributeError {
                             object: pointer,
                             missed_field: key.to_string()
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::LoadFieldByIndex(idx) => {
+                let pointer = checked_stack_pop!()?;
+
+                match VM::get_property_idx_mut(&pointer, idx as usize) {
+                    Some(field) => {
+                        self.stack.push(field.clone());
+                    }
+                    None => {
+                        return Err(runtime_error!(InterpretErrorKind::IndexAttributeError {
+                            object: pointer,
+                            missed_idx: idx as usize
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::StoreFieldByIndex(idx) => {
+                let value = checked_stack_pop!()?;
+                let pointer = checked_stack_pop!()?;
+                match VM::get_property_idx_mut(&pointer, idx as usize) {
+                    Some(field) => {
+                        *field = value;
+                    }
+                    None => {
+                        return Err(runtime_error!(InterpretErrorKind::IndexAttributeError {
+                            object: pointer,
+                            missed_idx: idx as usize
                         }))
                     }
                 }
@@ -878,6 +915,17 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
                 let instance = obj.unwrap_struct_instance().unwrap();
                 instance.fields.get_mut(key)
+            }
+
+            _other => None,
+        }
+    }
+
+    fn get_property_idx_mut(pointer: &Value, index: usize) -> Option<&mut Value> {
+        match pointer {
+            obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
+                let instance = obj.unwrap_struct_instance().unwrap();
+                instance.fields.get_index_mut(index).map(|(k, v)| v)
             }
 
             _other => None,
