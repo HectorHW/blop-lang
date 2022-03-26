@@ -84,6 +84,8 @@ impl Rewriter<String> for ExpressionLifter {
                 //Expr::SingleStatement(a)
             }
 
+            s @ Stmt::StructDeclaration { .. } => Expr::SingleStatement(Box::new(s)),
+
             p @ Stmt::Pass(..) => Expr::SingleStatement(Box::new(p)),
 
             a @ Stmt::PropertyAssignment(..) => Expr::SingleStatement(Box::new(a)),

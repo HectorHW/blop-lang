@@ -14,6 +14,10 @@ pub enum Stmt {
         args: Vec<Token>,
         body: Expr,
     },
+    StructDeclaration {
+        name: Token,
+        fields: Vec<Token>,
+    },
 }
 
 #[derive(Clone, Debug)]

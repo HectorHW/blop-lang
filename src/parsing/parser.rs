@@ -40,6 +40,7 @@ peg::parser! {
 
              var_decl_stmt()
             / function_decl_stmt()
+            / struct_decl_stmt()
             / print_stmt()
             / assignment_stmt()
             / assert_stmt()
@@ -57,6 +58,29 @@ peg::parser! {
         rule function_decl_stmt() -> Stmt =
             [t!(Def)] n:name() args:maybe_arguments_and_equals() body:expr() {
                 Stmt::FunctionDeclaration{name:n, args, body}
+            }
+
+        rule struct_decl_stmt() -> Stmt =
+            [t!(Struct)] n:name() body: struct_body()? {
+                match body {
+                    Some(entries) => {
+                            Stmt::StructDeclaration {
+                                name: n,
+                                fields: entries,
+                            }
+
+                    }
+                    None => Stmt::StructDeclaration {
+                        name: n,
+                        fields: vec![],
+                    }
+                }
+
+            }
+
+        rule struct_body() -> Vec<Token> =
+            [t!(Equals)] [bb@t!(BeginBlock)] [t!(LineEnd)]? n:name() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {
+                n
             }
 
         rule paren_name_list() -> Vec<Token> =

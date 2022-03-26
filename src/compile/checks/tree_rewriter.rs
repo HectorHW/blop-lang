@@ -16,6 +16,11 @@ pub(super) trait Rewriter<E> {
             Stmt::FunctionDeclaration { name, args, body } => {
                 self.visit_function_declaration_statement(name, args, body)
             }
+
+            Stmt::StructDeclaration { name, fields } => {
+                self.visit_struct_declaration_statement(name, fields)
+            }
+
             Stmt::PropertyAssignment(target, value) => {
                 self.visit_property_assignment(target, value)
             }
@@ -64,6 +69,14 @@ pub(super) trait Rewriter<E> {
             args,
             body: self.visit_expr(body)?,
         })
+    }
+
+    fn visit_struct_declaration_statement(
+        &mut self,
+        name: Token,
+        fields: Vec<Token>,
+    ) -> Result<Stmt, E> {
+        Ok(Stmt::StructDeclaration { name, fields })
     }
 
     fn visit_property_assignment(&mut self, target: Expr, value: Expr) -> Result<Stmt, E> {

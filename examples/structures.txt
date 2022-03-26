@@ -1,4 +1,6 @@
-var pair = struct("pair", "elem1", "elem2")
+struct pair = 
+    elem1
+    elem2
 
 #simple field access
 
@@ -52,3 +54,10 @@ instance.elem1 = "first"
 instance.elem2 = "second"
 
 print instance?elem1 and instance.elem1 or instance.elem2
+
+# you can define structs with no fields
+struct zero
+
+var zero_instance = zero()
+print zero_instance
+print instance

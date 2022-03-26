@@ -186,6 +186,11 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
                 Stmt::FunctionDeclaration { name, .. } => {
                     self.declare_name(name);
                 }
+
+                Stmt::StructDeclaration { name, .. } => {
+                    self.declare_name(name);
+                }
+
                 _ => {}
             }
         }

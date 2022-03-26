@@ -92,10 +92,9 @@ impl Visitor<String> for NameRedefinitionChecker {
         _end_token: &Token,
         containing_statements: &[Stmt],
     ) -> Result<(), String> {
-        let mut statements = vec![];
         self.new_scope();
         for stmt in containing_statements {
-            statements.push(self.visit_stmt(stmt)?);
+            self.visit_stmt(stmt)?;
         }
         self.pop_scope();
         Ok(())
@@ -119,5 +118,37 @@ impl Visitor<String> for NameRedefinitionChecker {
             })?;
         }
         self.visit_expr(body)
+    }
+
+    fn visit_struct_declaration_statement(
+        &mut self,
+        name: &Token,
+        fields: &[Token],
+    ) -> Result<(), String> {
+        self.declare_name(name).map_err(|e| {
+            format!(
+                "name {} [{}] is redefined in block, previous definition at [{}]",
+                name.get_string().unwrap(),
+                name.position,
+                e.position
+            )
+        })?;
+
+        self.new_scope();
+
+        for field in fields {
+            self.declare_name(field).map_err(|e| {
+                format!(
+                    "field {} [{}] is redefined in struct, previous definition at [{}]",
+                    field.get_string().unwrap(),
+                    field.position,
+                    e.position
+                )
+            })?;
+        }
+
+        self.pop_scope();
+
+        Ok(())
     }
 }

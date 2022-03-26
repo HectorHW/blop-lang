@@ -1,6 +1,6 @@
 use crate::compile::checks::{Annotations, VariableType};
 use crate::data::gc::GC;
-use crate::data::objects::{StackObject, Value};
+use crate::data::objects::{StackObject, StructDescriptor, Value};
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
@@ -361,6 +361,37 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         Ok(result)
     }
 
+    fn create_named_entity(
+        &mut self,
+        name: &Token,
+        value_emitting_code: AnnotatedCodeBlob,
+    ) -> Result<AnnotatedCodeBlob, String> {
+        let mut result = AnnotatedCodeBlob::new();
+
+        match self.lookup_block(name.get_string().unwrap()) {
+            Some((VariableType::Boxed, idx)) => {
+                result.push(Opcode::LoadLocal(idx as u16), name.position.0); //load box
+
+                result.append(value_emitting_code);
+
+                result.push(Opcode::StoreBox, name.position.0);
+            }
+
+            None => {
+                //variable is not forward-declared => not present on stack yet
+                result.append(value_emitting_code);
+                let varname = name.get_string().unwrap();
+                let _ = self
+                    .declare_local(varname, VariableType::Normal)
+                    .ok_or(format!("redefinition of variable {}", varname))?;
+            }
+            _a => panic!("{:?}", _a),
+        }
+        self.define_local(name.get_string().unwrap());
+
+        Ok(result)
+    }
+
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
         match stmt {
@@ -377,42 +408,47 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             }
 
             Stmt::VarDeclaration(n, e) => {
-                match self.lookup_block(n.get_string().unwrap()) {
-                    Some((VariableType::Boxed, idx)) => {
-                        result.push(Opcode::LoadLocal(idx as u16), n.position.0); //load box
-                        if e.is_none() {
-                            result.push(Opcode::LoadImmediateInt(0), n.position.0);
-                        } else {
-                            self.require_value();
-                            let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
-                            self.pop_requirement();
-                            result.append(assignment_body);
-                        }
-                        result.push(Opcode::StoreBox, n.position.0);
-                    }
+                let mut right_side = AnnotatedCodeBlob::new();
 
-                    None => {
-                        //variable is not forward-declared => not present on stack yet
-                        if e.is_none() {
-                            result.push(Opcode::LoadImmediateInt(0), n.position.0);
-                        } else {
-                            self.require_value();
-                            let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
-                            self.pop_requirement();
-                            result.append(assignment_body);
-                        }
-                        let varname = n.get_string().unwrap();
-                        let _ = self
-                            .declare_local(varname, VariableType::Normal)
-                            .ok_or(format!("redefinition of variable {}", varname))?;
-                    }
-                    _a => panic!("{:?}", _a),
+                if e.is_none() {
+                    right_side.push(Opcode::LoadImmediateInt(0), n.position.0);
+                } else {
+                    self.require_value();
+                    let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
+                    self.pop_requirement();
+                    right_side.append(assignment_body);
                 }
-                self.define_local(n.get_string().unwrap());
+
+                result.append(self.create_named_entity(n, right_side)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0), result.last_index().unwrap());
                     //TODO dup?
+                }
+            }
+
+            Stmt::StructDeclaration { name, fields } => {
+                let struct_descriptor = StructDescriptor {
+                    name: name.get_string().unwrap().to_string(),
+                    fields: fields
+                        .iter()
+                        .map(|f| f.get_string().unwrap().to_string())
+                        .collect(),
+                };
+
+                let struct_object_pointer = self.gc.store(struct_descriptor);
+                let constant_idx = self.get_or_create_constant(struct_object_pointer);
+
+                let struct_load_code = {
+                    let mut blob = AnnotatedCodeBlob::new();
+                    blob.push(Opcode::LoadConst(constant_idx as u16), name.position.0);
+                    blob
+                };
+
+                result.append(self.create_named_entity(name, struct_load_code)?);
+
+                if self.needs_value() {
+                    result.push(Opcode::LoadImmediateInt(0), name.position.0);
                 }
             }
 
@@ -527,42 +563,18 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 let const_idx = self.get_or_create_constant(new_chunk_idx);
 
-                if let Some((_, idx)) = self.lookup_block(function_name.get_string().unwrap()) {
-                    //load pointer
-                    result.push(Opcode::LoadLocal(idx as u16), function_name.position.0);
-                }
+                let mut function = AnnotatedCodeBlob::new();
 
-                result.push(
+                function.push(
                     Opcode::LoadConst(const_idx as u16),
                     function_name.position.0,
                 ); //code block
 
-                let code = self.close_function(function_name)?;
+                let closing_code = self.close_function(function_name)?;
 
-                result.append(code);
+                function.append(closing_code);
 
-                //match self.lookup_local()
-
-                match self.lookup_block(function_name.get_string().unwrap()) {
-                    Some((VariableType::Boxed, _)) => {
-                        //pointer is on stack
-                        result.push(Opcode::StoreBox, function_name.position.0);
-                    }
-                    None => {
-                        self.declare_local(
-                            function_name.get_string().unwrap(),
-                            VariableType::Normal,
-                        )
-                        .ok_or_else(|| {
-                            format!(
-                                "redifinition of name {}",
-                                function_name.get_string().unwrap()
-                            )
-                        })?;
-                    }
-                    _other => panic!("{:?}", _other),
-                }
-                self.define_local(function_name.get_string().unwrap());
+                result.append(self.create_named_entity(function_name, function)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0), function_name.position.0);

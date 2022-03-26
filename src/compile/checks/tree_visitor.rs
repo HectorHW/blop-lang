@@ -15,6 +15,9 @@ pub(super) trait Visitor<E> {
             Stmt::FunctionDeclaration { name, args, body } => {
                 self.visit_function_declaration_statement(name, args, body)
             }
+            Stmt::StructDeclaration { name, fields } => {
+                self.visit_struct_declaration_statement(name, fields)
+            }
             Stmt::PropertyAssignment(target, value) => {
                 self.visit_property_assignment(target, value)
             }
@@ -55,6 +58,14 @@ pub(super) trait Visitor<E> {
         body: &Expr,
     ) -> Result<(), E> {
         self.visit_expr(body)
+    }
+
+    fn visit_struct_declaration_statement(
+        &mut self,
+        name: &Token,
+        fields: &[Token],
+    ) -> Result<(), E> {
+        Ok(())
     }
 
     fn visit_property_assignment(&mut self, target: &Expr, value: &Expr) -> Result<(), E> {
