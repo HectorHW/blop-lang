@@ -1,21 +1,23 @@
 name: Rust
 
-on:
-  push:
-  pull_request:
-    branches: [ master ]
-
-env:
-  CARGO_TERM_COLOR: always
-
+on: push
 jobs:
-  build:
-
+  clippy_check:
     runs-on: self-hosted
-
     steps:
-    - uses: actions/checkout@v2
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests under valgrind
-      run: cargo test --no-run && valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 -v --suppressions=valgrind.supp  $(find target/debug/deps -regextype sed -regex ".*/blop[^.]*")
+      - uses: actions/checkout@v1
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
+
+  valgrind_test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v2
+      - name: clean
+        run: cargo clean
+      - name: build test binary
+        run: cargo test --no-run
+      - name: Run tests under valgrind
+        run: valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 -v --suppressions=valgrind.supp  $(find target/debug/deps -regextype sed -regex ".*/blop[^.]*")
