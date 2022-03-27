@@ -20,4 +20,4 @@ jobs:
       - name: build test binary
         run: cargo test --no-run
       - name: Run tests under valgrind
-        run: valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 -v --suppressions=valgrind.supp  $(find target/debug/deps -regextype sed -regex ".*/blop[^.]*")
+        run: valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 -v --suppressions=valgrind.supp --num-callers=30 $(find target/debug/deps -regextype sed -regex ".*/blop[^.]*")
