@@ -18,4 +18,4 @@ jobs:
     - name: Build
       run: cargo build --verbose
     - name: Run tests under valgrind
-      run: cargo valgrind test --verbose
+      run: cargo test --no-run && valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 -v --suppressions=valgrind.supp  $(find target/debug/deps -regextype sed -regex ".*/blop[^.]*")
