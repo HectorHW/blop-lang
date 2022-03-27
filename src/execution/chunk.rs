@@ -77,62 +77,7 @@ pub enum Opcode {
 
 impl Display for Opcode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        use Opcode::*;
-        write!(
-            f,
-            "{}",
-            match self {
-                Print => "Print".to_string(),
-                LoadConst(a) => format!("LoadConst[{}]", a),
-                LoadImmediateInt(i) => format!("LoadImmediateInt[{}]", i),
-                LoadGlobal(a) => format!("LoadGlobal[{}]", a),
-                StoreGLobal(a) => format!("StoreGlobal[{}]", a),
-                StoreLocal(a) => format!("StoreLocal[{}]", a),
-                LoadField(a) => format!("LoadField[{}]", a),
-                StoreField(a) => format!("StoreField[{}]", a),
-                LoadFieldByIndex(idx) => format!("LoadFieldByIdx[{}]", idx),
-                StoreFieldByIndex(idx) => format!("StoreFieldByIdx[{}]", idx),
-                TestProperty(a) => format!("TestProperty[{}]", a),
-                Add => "Add".to_string(),
-                Sub => "Sub".to_string(),
-                Div => "Div".to_string(),
-                Mul => "Mul".to_string(), //Opcode::SwapStack(a, b) => format!("SwapStack[{}, {}]", a, b),
-                //Opcode::ExtendArg1(e) => format!("Extend[{}]", e),
-                //Opcode::ExtendDouble(a, b) => format!("Extend[{}, {}]", a, b)
-                TestEquals => "TestEquals".to_string(),
-                TestNotEquals => "TestNotEquals".to_string(),
-
-                TestGreater => "TestGreater".to_string(),
-                TestGreaterEqual => "TestGreaterEqual".to_string(),
-                TestLess => "TestLess".to_string(),
-                TestLessEqual => "TestLessEqual".to_string(),
-
-                JumpIfFalseOrPop(delta) => format!("JumpIfFalse[{}]", delta),
-                JumpIfTrueOrPop(delta) => format!("JumpIfTrue[{}]", delta),
-                JumpRelative(delta) => format!("Jump[{}]", delta),
-                Pop(n) => format!("Pop[{}]", n),
-                Nop => "Nop".to_string(),
-                Assert => "Assert".to_string(),
-                Call(arity) => format!("Call[{}]", arity),
-                Return => "Return".to_string(),
-                LoadLocal(idx) => format!("LoadLocal[{}]", idx),
-                NewBox => "NewBox".to_string(),
-                LoadBox => "LoadBox".to_string(),
-                StoreBox => "StoreBox".to_string(),
-                NewClosure => "NewClosure".to_string(),
-                AddClosedValue => "AddClosedValue".to_string(),
-                LoadClosureValue(idx) => format!("LoadClosureValue[{}]", idx),
-                Duplicate => "Duplicate".to_string(),
-                JumpAbsolute(idx) => format!("JumpAbsolute[{}]", idx),
-                Mod => "Mod".to_string(),
-                Power => "Power".to_string(),
-                LogicalNot => "Not".to_string(),
-                LoadBlank => {
-                    "LoadBlank".to_string()
-                }
-                CallPartial(idx) => format!("CallPartial[{}]", idx),
-            }
-        )
+        write!(f, "{:?}", self)
     }
 }
 
@@ -201,70 +146,50 @@ mod chunk_pretty_printer {
         let mut res = vec![];
         for (i, opcode) in chunk.code.iter().enumerate() {
             let mut s = String::new();
+
+            macro_rules! pretty_argument {
+                ($arg:expr) => {
+                    format!("{:<21} ({})", format!("{}", opcode), $arg)
+                };
+            }
+
+            macro_rules! pretty_with_global {
+                ($idx:expr) => {
+                    format!(
+                        "{:<21} ({})",
+                        format!("{}", opcode),
+                        format!("value {}", (chunk.global_names[($idx) as usize]))
+                    )
+                };
+            }
+
             let _ = write!(
                 s,
                 "{:<5} {}",
                 i,
                 match opcode {
-                    Opcode::LoadConst(idx) => {
-                        format!(
-                            "{:<21} (value {})",
-                            format!("{}", Opcode::LoadConst(*idx)),
-                            (chunk.constants[(*idx) as usize])
-                        )
-                    }
+                    Opcode::LoadConst(idx) =>
+                        pretty_argument!(format!("value {}", (chunk.constants[(*idx) as usize]))),
 
-                    Opcode::LoadGlobal(idx) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", Opcode::LoadGlobal(*idx)),
-                            chunk.global_names[(*idx) as usize]
-                        )
-                    }
+                    Opcode::LoadGlobal(idx) => pretty_with_global!(*idx),
 
-                    instr @ Opcode::LoadField(idx) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", instr),
-                            chunk.global_names[(*idx) as usize]
-                        )
-                    }
+                    Opcode::LoadField(idx) => pretty_with_global!(*idx),
 
-                    instr @ Opcode::StoreField(idx) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", instr),
-                            chunk.global_names[(*idx) as usize]
-                        )
-                    }
+                    Opcode::StoreField(idx) => pretty_with_global!(*idx),
 
-                    instr @ Opcode::TestProperty(idx) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", instr),
-                            chunk.global_names[(*idx) as usize]
-                        )
-                    }
+                    Opcode::TestProperty(idx) => pretty_with_global!(*idx),
 
-                    Opcode::StoreGLobal(idx) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", Opcode::StoreGLobal(*idx)),
-                            chunk.global_names[(*idx) as usize]
-                        )
-                    }
+                    Opcode::StoreGLobal(idx) => pretty_with_global!(*idx),
 
-                    Opcode::LoadImmediateInt(n) => {
-                        format!("{:<21} (value {})", "LoadImmediateInt", n)
-                    }
+                    Opcode::LoadImmediateInt(n) => pretty_argument!(format!("value {}", n)),
 
                     op @ Opcode::LoadLocal(idx) => {
                         if chunk.name.get_string().unwrap() != "<script>" {
                             //inside some function
                             if *idx == 0 {
-                                format!("{:<21} (current function)", format!("{}", op))
+                                pretty_argument!("current function")
                             } else if *idx as usize <= chunk.arity {
-                                format!("{:<21} (argument {})", format!("{}", op), idx - 1)
+                                pretty_argument!(format!("argument {}", idx - 1))
                             } else {
                                 format!("{}", op)
                             }
@@ -273,37 +198,13 @@ mod chunk_pretty_printer {
                         }
                     }
 
-                    Opcode::JumpIfFalseOrPop(delta) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", Opcode::JumpIfFalseOrPop(*delta)),
-                            i + *delta as usize
-                        )
-                    }
+                    Opcode::JumpIfFalseOrPop(delta) => pretty_argument!(i + *delta as usize),
 
-                    Opcode::JumpIfTrueOrPop(delta) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", Opcode::JumpIfTrueOrPop(*delta)),
-                            i + *delta as usize
-                        )
-                    }
+                    Opcode::JumpIfTrueOrPop(delta) => pretty_argument!(i + *delta as usize),
 
-                    Opcode::JumpRelative(delta) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", Opcode::JumpRelative(*delta)),
-                            i + *delta as usize
-                        )
-                    }
+                    Opcode::JumpRelative(delta) => pretty_argument!(i + *delta as usize),
 
-                    Opcode::JumpAbsolute(idx) => {
-                        format!(
-                            "{:<21} ({})",
-                            format!("{}", Opcode::JumpAbsolute(*idx)),
-                            *idx as usize
-                        )
-                    }
+                    Opcode::JumpAbsolute(idx) => pretty_argument!(*idx as usize),
 
                     any_other => {
                         format!("{}", any_other)

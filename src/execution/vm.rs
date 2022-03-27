@@ -925,7 +925,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         match pointer {
             obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
                 let instance = obj.unwrap_struct_instance().unwrap();
-                instance.fields.get_index_mut(index).map(|(k, v)| v)
+                instance.fields.get_index_mut(index).map(|(_k, v)| v)
             }
 
             _other => None,
