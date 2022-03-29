@@ -79,7 +79,7 @@ peg::parser! {
             }
 
         rule struct_body() -> Vec<Token> =
-            [t!(Equals)] [bb@t!(BeginBlock)] [t!(LineEnd)]? n:name() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {
+            [t!(Colon)] [bb@t!(BeginBlock)] [t!(LineEnd)]? n:name() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {
                 n
             }
 

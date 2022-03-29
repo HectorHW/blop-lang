@@ -55,6 +55,7 @@ pub enum TokenKind {
     Blank,
 
     Equals,
+    Colon,
 
     Number(i64),
     Name(String),
@@ -115,6 +116,7 @@ impl Display for TokenKind {
                 TokenKind::Arrow => "(=>)".to_string(),
                 TokenKind::Blank => "(_)".to_string(),
                 TokenKind::Struct => "(struct)".to_string(),
+                TokenKind::Colon => "<:>".to_string(),
             }
         )
     }
@@ -327,6 +329,11 @@ impl<'input> Lexer<'input> {
 
                 '?' => {
                     result.push(token!(QuestionMark));
+                    self.input_iterator.next();
+                }
+
+                ':' => {
+                    result.push(token!(Colon));
                     self.input_iterator.next();
                 }
 

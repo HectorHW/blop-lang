@@ -1,4 +1,4 @@
-struct pair = 
+struct pair:
     elem1
     elem2
 

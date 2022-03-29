@@ -19,7 +19,7 @@ lazy_static! {
         kind: TokenKind::Name("`script`".to_string()),
         position: Index(0, 0),
     };
-    static ref FIELD_INDEX_REGEX: Regex = Regex::new(r"^_(\d+)$").unwrap();
+    static ref FIELD_INDEX_REGEX: Regex = Regex::new(r"^_\d+$").unwrap();
 }
 
 pub struct Compiler<'gc, 'annotations, 'chunk> {
