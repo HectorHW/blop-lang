@@ -24,6 +24,11 @@ pub(super) trait Rewriter<E> {
             Stmt::PropertyAssignment(target, value) => {
                 self.visit_property_assignment(target, value)
             }
+
+            Stmt::ImplBlock {
+                name,
+                implementations,
+            } => self.visit_impl_block(name, implementations),
         }
     }
 
@@ -84,6 +89,18 @@ pub(super) trait Rewriter<E> {
             self.visit_expr(target)?,
             self.visit_expr(value)?,
         ))
+    }
+
+    fn visit_impl_block(&mut self, name: Token, functions: Vec<Stmt>) -> Result<Stmt, E> {
+        let functions = functions
+            .into_iter()
+            .map(|f| self.visit_stmt(f))
+            .collect::<Result<Vec<Stmt>, E>>()?;
+
+        Ok(Stmt::ImplBlock {
+            name,
+            implementations: functions,
+        })
     }
 
     fn visit_expr(&mut self, expr: Expr) -> Result<Expr, E> {

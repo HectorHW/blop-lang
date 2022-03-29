@@ -151,4 +151,32 @@ impl Visitor<String> for NameRedefinitionChecker {
 
         Ok(())
     }
+
+    fn visit_impl_block(&mut self, _name: &Token, implementations: &[Stmt]) -> Result<(), String> {
+        self.new_scope();
+
+        for f in implementations {
+            match f {
+                Stmt::FunctionDeclaration { name, args, body } => {
+                    self.visit_method(name, args, body)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        self.pop_scope();
+        Ok(())
+    }
+
+    fn visit_method(&mut self, name: &Token, args: &[Token], body: &Expr) -> Result<(), String> {
+        if args.is_empty() {
+            return Err(format!(
+                "method {} [{}] should have at least one argument",
+                name.get_string().unwrap(),
+                name.position
+            ));
+        }
+
+        self.visit_function_declaration_statement(name, args, body)
+    }
 }

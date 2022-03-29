@@ -1,6 +1,6 @@
 ///
 /// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
-use crate::data::objects::{StackObject, StructDescriptor, VVec, Value};
+use crate::data::objects::{StackObject, VVec, Value};
 use std::collections::HashMap;
 
 use super::vm::VM;
@@ -52,18 +52,6 @@ pub fn builtin_factory() -> BuiltinMap {
         };
     }
 
-    macro_rules! require_at_least {
-        ($checked:expr, $n:expr) => {
-            if $checked.len() < $n {
-                return Err(format!(
-                    "arity mismatch: expected at least {} but got {}",
-                    $n,
-                    $checked.len()
-                ));
-            }
-        };
-    }
-
     macro_rules! builtin {
         ($name:expr, $function: expr) => {
             map.add_builtin($name, $function)
@@ -106,25 +94,6 @@ pub fn builtin_factory() -> BuiltinMap {
     builtin!("set_stack_limit", |args, vm| {
         vm.override_stack_limit(args[0].unwrap_int().unwrap() as usize);
         Ok(Value::Int(0))
-    });
-
-    builtin!("struct", |args, vm| {
-        require_at_least!(args, 1);
-        if let Some(obj) = args.iter().find(|arg| arg.unwrap_any_str().is_none()) {
-            return Err(format!(
-                "expected field names as strings but got {}",
-                obj.type_string()
-            ));
-        }
-        let struct_descriptor = vm.gc.store(StructDescriptor {
-            name: args[0].unwrap_any_str().unwrap().to_owned(),
-            fields: args[1..]
-                .iter()
-                .map(|item| item.unwrap_any_str().unwrap().to_owned())
-                .collect(),
-        });
-
-        Ok(struct_descriptor)
     });
 
     map

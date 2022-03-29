@@ -274,6 +274,20 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             };
         }
 
+        macro_rules! get_from_top {
+            () => {
+                self.stack
+                    .last()
+                    .ok_or_else(|| runtime_error!(StackUnderflow))
+            };
+
+            ($idx:expr) => {
+                self.stack
+                    .get($idx)
+                    .ok_or_else(|| runtime_error!(StackUnderflow))
+            };
+        }
+
         let jump = match chunk.code[ip] {
             Opcode::Print => {
                 let result = checked_stack_pop!()?;
@@ -296,7 +310,6 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::Add => {
-                //let second_operand = checked_stack_pop!()
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
 
@@ -391,9 +404,9 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let pointer = checked_stack_pop!()?;
                 let key = checked_get_name!(idx)?;
 
-                match VM::get_property(&pointer, key) {
-                    Some(field) => {
-                        self.stack.push(field.clone());
+                match pointer.lookup(key, self) {
+                    Some(obj) => {
+                        self.stack.push(obj);
                     }
                     None => {
                         return Err(runtime_error!(InterpretErrorKind::AttributeError {
@@ -411,11 +424,9 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let pointer = checked_stack_pop!()?;
                 let key = checked_get_name!(idx)?;
 
-                match VM::get_property_mut(&pointer, key) {
-                    Some(field) => {
-                        *field = value;
-                    }
-                    None => {
+                match pointer.set_field(key, value, self) {
+                    Ok(()) => {}
+                    Err(()) => {
                         return Err(runtime_error!(InterpretErrorKind::AttributeError {
                             object: pointer,
                             missed_field: key.to_string()
@@ -537,12 +548,12 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     .get(idx as usize)
                     .ok_or(runtime_error!(OperandIndexing))?;
                 let pointer = checked_stack_pop!()?;
-                self.stack
-                    .push(Value::Int(if VM::get_property(&pointer, key).is_some() {
-                        1
-                    } else {
-                        0
-                    }));
+                let value = Value::Int(if pointer.lookup(key, self).is_some() {
+                    1
+                } else {
+                    0
+                });
+                self.stack.push(value);
                 InstructionExecution::NextInstruction
             }
 
@@ -879,8 +890,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 InstructionExecution::NextInstruction
             }
             Opcode::Duplicate => {
-                let value = checked_stack_pop!()?;
-                self.stack.push(value.clone());
+                let value = get_from_top!()?.clone();
                 self.stack.push(value);
                 InstructionExecution::NextInstruction
             }
@@ -897,28 +907,6 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             return Err(());
         }
         Ok(())
-    }
-
-    fn get_property<'v, 'k>(pointer: &'v Value, key: &'k str) -> Option<&'v Value> {
-        match pointer {
-            obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
-                let instance = obj.unwrap_struct_instance().unwrap();
-                instance.fields.get(key)
-            }
-
-            _other => None,
-        }
-    }
-
-    fn get_property_mut<'v, 'k>(pointer: &'v Value, key: &'k str) -> Option<&'v mut Value> {
-        match pointer {
-            obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
-                let instance = obj.unwrap_struct_instance().unwrap();
-                instance.fields.get_mut(key)
-            }
-
-            _other => None,
-        }
     }
 
     fn get_property_idx_mut(pointer: &Value, index: usize) -> Option<&mut Value> {

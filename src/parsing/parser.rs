@@ -41,6 +41,7 @@ peg::parser! {
              var_decl_stmt()
             / function_decl_stmt()
             / struct_decl_stmt()
+            / implementation_stmt()
             / print_stmt()
             / assignment_stmt()
             / assert_stmt()
@@ -81,6 +82,19 @@ peg::parser! {
         rule struct_body() -> Vec<Token> =
             [t!(Colon)] [bb@t!(BeginBlock)] [t!(LineEnd)]? n:name() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {
                 n
+            }
+
+        rule implementation_stmt() -> Stmt =
+            [t!(Impl)] n: name() [t!(Colon)] methods: impl_block() {
+                Stmt::ImplBlock {
+                    name: n,
+                    implementations: methods,
+                }
+            }
+
+        rule impl_block() -> Vec<Stmt> =
+            [bb@t!(BeginBlock)] [t!(LineEnd)]? m:function_decl_stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {
+                m
             }
 
         rule paren_name_list() -> Vec<Token> =

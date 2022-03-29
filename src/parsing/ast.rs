@@ -18,6 +18,11 @@ pub enum Stmt {
         name: Token,
         fields: Vec<Token>,
     },
+
+    ImplBlock {
+        name: Token,
+        implementations: Vec<Stmt>,
+    },
 }
 
 #[derive(Clone, Debug)]

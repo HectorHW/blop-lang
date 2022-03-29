@@ -21,6 +21,11 @@ pub(super) trait Visitor<E> {
             Stmt::PropertyAssignment(target, value) => {
                 self.visit_property_assignment(target, value)
             }
+
+            Stmt::ImplBlock {
+                name,
+                implementations,
+            } => self.visit_impl_block(name, implementations),
         }
     }
 
@@ -60,6 +65,10 @@ pub(super) trait Visitor<E> {
         self.visit_expr(body)
     }
 
+    fn visit_method(&mut self, name: &Token, args: &[Token], body: &Expr) -> Result<(), E> {
+        self.visit_function_declaration_statement(name, args, body)
+    }
+
     fn visit_struct_declaration_statement(
         &mut self,
         name: &Token,
@@ -71,6 +80,14 @@ pub(super) trait Visitor<E> {
     fn visit_property_assignment(&mut self, target: &Expr, value: &Expr) -> Result<(), E> {
         self.visit_expr(target)?;
         self.visit_expr(value)
+    }
+
+    fn visit_impl_block(&mut self, name: &Token, implementations: &[Stmt]) -> Result<(), E> {
+        implementations
+            .iter()
+            .try_for_each(|f| self.visit_stmt(f))?;
+
+        Ok(())
     }
 
     fn visit_expr(&mut self, expr: &Expr) -> Result<(), E> {

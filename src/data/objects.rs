@@ -1,4 +1,5 @@
 use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
+use crate::execution::vm::VM;
 use crate::Chunk;
 use indexmap::IndexMap;
 use std::cmp::Ordering;
@@ -7,6 +8,8 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
+
+use super::gc::GC;
 
 pub type Value = StackObject;
 
@@ -84,6 +87,7 @@ impl Partial {
 pub struct StructDescriptor {
     pub name: String,
     pub fields: Vec<String>,
+    pub(crate) methods: HashMap<String, Value>,
 }
 
 impl StructDescriptor {
@@ -106,12 +110,70 @@ impl StructDescriptor {
                 .collect::<IndexMap<String, Value>>(),
         })
     }
+
+    pub fn add_method(&mut self, method_name: &str, method: Value) {
+        self.methods.insert(method_name.to_string(), method);
+    }
+
+    pub fn get_method(&self, method_name: &str) -> Option<Value> {
+        self.methods.get(method_name).cloned()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructInstance {
     pub descriptor: Value,
     pub fields: IndexMap<String, Value>,
+}
+
+impl StructInstance {
+    pub fn get_bound_method(
+        &self,
+        self_ptr: &Value,
+        method_name: &str,
+        gc_context: &mut GC,
+    ) -> Option<Value> {
+        self.descriptor
+            .unwrap_struct_descriptor()
+            .unwrap()
+            .get_method(method_name)
+            .and_then(|raw_method| {
+                let blanks = match raw_method.get_arity() {
+                    Ok(Some(n)) => vec![StackObject::Blank; n],
+                    Ok(None) => vec![StackObject::Blank],
+                    Err(_) => {
+                        return None;
+                    }
+                };
+
+                let partial = Partial::new(raw_method, blanks).substitute(vec![self_ptr.clone()]);
+
+                Some(gc_context.store(partial))
+            })
+    }
+
+    pub fn get_field(&self, field_name: &str) -> Option<Value> {
+        self.fields.get(field_name).cloned()
+    }
+
+    pub fn lookup(
+        &self,
+        self_ptr: &Value,
+        entity_name: &str,
+        gc_context: &mut GC,
+    ) -> Option<Value> {
+        self.get_bound_method(self_ptr, entity_name, gc_context)
+            .or_else(|| self.get_field(entity_name))
+    }
+
+    pub fn set_field(&mut self, field_name: &str, value: Value) -> Result<(), ()> {
+        if self.fields.contains_key(field_name) {
+            self.fields.insert(field_name.to_string(), value);
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -339,6 +401,61 @@ impl StackObject {
         }
     }
 
+    pub fn get_arity(&self) -> Result<Option<usize>, ()> {
+        match self {
+            StackObject::Int(_) => Err(()),
+            StackObject::Blank => Err(()),
+            StackObject::Builtin(_) => Ok(None),
+            h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
+                OwnedObjectItem::ConstantString(_) => Err(()),
+                OwnedObjectItem::MutableString(_) => Err(()),
+                OwnedObjectItem::Vector(_) => Err(()),
+                OwnedObjectItem::Map(_) => Err(()),
+                OwnedObjectItem::Box(_) => Err(()),
+                OwnedObjectItem::Closure(c) => c.underlying.get_arity(),
+                OwnedObjectItem::Function(f) => Ok(Some(f.arity)),
+                OwnedObjectItem::Partial(p) => Ok(Some(p.count_blanks())),
+                OwnedObjectItem::StructDescriptor(s) => Ok(Some(s.fields.len())),
+                OwnedObjectItem::StructInstance(_) => Err(()),
+            },
+        }
+    }
+
+    pub fn lookup(&self, field_name: &str, context: &mut VM) -> Option<Value> {
+        match self {
+            StackObject::Int(_) => None,
+            StackObject::Blank => None,
+            StackObject::Builtin(_) => None,
+            h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
+                OwnedObjectItem::ConstantString(_) => None,
+                OwnedObjectItem::MutableString(_) => None,
+                OwnedObjectItem::Vector(_) => None,
+                OwnedObjectItem::Map(_) => None,
+                OwnedObjectItem::Box(_) => None,
+                OwnedObjectItem::Closure(_) => None,
+                OwnedObjectItem::Function(_) => None,
+                OwnedObjectItem::Partial(_) => None,
+                OwnedObjectItem::StructDescriptor(_) => None,
+                OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context.gc),
+            },
+        }
+    }
+
+    pub fn set_field(&self, field_name: &str, value: Value, _context: &mut VM) -> Result<(), ()> {
+        match self {
+            h @ StackObject::HeapObject(..) => match h.as_heap_object().unwrap() {
+                OwnedObjectItem::StructDescriptor(d) => {
+                    d.add_method(field_name, value);
+                    Ok(())
+                }
+                OwnedObjectItem::StructInstance(s) => s.set_field(field_name, value),
+                _ => Err(()),
+            },
+
+            _ => Err(()),
+        }
+    }
+
     pub fn type_string(&self) -> String {
         match self {
             StackObject::Int(_) => "int".to_string(),
@@ -546,7 +663,7 @@ impl Display for OwnedObject {
                     chunk.arity
                 )
             }
-            OwnedObjectItem::StructDescriptor(StructDescriptor { name, fields }) => {
+            OwnedObjectItem::StructDescriptor(StructDescriptor { name, fields, .. }) => {
                 write!(f, "Struct {name} = {}", fields.join(" * "))
             }
             OwnedObjectItem::StructInstance(StructInstance { descriptor, fields }) => {

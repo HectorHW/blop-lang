@@ -1,10 +1,10 @@
-struct pair:
+struct Pair:
     elem1
     elem2
 
 #simple field access
 
-var instance = pair(1, 2)
+var instance = Pair(1, 2)
 
 print instance.elem1
 assert instance.elem1==1
@@ -21,7 +21,7 @@ assert instance.elem1 == 0
 print instance.elem2
 assert instance.elem2==2
 
-instance = pair(pair(1, 2), pair(3, pair(4, 5)))
+instance = Pair(Pair(1, 2), Pair(3, Pair(4, 5)))
 
 #complex field access
 assert instance.elem2.elem1 == 3
@@ -33,19 +33,19 @@ assert not instance?other_field
 
 #field assignment
 
-instance = pair(1, 2)
+instance = Pair(1, 2)
 instance.elem1 = 3
 assert instance.elem1 == 3
 assert instance.elem2 == 2
 
-instance.elem2 = pair(4, 5)
+instance.elem2 = Pair(4, 5)
 assert instance.elem2.elem1 == 4
 
 #complex assignment
 instance.elem2.elem1 = 8
 assert instance.elem2.elem1 == 8
 
-instance.elem1 = pair(0, 0)
+instance.elem1 = Pair(0, 0)
 
 #exressions in assignment target as pointers
 
@@ -70,3 +70,18 @@ struct zero
 var zero_instance = zero()
 print zero_instance
 print instance
+
+#implementation block
+# somewhat equivalent to 
+#     Pair.first = (self) => self._0
+#     Pair.second = (self) => self._1
+
+impl Pair:
+
+    def first(self) = self._0
+    def second(self) = self._1
+
+instance = Pair(2, 3)
+
+assert instance.first() == 2
+assert instance.second() == 3

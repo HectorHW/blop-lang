@@ -70,6 +70,7 @@ pub enum TokenKind {
     Def,
     Pass,
     Struct,
+    Impl,
 }
 
 impl Display for TokenKind {
@@ -117,6 +118,7 @@ impl Display for TokenKind {
                 TokenKind::Blank => "(_)".to_string(),
                 TokenKind::Struct => "(struct)".to_string(),
                 TokenKind::Colon => "<:>".to_string(),
+                TokenKind::Impl => "(impl)".to_string(),
             }
         )
     }
@@ -173,6 +175,7 @@ impl<'input> Lexer<'input> {
             ("not", Not),
             ("_", Blank),
             ("struct", Struct),
+            ("impl", Impl),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

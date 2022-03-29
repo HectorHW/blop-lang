@@ -393,6 +393,35 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         Ok(result)
     }
 
+    fn get_named_entity(&mut self, name: &Token) -> Result<AnnotatedCodeBlob, String> {
+        let mut result = AnnotatedCodeBlob::new();
+        let line = name.position.0;
+        match self.lookup_local(name.get_string().unwrap()) {
+            Some((VariableType::Normal, var_idx)) => {
+                result.push(Opcode::LoadLocal(var_idx as u16), line);
+                //TODO extension
+            }
+
+            Some((VariableType::Boxed, var_idx)) => {
+                result.push(Opcode::LoadLocal(var_idx as u16), line);
+                result.push(Opcode::LoadBox, line);
+            }
+
+            Some((VariableType::Closed, idx)) => {
+                result.push(Opcode::LoadClosureValue(idx as u16), line);
+                result.push(Opcode::LoadBox, line);
+            }
+
+            None => {
+                //global
+                let idx = self.get_or_create_name(name.get_string().unwrap());
+
+                result.push(Opcode::LoadGlobal(idx as u16), line);
+            }
+        }
+        Ok(result)
+    }
+
     fn try_parse_special_field_access(property: &Token) -> Result<Option<u16>, String> {
         if FIELD_INDEX_REGEX.is_match(property.get_string().unwrap()) {
             let idx = (property.get_string().unwrap()[1..])
@@ -453,6 +482,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                         .iter()
                         .map(|f| f.get_string().unwrap().to_string())
                         .collect(),
+                    methods: HashMap::new(),
                 };
 
                 let struct_object_pointer = self.gc.store(struct_descriptor);
@@ -468,6 +498,42 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0), name.position.0);
+                }
+            }
+
+            Stmt::ImplBlock {
+                name: struct_name,
+                implementations,
+            } => {
+                //load pointer
+                result.append(self.get_named_entity(struct_name)?);
+
+                for item in implementations {
+                    result.push(Opcode::Duplicate, struct_name.position.0);
+                    //pointer
+                    match item {
+                        Stmt::FunctionDeclaration { name, args, body } => {
+                            let base_function = self.compile_function(name, args, body)?;
+                            let index = self.get_or_create_constant(base_function);
+
+                            result.push(Opcode::LoadConst(index as u16), name.position.0);
+                            result.append(self.close_function(name)?);
+                            //function on top of pointer
+
+                            result.push(
+                                Opcode::StoreField(
+                                    self.get_or_create_name(name.get_string().unwrap()) as u16,
+                                ),
+                                name.position.0,
+                            );
+
+                            //field is stored, pointer is no longer on stack, therefore Duplicate
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), struct_name.position.0);
                 }
             }
 
@@ -745,41 +811,12 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 }
             }
 
-            Expr::Name(n) => match self.lookup_local(n.get_string().unwrap()) {
-                Some((VariableType::Normal, var_idx)) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16), n.position.0); //TODO extension
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
+            Expr::Name(n) => {
+                result.append(self.get_named_entity(n)?);
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), n.position.0);
                 }
-
-                Some((VariableType::Boxed, var_idx)) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16), n.position.0);
-                    result.push(Opcode::LoadBox, n.position.0);
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
-                }
-
-                Some((VariableType::Closed, idx)) => {
-                    result.push(Opcode::LoadClosureValue(idx as u16), n.position.0);
-                    result.push(Opcode::LoadBox, n.position.0);
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
-                }
-
-                None => {
-                    //global
-                    let idx = self.get_or_create_name(n.get_string().unwrap());
-
-                    result.push(Opcode::LoadGlobal(idx as u16), n.position.0);
-
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
-                }
-            },
+            }
 
             Expr::If(cond, then_body, else_body) => {
                 self.require_value();
