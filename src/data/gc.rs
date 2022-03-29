@@ -115,7 +115,11 @@ impl OwnedObject {
                     constant.mark(value);
                 }
             }
-            OwnedObjectItem::StructDescriptor(..) => {} //has no children
+            OwnedObjectItem::StructDescriptor(d) => {
+                for method in d.methods.values() {
+                    method.mark(value);
+                }
+            }
 
             OwnedObjectItem::StructInstance(s) => {
                 s.descriptor.mark(value);
@@ -185,7 +189,11 @@ impl OwnedObject {
                 f
             }
 
-            OwnedObjectItem::StructDescriptor(..) => false,
+            OwnedObjectItem::StructDescriptor(d) => {
+                let f = d.methods.is_empty();
+                d.methods.clear();
+                f
+            }
             OwnedObjectItem::StructInstance(s) => {
                 s.descriptor = StackObject::Int(0);
                 s.fields.clear();
