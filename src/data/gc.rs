@@ -39,7 +39,7 @@ impl Clone for StackObject {
                 StackObject::HeapObject(*ptr)
             }
 
-            StackObject::Builtin(s) => StackObject::Builtin(s.clone()),
+            StackObject::Builtin(s) => StackObject::Builtin(*s),
             StackObject::Blank => StackObject::Blank,
         }
     }
@@ -585,7 +585,7 @@ impl GC {
                 }
             }
 
-            StackObject::Builtin(s) => StackObject::Builtin(s.clone()),
+            StackObject::Builtin(s) => StackObject::Builtin(*s),
             StackObject::Blank => StackObject::Blank,
         }
     }
