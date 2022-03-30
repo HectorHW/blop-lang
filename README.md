@@ -45,9 +45,39 @@ Functions also support partial calls written as `f(_, _, arg2, _)` which returns
 
 The language currently does not provide common loop constructs but offers tail call optimization.
 
+To define complex structures you may use `struct` keyword:
+```
+struct Pair:
+    element1
+    element2
+```
+To create instance just call struct descriptor like any other callable: 
+```
+var instance = Pair(1, 2)
+```
+To later access struct's attributes, use standard dot syntax:
+```
+instance.element1 # to access field
+instance.element2 = 2 # to set field
+instance?element1 # to check if field exists
+```
+Struct elements are fixed in position and count, and because of that you may also use special syntax to access fields by index:
+```
+instance._0 # to access field by index
+instance._1 = 2 # to set field
+```
+
+To define methods, use impl blocks like so:
+```
+impl Pair:
+    fn first(self) = self._0
+    fn second(self) = self._1
+```
+(Note `self` parameter: declared methods are required to have at least one argument to store reference to bound object).
+
 For additional features refer to files in [examples directory](examples).
 
 The language is still in early development stage. Features that are currently planned:
-* Rust-like structs / enums with impl blocks and pattern matching
+* Rust-like enums with impl blocks and pattern matching
 * Optional typechecking
 * Standard library
