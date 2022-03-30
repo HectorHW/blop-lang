@@ -12,6 +12,7 @@ use std::io::{stdin, BufRead};
 use std::time::Instant;
 
 extern crate indexmap;
+extern crate regex;
 
 #[macro_use]
 extern crate lazy_static;

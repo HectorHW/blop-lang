@@ -49,6 +49,8 @@ pub enum InterpretErrorKind {
     MissedReturn,
     NameError { name: String },
     NativeError { message: String },
+    AttributeError { object: Value, missed_field: String },
+    IndexAttributeError { object: Value, missed_idx: usize },
 }
 
 enum InstructionExecution {
@@ -263,6 +265,29 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
         let chunk = current_chunk.unwrap_function().unwrap();
 
+        macro_rules! checked_get_name {
+            ($idx:expr) => {
+                chunk
+                    .global_names
+                    .get($idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))
+            };
+        }
+
+        macro_rules! get_from_top {
+            () => {
+                self.stack
+                    .last()
+                    .ok_or_else(|| runtime_error!(StackUnderflow))
+            };
+
+            ($idx:expr) => {
+                self.stack
+                    .get($idx)
+                    .ok_or_else(|| runtime_error!(StackUnderflow))
+            };
+        }
+
         let jump = match chunk.code[ip] {
             Opcode::Print => {
                 let result = checked_stack_pop!()?;
@@ -285,7 +310,6 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::Add => {
-                //let second_operand = checked_stack_pop!()
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
 
@@ -362,10 +386,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::LoadGlobal(idx) => {
-                let key = chunk
-                    .global_names
-                    .get(idx as usize)
-                    .ok_or(runtime_error!(OperandIndexing))?;
+                let key = checked_get_name!(idx)?;
                 let value = self
                     .globals
                     .get(key)
@@ -379,11 +400,81 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 InstructionExecution::NextInstruction
             }
 
+            Opcode::LoadField(idx) => {
+                let pointer = checked_stack_pop!()?;
+                let key = checked_get_name!(idx)?;
+
+                match pointer.lookup(key, self) {
+                    Some(obj) => {
+                        self.stack.push(obj);
+                    }
+                    None => {
+                        return Err(runtime_error!(InterpretErrorKind::AttributeError {
+                            object: pointer,
+                            missed_field: key.to_string()
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::StoreField(idx) => {
+                let value = checked_stack_pop!()?;
+                let pointer = checked_stack_pop!()?;
+                let key = checked_get_name!(idx)?;
+
+                match pointer.set_field(key, value, self) {
+                    Ok(()) => {}
+                    Err(()) => {
+                        return Err(runtime_error!(InterpretErrorKind::AttributeError {
+                            object: pointer,
+                            missed_field: key.to_string()
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::LoadFieldByIndex(idx) => {
+                let pointer = checked_stack_pop!()?;
+
+                match VM::get_property_idx_mut(&pointer, idx as usize) {
+                    Some(field) => {
+                        self.stack.push(field.clone());
+                    }
+                    None => {
+                        return Err(runtime_error!(InterpretErrorKind::IndexAttributeError {
+                            object: pointer,
+                            missed_idx: idx as usize
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::StoreFieldByIndex(idx) => {
+                let value = checked_stack_pop!()?;
+                let pointer = checked_stack_pop!()?;
+                match VM::get_property_idx_mut(&pointer, idx as usize) {
+                    Some(field) => {
+                        *field = value;
+                    }
+                    None => {
+                        return Err(runtime_error!(InterpretErrorKind::IndexAttributeError {
+                            object: pointer,
+                            missed_idx: idx as usize
+                        }))
+                    }
+                }
+
+                InstructionExecution::NextInstruction
+            }
+
             Opcode::StoreGLobal(idx) => {
-                let key = chunk
-                    .global_names
-                    .get(idx as usize)
-                    .ok_or(runtime_error!(OperandIndexing))?;
+                let key = checked_get_name!(idx)?;
                 let value = checked_stack_pop!()?;
 
                 self.globals.insert(key.to_string(), value);
@@ -451,34 +542,46 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 comparison_operator!(Some(Ordering::Equal | Ordering::Less))
             }
 
-            Opcode::JumpIfFalse(delta) => {
-                let value_to_test = as_int!(checked_stack_pop!()?)?;
-                let result = if value_to_test == 0 {
-                    let new_ip = ip + delta as usize;
-                    if new_ip >= chunk.code.len() {
-                        return Err(runtime_error!(JumpBounds));
-                    }
-                    InstructionExecution::LocalJump(new_ip)
+            Opcode::TestProperty(idx) => {
+                let key = chunk
+                    .global_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+                let pointer = checked_stack_pop!()?;
+                let value = Value::Int(if pointer.lookup(key, self).is_some() {
+                    1
                 } else {
-                    InstructionExecution::NextInstruction
-                };
-                self.stack.push(StackObject::Int(value_to_test));
-                result
+                    0
+                });
+                self.stack.push(value);
+                InstructionExecution::NextInstruction
             }
 
-            Opcode::JumpIfTrue(delta) => {
-                let value_to_test = as_int!(checked_stack_pop!()?)?;
-                self.stack.push(StackObject::Int(value_to_test));
-                if value_to_test == 1 {
+            Opcode::JumpIfFalseOrPop(delta) => match checked_stack_pop!()? {
+                Value::Int(0) => {
+                    let new_ip = ip + delta as usize;
+                    if new_ip >= chunk.code.len() {
+                        return Err(runtime_error!(JumpBounds));
+                    }
+                    self.stack.push(Value::Int(0));
+                    InstructionExecution::LocalJump(new_ip)
+                }
+
+                _other => InstructionExecution::NextInstruction,
+            },
+
+            Opcode::JumpIfTrueOrPop(delta) => match checked_stack_pop!()? {
+                Value::Int(0) => InstructionExecution::NextInstruction,
+
+                other => {
+                    self.stack.push(other);
                     let new_ip = ip + delta as usize;
                     if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
-                } else {
-                    InstructionExecution::NextInstruction
                 }
-            }
+            },
 
             Opcode::JumpRelative(delta) => {
                 let new_ip = ip + delta as usize;
@@ -506,8 +609,11 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::LogicalNot => {
-                let value_to_test = as_int!(checked_stack_pop!()?)?;
-                self.stack.push(StackObject::Int(1 - value_to_test));
+                let value = checked_stack_pop!()?;
+                self.stack.push(match value {
+                    Value::Int(0) => Value::Int(1),
+                    _ => Value::Int(0),
+                });
                 InstructionExecution::NextInstruction
             }
 
@@ -566,45 +672,74 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         .unwrap();
                 }
 
-                if let Value::Builtin(name) = &object {
-                    let final_length = self.stack.len().saturating_sub(arity);
-                    let args = self.stack.split_off(final_length);
-                    self.stack.pop(); //remove builtin
+                match &object {
+                    Value::Builtin(name) => {
+                        let final_length = self.stack.len().saturating_sub(arity);
+                        let args = self.stack.split_off(final_length);
+                        self.stack.pop(); //remove builtin
 
-                    let builtins = self.builtins;
+                        let builtins = self.builtins;
 
-                    let result = builtins.apply_builtin(name.as_ref(), args, self);
-                    let result = result.map_err(|e| {
-                        runtime_error!(InterpretErrorKind::NativeError { message: e })
-                    })?;
-                    self.stack.push(result);
-                    InstructionExecution::NextInstruction
-                } else {
-                    let new_chunk = VM::get_chunk(object.clone()).ok_or_else(|| {
-                        runtime_error!(TypeError {
-                            message: format!("expected function but got {}", object.type_string())
-                        })
-                    })?;
+                        let result = builtins.apply_builtin(name.as_ref(), args, self);
+                        let result = result.map_err(|e| {
+                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                        })?;
+                        self.stack.push(result);
+                        InstructionExecution::NextInstruction
+                    }
 
-                    self.call_stack.push(CallStackValue {
-                        return_chunk: current_chunk.clone(),
-                        return_ip: ip + 1,
-                        return_locals_offset: self.locals_offset,
-                        return_stack_size: self.stack.len() - 1 - arity,
-                    });
+                    obj @ Value::HeapObject(..) if obj.unwrap_struct_descriptor().is_some() => {
+                        let final_length = self.stack.len().saturating_sub(arity);
+                        let args = self.stack.split_off(final_length);
+                        self.stack.pop(); //remove descriptor
 
-                    self.locals_offset = self.stack.len() - 1 - arity;
+                        let descriptor = obj.unwrap_struct_descriptor().unwrap();
 
-                    if arity as usize != new_chunk.unwrap_function().unwrap().arity {
-                        return Err(runtime_error!(TypeError {
-                            message: format!(
-                                "mismatched arguments: expected {} but got {}",
-                                new_chunk.unwrap_function().unwrap().arity,
-                                arity
-                            )
-                        }));
-                    } else {
-                        InstructionExecution::EnterChunk(new_chunk)
+                        let instance = descriptor.make_instance(obj.clone(), args).map_err(
+                            |(expected, got)| {
+                                runtime_error!(TypeError {
+                                    message: format!(
+                                        "struct field mismatch: expected {}, got {}",
+                                        expected, got
+                                    )
+                                })
+                            },
+                        )?;
+                        let ptr = self.gc.store(instance);
+                        self.stack.push(ptr);
+                        InstructionExecution::NextInstruction
+                    }
+
+                    _ => {
+                        let new_chunk = VM::get_chunk(object.clone()).ok_or_else(|| {
+                            runtime_error!(TypeError {
+                                message: format!(
+                                    "expected function but got {}",
+                                    object.type_string()
+                                )
+                            })
+                        })?;
+
+                        self.call_stack.push(CallStackValue {
+                            return_chunk: current_chunk.clone(),
+                            return_ip: ip + 1,
+                            return_locals_offset: self.locals_offset,
+                            return_stack_size: self.stack.len() - 1 - arity,
+                        });
+
+                        self.locals_offset = self.stack.len() - 1 - arity;
+
+                        if arity as usize != new_chunk.unwrap_function().unwrap().arity {
+                            return Err(runtime_error!(TypeError {
+                                message: format!(
+                                    "mismatched arguments: expected {} but got {}",
+                                    new_chunk.unwrap_function().unwrap().arity,
+                                    arity
+                                )
+                            }));
+                        } else {
+                            InstructionExecution::EnterChunk(new_chunk)
+                        }
                     }
                 }
             }
@@ -755,8 +890,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 InstructionExecution::NextInstruction
             }
             Opcode::Duplicate => {
-                let value = checked_stack_pop!()?;
-                self.stack.push(value.clone());
+                let value = get_from_top!()?.clone();
                 self.stack.push(value);
                 InstructionExecution::NextInstruction
             }
@@ -773,6 +907,17 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             return Err(());
         }
         Ok(())
+    }
+
+    fn get_property_idx_mut(pointer: &Value, index: usize) -> Option<&mut Value> {
+        match pointer {
+            obj @ StackObject::HeapObject(..) if obj.unwrap_struct_instance().is_some() => {
+                let instance = obj.unwrap_struct_instance().unwrap();
+                instance.fields.get_index_mut(index).map(|(_k, v)| v)
+            }
+
+            _other => None,
+        }
     }
 
     fn is_callable(value: &StackObject) -> bool {

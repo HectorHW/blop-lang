@@ -5,6 +5,7 @@ pub enum Stmt {
     Print(Token, Expr),
     VarDeclaration(Token, Option<Expr>),
     Assignment(Token, Expr),
+    PropertyAssignment(Expr, Expr),
     Expression(Expr),
     Assert(Token, Expr),
     Pass(Token),
@@ -12,6 +13,15 @@ pub enum Stmt {
         name: Token,
         args: Vec<Token>,
         body: Expr,
+    },
+    StructDeclaration {
+        name: Token,
+        fields: Vec<Token>,
+    },
+
+    ImplBlock {
+        name: Token,
+        implementations: Vec<Stmt>,
     },
 }
 
@@ -28,6 +38,8 @@ pub enum Expr {
     Call(Box<Expr>, Vec<Expr>),
     PartialCall(Box<Expr>, Vec<Option<Expr>>),
     AnonFunction(Vec<Token>, Token, Box<Expr>),
+    PropertyAccess(Box<Expr>, Token),
+    PropertyTest(Box<Expr>, Token),
 }
 
 pub type Program = Expr;

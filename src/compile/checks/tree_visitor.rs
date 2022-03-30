@@ -15,6 +15,17 @@ pub(super) trait Visitor<E> {
             Stmt::FunctionDeclaration { name, args, body } => {
                 self.visit_function_declaration_statement(name, args, body)
             }
+            Stmt::StructDeclaration { name, fields } => {
+                self.visit_struct_declaration_statement(name, fields)
+            }
+            Stmt::PropertyAssignment(target, value) => {
+                self.visit_property_assignment(target, value)
+            }
+
+            Stmt::ImplBlock {
+                name,
+                implementations,
+            } => self.visit_impl_block(name, implementations),
         }
     }
 
@@ -54,6 +65,31 @@ pub(super) trait Visitor<E> {
         self.visit_expr(body)
     }
 
+    fn visit_method(&mut self, name: &Token, args: &[Token], body: &Expr) -> Result<(), E> {
+        self.visit_function_declaration_statement(name, args, body)
+    }
+
+    fn visit_struct_declaration_statement(
+        &mut self,
+        name: &Token,
+        fields: &[Token],
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_property_assignment(&mut self, target: &Expr, value: &Expr) -> Result<(), E> {
+        self.visit_expr(target)?;
+        self.visit_expr(value)
+    }
+
+    fn visit_impl_block(&mut self, name: &Token, implementations: &[Stmt]) -> Result<(), E> {
+        implementations
+            .iter()
+            .try_for_each(|f| self.visit_stmt(f))?;
+
+        Ok(())
+    }
+
     fn visit_expr(&mut self, expr: &Expr) -> Result<(), E> {
         match expr {
             Expr::Number(n) => self.visit_number_expr(n),
@@ -72,6 +108,8 @@ pub(super) trait Visitor<E> {
             Expr::AnonFunction(args, arrow, body) => {
                 self.visit_anon_function_expr(args, arrow, body)
             }
+            Expr::PropertyAccess(target, prop) => self.visit_property_access(target.as_ref(), prop),
+            Expr::PropertyTest(target, prop) => self.visit_property_check(target.as_ref(), prop),
         }
     }
 
@@ -152,6 +190,16 @@ pub(super) trait Visitor<E> {
         body: &Expr,
     ) -> Result<(), E> {
         self.visit_expr(body)?;
+        Ok(())
+    }
+
+    fn visit_property_access(&mut self, target: &Expr, property: &Token) -> Result<(), E> {
+        self.visit_expr(target)?;
+        Ok(())
+    }
+
+    fn visit_property_check(&mut self, target: &Expr, property: &Token) -> Result<(), E> {
+        self.visit_expr(target)?;
         Ok(())
     }
 }

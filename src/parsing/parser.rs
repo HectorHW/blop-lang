@@ -17,6 +17,13 @@ macro_rules! bin {
 enum CallVariant {
     Normal(Vec<Expr>),
     Partial(Vec<Option<Expr>>),
+    Property(Token),
+    PropertyTest(Token),
+}
+
+enum AssignmentTarget {
+    Variable(Token),
+    Property(Expr),
 }
 
 peg::parser! {
@@ -33,6 +40,8 @@ peg::parser! {
 
              var_decl_stmt()
             / function_decl_stmt()
+            / struct_decl_stmt()
+            / implementation_stmt()
             / print_stmt()
             / assignment_stmt()
             / assert_stmt()
@@ -52,6 +61,42 @@ peg::parser! {
                 Stmt::FunctionDeclaration{name:n, args, body}
             }
 
+        rule struct_decl_stmt() -> Stmt =
+            [t!(Struct)] n:name() body: struct_body()? {
+                match body {
+                    Some(entries) => {
+                            Stmt::StructDeclaration {
+                                name: n,
+                                fields: entries,
+                            }
+
+                    }
+                    None => Stmt::StructDeclaration {
+                        name: n,
+                        fields: vec![],
+                    }
+                }
+
+            }
+
+        rule struct_body() -> Vec<Token> =
+            [t!(Colon)] [bb@t!(BeginBlock)] [t!(LineEnd)]? n:name() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {
+                n
+            }
+
+        rule implementation_stmt() -> Stmt =
+            [t!(Impl)] n: name() [t!(Colon)] methods: impl_block() {
+                Stmt::ImplBlock {
+                    name: n,
+                    implementations: methods,
+                }
+            }
+
+        rule impl_block() -> Vec<Stmt> =
+            [bb@t!(BeginBlock)] [t!(LineEnd)]? m:function_decl_stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {
+                m
+            }
+
         rule paren_name_list() -> Vec<Token> =
             [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {n}
 
@@ -65,7 +110,29 @@ peg::parser! {
             [print_token@t!(Print)] e:expr() {Stmt::Print(print_token, e)}
 
         rule assignment_stmt() -> Stmt =
-            n:name() [t!(Equals)] e:expr() {Stmt::Assignment(n, e)}
+            target:assignment_target() [t!(Equals)] e:expr() {
+                match target {
+                    AssignmentTarget::Property(target) => {
+                        Stmt::PropertyAssignment(
+                            target, e)
+                    }
+                    AssignmentTarget::Variable(v) => {
+                        Stmt::Assignment(v, e)
+                    }
+                }
+
+                }
+
+        rule assignment_target() -> AssignmentTarget =
+        prop: property_access() {
+            AssignmentTarget::Property(prop)
+        }
+        /
+
+        n:name() {
+            AssignmentTarget::Variable(n)
+        }
+
 
         rule assert_stmt() -> Stmt =
             [a@t!(Assert)] e:expr() {Stmt::Assert(a, e)}
@@ -168,8 +235,16 @@ peg::parser! {
             n:call() {n}
         }
 
+        rule property_access() -> Expr =
+            target: call() {?
+                match target {
+                    e @ Expr::PropertyAccess(..) => Ok(e),
+                    _ => Err("property accesss or variable")
+                }
+            }
+
         rule call() -> Expr =
-            target:term() calls:call_parens()* {
+            target:term() calls:call_right_side()* {
                 let mut res = target;
                 for parens in calls {
                 match parens {
@@ -179,11 +254,22 @@ peg::parser! {
                     CallVariant::Partial(args) => {
                         res = Expr::PartialCall(Box::new(res), args)
                     }
+                    CallVariant::Property(prop) => {
+                        res = Expr::PropertyAccess(Box::new(res), prop)
+                    }
+
+                    CallVariant::PropertyTest(prop) => {
+                        res = Expr::PropertyTest(Box::new(res), prop)
+                    }
                 }
             }
                 res
             }
             / term()
+
+        rule call_right_side() -> CallVariant =
+            call_property_access()
+            / call_parens()
 
         rule call_parens() -> CallVariant =
             [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {CallVariant::Normal(args)}
@@ -194,6 +280,11 @@ peg::parser! {
         rule maybe_argument() -> Option<Expr> =
             e:simple_expr() {Some(e)}
         / [t!(Blank)] {None}
+
+        rule call_property_access() -> CallVariant =
+            [t!(Dot)] property_name: name() {CallVariant::Property(property_name)}
+        /
+            [t!(QuestionMark)] property_name: name() {CallVariant::PropertyTest(property_name)}
 
         rule term() -> Expr
             = [num@t!(Number(..))] {Expr::Number(num)}

@@ -41,6 +41,8 @@ pub enum TokenKind {
     Not,
 
     Comma,
+    Dot,
+    QuestionMark,
 
     CompareEquals,
     CompareNotEquals,
@@ -53,6 +55,7 @@ pub enum TokenKind {
     Blank,
 
     Equals,
+    Colon,
 
     Number(i64),
     Name(String),
@@ -66,6 +69,8 @@ pub enum TokenKind {
     Else,
     Def,
     Pass,
+    Struct,
+    Impl,
 }
 
 impl Display for TokenKind {
@@ -100,6 +105,8 @@ impl Display for TokenKind {
                 TokenKind::Assert => "(assert)".to_string(),
                 TokenKind::Def => "(def)".to_string(),
                 TokenKind::Comma => "<,>".to_string(),
+                TokenKind::Dot => "<.>".to_string(),
+                TokenKind::QuestionMark => "<?>".to_string(),
                 TokenKind::Elif => "(elif)".to_string(),
                 TokenKind::Mod => "(mod)".to_string(),
                 TokenKind::Power => "(**)".to_string(),
@@ -109,6 +116,9 @@ impl Display for TokenKind {
                 TokenKind::Not => "(not)".to_string(),
                 TokenKind::Arrow => "(=>)".to_string(),
                 TokenKind::Blank => "(_)".to_string(),
+                TokenKind::Struct => "(struct)".to_string(),
+                TokenKind::Colon => "<:>".to_string(),
+                TokenKind::Impl => "(impl)".to_string(),
             }
         )
     }
@@ -164,6 +174,8 @@ impl<'input> Lexer<'input> {
             ("and", And),
             ("not", Not),
             ("_", Blank),
+            ("struct", Struct),
+            ("impl", Impl),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -310,6 +322,21 @@ impl<'input> Lexer<'input> {
 
                 ',' => {
                     result.push(token!(Comma));
+                    self.input_iterator.next();
+                }
+
+                '.' => {
+                    result.push(token!(Dot));
+                    self.input_iterator.next();
+                }
+
+                '?' => {
+                    result.push(token!(QuestionMark));
+                    self.input_iterator.next();
+                }
+
+                ':' => {
+                    result.push(token!(Colon));
                     self.input_iterator.next();
                 }
 
