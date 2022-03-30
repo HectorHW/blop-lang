@@ -1,12 +1,12 @@
 use crate::compile::checks::{Annotations, VariableType};
+use crate::compile::code_blob::AnnotatedCodeBlob;
 use crate::data::gc::GC;
-use crate::data::objects::{StackObject, Value};
-use crate::execution::chunk::Opcode;
+use crate::data::objects::{StackObject, StructDescriptor, Value};
+use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
+use regex::Regex;
 use std::collections::HashMap;
-
-use crate::compile::code_blob::AnnotatedCodeBlob;
 
 enum ValueRequirement {
     Nothing,
@@ -19,14 +19,16 @@ lazy_static! {
         kind: TokenKind::Name("`script`".to_string()),
         position: Index(0, 0),
     };
+    static ref FIELD_INDEX_REGEX: Regex = Regex::new(r"^_\d+$").unwrap();
 }
 
-pub struct Compiler<'gc, 'annotations> {
+pub struct Compiler<'gc, 'annotations, 'chunk> {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
     total_variables: usize,
     total_closed_variables: usize,
     function_context: FunctionCompilationContext,
+    current_chunk: &'chunk mut Chunk,
     annotations: &'annotations Annotations,
     gc: &'gc mut GC,
 }
@@ -36,13 +38,14 @@ struct FunctionCompilationContext {
     name: Token,
 }
 
-impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
+impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     fn new(
         annotations: &'annotations Annotations,
         gc: &'gc mut GC,
         function_name: Token,
         function_arity: usize,
-    ) -> Compiler<'gc, 'annotations> {
+        chunk: &'chunk mut Chunk,
+    ) -> Compiler<'gc, 'annotations, 'chunk> {
         Compiler {
             names: vec![],
             value_requirements: vec![],
@@ -52,6 +55,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                 arity: function_arity,
                 name: function_name,
             },
+            current_chunk: chunk,
             annotations,
             gc,
         }
@@ -62,7 +66,15 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
         annotations: Annotations,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut compiler = Compiler::new(&annotations, gc, SCRIPT_TOKEN.clone(), 0);
+        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), 0);
+
+        let mut compiler = Compiler::new(
+            &annotations,
+            gc,
+            SCRIPT_TOKEN.clone(),
+            0,
+            &mut program_chunk,
+        );
 
         compiler.new_scope();
 
@@ -71,14 +83,10 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
         compiler.pop_requirement();
 
         blob += (Opcode::Return, 0);
-        let program_chunk = blob.into_chunk(
-            Token {
-                kind: TokenKind::Name("<script>".to_string()),
-                position: Index(0, 0),
-            },
-            0,
-        );
-        let pointer = compiler.gc.store(program_chunk);
+
+        program_chunk.append(blob);
+
+        let pointer = gc.store(program_chunk);
         Ok(pointer)
     }
 
@@ -110,6 +118,26 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             Some(ValueRequirement::ReturnValue) => true,
             _other => false,
         }
+    }
+
+    fn get_or_create_name(&mut self, name: &str) -> usize {
+        for (i, item) in self.current_chunk.global_names.iter().enumerate() {
+            if item == name {
+                return i;
+            }
+        }
+        self.current_chunk.global_names.push(name.to_string());
+        self.current_chunk.global_names.len() - 1
+    }
+
+    fn get_or_create_constant(&mut self, constant: Value) -> usize {
+        for (i, item) in self.current_chunk.constants.iter().enumerate() {
+            if item == &constant {
+                return i;
+            }
+        }
+        self.current_chunk.constants.push(constant);
+        self.current_chunk.constants.len() - 1
     }
 
     /// looks up variable by name, considering only well-defined variables
@@ -200,7 +228,15 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
     ) -> Result<StackObject, String> {
         //save current compiler
 
-        let mut inner_compiler = Compiler::new(self.annotations, self.gc, name.clone(), args.len());
+        let mut chunk = Chunk::new(name.clone(), args.len());
+
+        let mut inner_compiler = Compiler::new(
+            self.annotations,
+            self.gc,
+            name.clone(),
+            args.len(),
+            &mut chunk,
+        );
 
         //compile body
 
@@ -278,7 +314,8 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
 
         current_chunk += (Opcode::Return, return_index);
 
-        let chunk = current_chunk.into_chunk(name.clone(), args.len());
+        chunk.append(current_chunk);
+
         let pointer = self.gc.store(chunk);
         Ok(pointer)
     }
@@ -325,6 +362,84 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
         Ok(result)
     }
 
+    fn create_named_entity(
+        &mut self,
+        name: &Token,
+        value_emitting_code: AnnotatedCodeBlob,
+    ) -> Result<AnnotatedCodeBlob, String> {
+        let mut result = AnnotatedCodeBlob::new();
+
+        match self.lookup_block(name.get_string().unwrap()) {
+            Some((VariableType::Boxed, idx)) => {
+                result.push(Opcode::LoadLocal(idx as u16), name.position.0); //load box
+
+                result.append(value_emitting_code);
+
+                result.push(Opcode::StoreBox, name.position.0);
+            }
+
+            None => {
+                //variable is not forward-declared => not present on stack yet
+                result.append(value_emitting_code);
+                let varname = name.get_string().unwrap();
+                let _ = self
+                    .declare_local(varname, VariableType::Normal)
+                    .ok_or(format!("redefinition of variable {}", varname))?;
+            }
+            _a => panic!("{:?}", _a),
+        }
+        self.define_local(name.get_string().unwrap());
+
+        Ok(result)
+    }
+
+    fn get_named_entity(&mut self, name: &Token) -> Result<AnnotatedCodeBlob, String> {
+        let mut result = AnnotatedCodeBlob::new();
+        let line = name.position.0;
+        match self.lookup_local(name.get_string().unwrap()) {
+            Some((VariableType::Normal, var_idx)) => {
+                result.push(Opcode::LoadLocal(var_idx as u16), line);
+                //TODO extension
+            }
+
+            Some((VariableType::Boxed, var_idx)) => {
+                result.push(Opcode::LoadLocal(var_idx as u16), line);
+                result.push(Opcode::LoadBox, line);
+            }
+
+            Some((VariableType::Closed, idx)) => {
+                result.push(Opcode::LoadClosureValue(idx as u16), line);
+                result.push(Opcode::LoadBox, line);
+            }
+
+            None => {
+                //global
+                let idx = self.get_or_create_name(name.get_string().unwrap());
+
+                result.push(Opcode::LoadGlobal(idx as u16), line);
+            }
+        }
+        Ok(result)
+    }
+
+    fn try_parse_special_field_access(property: &Token) -> Result<Option<u16>, String> {
+        if FIELD_INDEX_REGEX.is_match(property.get_string().unwrap()) {
+            let idx = (property.get_string().unwrap()[1..])
+                .parse::<u16>()
+                .map_err(|_e| {
+                    format!(
+                        "{}: index too big [{}]",
+                        property.get_string().unwrap(),
+                        property.position
+                    )
+                })?;
+
+            Ok(Some(idx))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
         match stmt {
@@ -341,42 +456,84 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             }
 
             Stmt::VarDeclaration(n, e) => {
-                match self.lookup_block(n.get_string().unwrap()) {
-                    Some((VariableType::Boxed, idx)) => {
-                        result.push(Opcode::LoadLocal(idx as u16), n.position.0); //load box
-                        if e.is_none() {
-                            result.push(Opcode::LoadImmediateInt(0), n.position.0);
-                        } else {
-                            self.require_value();
-                            let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
-                            self.pop_requirement();
-                            result.append(assignment_body);
-                        }
-                        result.push(Opcode::StoreBox, n.position.0);
-                    }
+                let mut right_side = AnnotatedCodeBlob::new();
 
-                    None => {
-                        //variable is not forward-declared => not present on stack yet
-                        if e.is_none() {
-                            result.push(Opcode::LoadImmediateInt(0), n.position.0);
-                        } else {
-                            self.require_value();
-                            let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
-                            self.pop_requirement();
-                            result.append(assignment_body);
-                        }
-                        let varname = n.get_string().unwrap();
-                        let _ = self
-                            .declare_local(varname, VariableType::Normal)
-                            .ok_or(format!("redefinition of variable {}", varname))?;
-                    }
-                    _a => panic!("{:?}", _a),
+                if e.is_none() {
+                    right_side.push(Opcode::LoadImmediateInt(0), n.position.0);
+                } else {
+                    self.require_value();
+                    let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
+                    self.pop_requirement();
+                    right_side.append(assignment_body);
                 }
-                self.define_local(n.get_string().unwrap());
+
+                result.append(self.create_named_entity(n, right_side)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0), result.last_index().unwrap());
                     //TODO dup?
+                }
+            }
+
+            Stmt::StructDeclaration { name, fields } => {
+                let struct_descriptor = StructDescriptor {
+                    name: name.get_string().unwrap().to_string(),
+                    fields: fields
+                        .iter()
+                        .map(|f| f.get_string().unwrap().to_string())
+                        .collect(),
+                    methods: HashMap::new(),
+                };
+
+                let struct_object_pointer = self.gc.store(struct_descriptor);
+                let constant_idx = self.get_or_create_constant(struct_object_pointer);
+
+                let struct_load_code = {
+                    let mut blob = AnnotatedCodeBlob::new();
+                    blob.push(Opcode::LoadConst(constant_idx as u16), name.position.0);
+                    blob
+                };
+
+                result.append(self.create_named_entity(name, struct_load_code)?);
+
+                if self.needs_value() {
+                    result.push(Opcode::LoadImmediateInt(0), name.position.0);
+                }
+            }
+
+            Stmt::ImplBlock {
+                name: struct_name,
+                implementations,
+            } => {
+                //load pointer
+                result.append(self.get_named_entity(struct_name)?);
+
+                for item in implementations {
+                    result.push(Opcode::Duplicate, struct_name.position.0);
+                    //pointer
+                    match item {
+                        Stmt::FunctionDeclaration { name, args, body } => {
+                            let base_function = self.compile_function(name, args, body)?;
+                            let index = self.get_or_create_constant(base_function);
+
+                            result.push(Opcode::LoadConst(index as u16), name.position.0);
+                            result.append(self.close_function(name)?);
+                            //function on top of pointer
+
+                            result.push(
+                                Opcode::StoreField(
+                                    self.get_or_create_name(name.get_string().unwrap()) as u16,
+                                ),
+                                name.position.0,
+                            );
+
+                            //field is stored, pointer is no longer on stack, therefore Duplicate
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), struct_name.position.0);
                 }
             }
 
@@ -437,7 +594,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                     }
                 } else {
                     //otherwise, just put it in global name
-                    let idx = result.get_or_create_name(varname);
+                    let idx = self.get_or_create_name(varname);
                     result.push(Opcode::StoreGLobal(idx as u16), target.position.0);
                 }
                 //in case we need some result value
@@ -445,6 +602,37 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                     result.push(Opcode::LoadImmediateInt(0), target.position.0);
                 }
             }
+
+            Stmt::PropertyAssignment(target, value) => match target {
+                Expr::PropertyAccess(target, property) => {
+                    self.require_value();
+                    let target = self.visit_expr(target)?;
+                    let value = self.visit_expr(value)?;
+                    self.pop_requirement();
+
+                    result.append(target); //load pointer
+                    result.append(value); // value on top of pointer
+
+                    //special field index access
+                    result += (
+                        match Compiler::try_parse_special_field_access(property)? {
+                            Some(idx) => Opcode::StoreFieldByIndex(idx),
+                            None => {
+                                let name_idx =
+                                    self.get_or_create_name(property.get_string().unwrap());
+                                Opcode::StoreField(name_idx as u16)
+                            }
+                        },
+                        property.position.0,
+                    );
+
+                    if self.needs_value() {
+                        result.push(Opcode::LoadImmediateInt(0), property.position.0);
+                    }
+                }
+
+                other => return Err(format!("unsupported assignment target {:?}", other)),
+            },
 
             Stmt::Expression(e) => {
                 let body = self.visit_expr(e)?;
@@ -469,44 +657,20 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             } => {
                 let new_chunk_idx = self.compile_function(function_name, args, body)?;
 
-                let const_idx = result.get_or_create_constant(new_chunk_idx);
+                let const_idx = self.get_or_create_constant(new_chunk_idx);
 
-                if let Some((_, idx)) = self.lookup_block(function_name.get_string().unwrap()) {
-                    //load pointer
-                    result.push(Opcode::LoadLocal(idx as u16), function_name.position.0);
-                }
+                let mut function = AnnotatedCodeBlob::new();
 
-                result.push(
+                function.push(
                     Opcode::LoadConst(const_idx as u16),
                     function_name.position.0,
                 ); //code block
 
-                let code = self.close_function(function_name)?;
+                let closing_code = self.close_function(function_name)?;
 
-                result.append(code);
+                function.append(closing_code);
 
-                //match self.lookup_local()
-
-                match self.lookup_block(function_name.get_string().unwrap()) {
-                    Some((VariableType::Boxed, _)) => {
-                        //pointer is on stack
-                        result.push(Opcode::StoreBox, function_name.position.0);
-                    }
-                    None => {
-                        self.declare_local(
-                            function_name.get_string().unwrap(),
-                            VariableType::Normal,
-                        )
-                        .ok_or_else(|| {
-                            format!(
-                                "redifinition of name {}",
-                                function_name.get_string().unwrap()
-                            )
-                        })?;
-                    }
-                    _other => panic!("{:?}", _other),
-                }
-                self.define_local(function_name.get_string().unwrap());
+                result.append(self.create_named_entity(function_name, function)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadImmediateInt(0), function_name.position.0);
@@ -535,7 +699,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                 if n >= (i16::MIN as i64) && n <= (i16::MAX as i64) {
                     result += (Opcode::LoadImmediateInt(n as i16), token.position.0);
                 } else {
-                    let constant_index = result.get_or_create_constant(Value::Int(n));
+                    let constant_index = self.get_or_create_constant(Value::Int(n));
                     result += (Opcode::LoadConst(constant_index as u16), token.position.0);
                     //TODO extension
                 }
@@ -545,7 +709,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             }
             Expr::ConstString(s) => {
                 let obj_ptr = self.gc.new_const_string(s.get_string().unwrap());
-                let constant_index = result.get_or_create_constant(obj_ptr);
+                let constant_index = self.get_or_create_constant(obj_ptr);
                 result.push(Opcode::LoadConst(constant_index as u16), s.position.0);
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), s.position.0);
@@ -585,20 +749,17 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                     evaluation scheme:
                     eval(A)
                     JumpIfTrue end_or
-                    pop(1)
                     eval(B)
                     end_or:
                      */
 
                     //eval (A)
                     result.append(a);
-                    //jump PAST (POP eval(B))
+                    //jump PAST eval(B)
                     result.push(
-                        Opcode::JumpIfTrue((b.code.len() + 1 + 1) as u16),
+                        Opcode::JumpIfTrueOrPop((b.code.len() + 1) as u16),
                         op.position.0,
                     );
-                    //pop
-                    result.push(Opcode::Pop(1), op.position.0);
                     //eval(B)
                     result.append(b);
                 } else if let TokenKind::And = op.kind {
@@ -606,21 +767,17 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                     evaluation scheme:
                     eval(A)
                     JumpIfFalse end_and
-                    pop(1)
-                    eval(B)
                     eval(B)
                     end_or:
                      */
 
                     //eval (A)
                     result.append(a);
-                    //jump PAST (POP eval(B))
+                    //jump PAST eval(B)
                     result.push(
-                        Opcode::JumpIfFalse((b.code.len() + 1 + 1) as u16),
+                        Opcode::JumpIfFalseOrPop((b.code.len() + 1) as u16),
                         op.position.0,
                     );
-                    //pop
-                    result.push(Opcode::Pop(1), op.position.0);
                     //eval(B)
                     result.append(b);
                 } else {
@@ -654,41 +811,12 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                 }
             }
 
-            Expr::Name(n) => match self.lookup_local(n.get_string().unwrap()) {
-                Some((VariableType::Normal, var_idx)) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16), n.position.0); //TODO extension
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
+            Expr::Name(n) => {
+                result.append(self.get_named_entity(n)?);
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), n.position.0);
                 }
-
-                Some((VariableType::Boxed, var_idx)) => {
-                    result.push(Opcode::LoadLocal(var_idx as u16), n.position.0);
-                    result.push(Opcode::LoadBox, n.position.0);
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
-                }
-
-                Some((VariableType::Closed, idx)) => {
-                    result.push(Opcode::LoadClosureValue(idx as u16), n.position.0);
-                    result.push(Opcode::LoadBox, n.position.0);
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
-                }
-
-                None => {
-                    //global
-                    let idx = result.get_or_create_name(n.get_string().unwrap());
-
-                    result.push(Opcode::LoadGlobal(idx as u16), n.position.0);
-
-                    if !self.needs_value() {
-                        result.push(Opcode::Pop(1), n.position.0);
-                    }
-                }
-            },
+            }
 
             Expr::If(cond, then_body, else_body) => {
                 self.require_value();
@@ -720,11 +848,10 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
                 let else_body_size = else_body.code.len();
 
                 result.push(
-                    Opcode::JumpIfFalse((then_body_size + 1 + 1 + 1) as u16),
+                    Opcode::JumpIfFalseOrPop((then_body_size + 1 + 1) as u16),
                     *result.indices.last().unwrap(),
                 );
-                //instruction AFTER POP then_body and jump
-                result.push(Opcode::Pop(1), *then_body.indices.first().unwrap());
+                //instruction AFTER then_body and jump
 
                 result.append(then_body);
 
@@ -851,7 +978,7 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
             Expr::AnonFunction(args, name, body) => {
                 let new_chunk_idx = self.compile_function(name, args, body)?;
 
-                let const_idx = result.get_or_create_constant(new_chunk_idx);
+                let const_idx = self.get_or_create_constant(new_chunk_idx);
 
                 result.push(Opcode::LoadConst(const_idx as u16), name.position.0); //code block
 
@@ -861,6 +988,44 @@ impl<'gc, 'annotations> Compiler<'gc, 'annotations> {
 
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), name.position.0);
+                }
+            }
+            Expr::PropertyAccess(target, prop) => {
+                self.require_value();
+                let target = self.visit_expr(target.as_ref())?;
+                self.pop_requirement();
+
+                result.append(target);
+
+                result += (
+                    match Compiler::try_parse_special_field_access(prop)? {
+                        Some(idx) => Opcode::LoadFieldByIndex(idx),
+                        None => {
+                            let idx = self.get_or_create_name(prop.get_string().unwrap());
+                            Opcode::LoadField(idx as u16)
+                        }
+                    },
+                    prop.position.0,
+                );
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), prop.position.0);
+                }
+            }
+
+            Expr::PropertyTest(target, prop) => {
+                self.require_value();
+                let target = self.visit_expr(target.as_ref())?;
+                self.pop_requirement();
+
+                result.append(target);
+
+                let idx = self.get_or_create_name(prop.get_string().unwrap());
+
+                result.push(Opcode::TestProperty(idx as u16), prop.position.0);
+
+                if !self.needs_value() {
+                    result.push(Opcode::Pop(1), prop.position.0);
                 }
             }
         }

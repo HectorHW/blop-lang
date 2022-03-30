@@ -1,0 +1,87 @@
+struct Pair:
+    elem1
+    elem2
+
+#simple field access
+
+var instance = Pair(1, 2)
+
+print instance.elem1
+assert instance.elem1==1
+
+#fields can be accessed using index via special syntax
+assert instance._0 == 1
+assert instance._1 == 2
+
+# and can also be assigned by index
+instance._0 = 0
+assert instance._0 == 0
+assert instance.elem1 == 0
+
+print instance.elem2
+assert instance.elem2==2
+
+instance = Pair(Pair(1, 2), Pair(3, Pair(4, 5)))
+
+#complex field access
+assert instance.elem2.elem1 == 3
+assert instance.elem2.elem2.elem1 == 4
+
+#field existance check
+assert instance?elem1
+assert not instance?other_field
+
+#field assignment
+
+instance = Pair(1, 2)
+instance.elem1 = 3
+assert instance.elem1 == 3
+assert instance.elem2 == 2
+
+instance.elem2 = Pair(4, 5)
+assert instance.elem2.elem1 == 4
+
+#complex assignment
+instance.elem2.elem1 = 8
+assert instance.elem2.elem1 == 8
+
+instance.elem1 = Pair(0, 0)
+
+#exressions in assignment target as pointers
+
+def first_field = 
+    instance.elem1
+
+first_field().elem2 = 9
+assert instance.elem1.elem2 == 9
+
+#only names and properties are allowed
+# will fail at parse stage
+#(instance.elem1 + 1) = 2
+
+instance.elem1 = "first"
+instance.elem2 = "second"
+
+print instance?elem1 and instance.elem1 or instance.elem2
+
+# you can define structs with no fields
+struct zero
+
+var zero_instance = zero()
+print zero_instance
+print instance
+
+#implementation block
+# somewhat equivalent to 
+#     Pair.first = (self) => self._0
+#     Pair.second = (self) => self._1
+
+impl Pair:
+
+    def first(self) = self._0
+    def second(self) = self._1
+
+instance = Pair(2, 3)
+
+assert instance.first() == 2
+assert instance.second() == 3

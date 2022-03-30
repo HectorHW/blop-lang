@@ -15,6 +15,7 @@ pub struct AnnotationGenerator<'a> {
 enum ScopeType {
     Block,
     Function,
+    Implementation,
 }
 
 impl<'a> AnnotationGenerator<'a> {
@@ -186,6 +187,11 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
                 Stmt::FunctionDeclaration { name, .. } => {
                     self.declare_name(name);
                 }
+
+                Stmt::StructDeclaration { name, .. } => {
+                    self.declare_name(name);
+                }
+
                 _ => {}
             }
         }
@@ -213,6 +219,20 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
 
         self.visit_expr(body)?;
         self.pop_scope();
+        Ok(())
+    }
+
+    fn visit_impl_block(&mut self, name: &Token, implementations: &[Stmt]) -> Result<(), String> {
+        self.lookup_name(name.get_string().unwrap());
+
+        self.new_scope(ScopeType::Implementation, name);
+
+        for f in implementations {
+            self.visit_stmt(f)?;
+        }
+
+        self.pop_scope();
+
         Ok(())
     }
 }

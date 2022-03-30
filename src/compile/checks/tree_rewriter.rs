@@ -16,6 +16,19 @@ pub(super) trait Rewriter<E> {
             Stmt::FunctionDeclaration { name, args, body } => {
                 self.visit_function_declaration_statement(name, args, body)
             }
+
+            Stmt::StructDeclaration { name, fields } => {
+                self.visit_struct_declaration_statement(name, fields)
+            }
+
+            Stmt::PropertyAssignment(target, value) => {
+                self.visit_property_assignment(target, value)
+            }
+
+            Stmt::ImplBlock {
+                name,
+                implementations,
+            } => self.visit_impl_block(name, implementations),
         }
     }
 
@@ -63,6 +76,33 @@ pub(super) trait Rewriter<E> {
         })
     }
 
+    fn visit_struct_declaration_statement(
+        &mut self,
+        name: Token,
+        fields: Vec<Token>,
+    ) -> Result<Stmt, E> {
+        Ok(Stmt::StructDeclaration { name, fields })
+    }
+
+    fn visit_property_assignment(&mut self, target: Expr, value: Expr) -> Result<Stmt, E> {
+        Ok(Stmt::PropertyAssignment(
+            self.visit_expr(target)?,
+            self.visit_expr(value)?,
+        ))
+    }
+
+    fn visit_impl_block(&mut self, name: Token, functions: Vec<Stmt>) -> Result<Stmt, E> {
+        let functions = functions
+            .into_iter()
+            .map(|f| self.visit_stmt(f))
+            .collect::<Result<Vec<Stmt>, E>>()?;
+
+        Ok(Stmt::ImplBlock {
+            name,
+            implementations: functions,
+        })
+    }
+
     fn visit_expr(&mut self, expr: Expr) -> Result<Expr, E> {
         match expr {
             Expr::Number(n) => self.visit_number_expr(n),
@@ -80,6 +120,8 @@ pub(super) trait Rewriter<E> {
             Expr::AnonFunction(args, arrow, body) => {
                 self.visit_anon_function_expr(args, arrow, body)
             }
+            Expr::PropertyAccess(target, prop) => self.visit_property_access(target, prop),
+            Expr::PropertyTest(target, prop) => self.visit_property_check(target, prop),
         }
     }
 
@@ -169,6 +211,16 @@ pub(super) trait Rewriter<E> {
             });
         }
         Ok(Expr::PartialCall(target, processed_args))
+    }
+
+    fn visit_property_access(&mut self, target: Box<Expr>, property: Token) -> Result<Expr, E> {
+        let target = Box::new(self.visit_expr(*target)?);
+        Ok(Expr::PropertyAccess(target, property))
+    }
+
+    fn visit_property_check(&mut self, target: Box<Expr>, property: Token) -> Result<Expr, E> {
+        let target = Box::new(self.visit_expr(*target)?);
+        Ok(Expr::PropertyTest(target, property))
     }
 
     fn visit_anon_function_expr(

@@ -1,6 +1,8 @@
 // this module defines api for working with objects from memory side
 
-use super::objects::{OwnedObject, OwnedObjectItem, StackObject, VMap, VVec};
+use super::objects::{
+    OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance, VMap, VVec,
+};
 use crate::data::marked_counter::UNMARKED_ONE;
 use crate::data::objects::{Closure, Partial, Value, ValueBox};
 use crate::execution::chunk::Chunk;
@@ -113,6 +115,18 @@ impl OwnedObject {
                     constant.mark(value);
                 }
             }
+            OwnedObjectItem::StructDescriptor(d) => {
+                for method in d.methods.values() {
+                    method.mark(value);
+                }
+            }
+
+            OwnedObjectItem::StructInstance(s) => {
+                s.descriptor.mark(value);
+                for field in s.fields.values() {
+                    field.mark(value);
+                }
+            }
         }
     }
 
@@ -173,6 +187,17 @@ impl OwnedObject {
                 let f = chunk.constants.is_empty();
                 chunk.constants.clear();
                 f
+            }
+
+            OwnedObjectItem::StructDescriptor(d) => {
+                let f = d.methods.is_empty();
+                d.methods.clear();
+                f
+            }
+            OwnedObjectItem::StructInstance(s) => {
+                s.descriptor = StackObject::Int(0);
+                s.fields.clear();
+                true
             }
         }
     }
@@ -336,6 +361,32 @@ impl GCAlloc for Chunk {
     fn store(_obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Function(_obj),
+            marker: UNMARKED_ONE,
+        }
+    }
+}
+
+impl GCAlloc for StructDescriptor {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::StructDescriptor(obj),
+            marker: UNMARKED_ONE,
+        }
+    }
+}
+
+impl GCAlloc for StructInstance {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::StructInstance(obj),
             marker: UNMARKED_ONE,
         }
     }
