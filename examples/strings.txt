@@ -15,7 +15,7 @@ var s21 = "a"
 var s22 = "b"
 s2 = s21 + s22
 
-if s1?=s2 # strings are compared for equality by content
+if s1==s2 # strings are compared for equality by content
     print "equal"
 else
     print "not equal"
@@ -23,3 +23,16 @@ else
 var n = int("2")
 print n
 assert n==2
+
+# running this with --features "bench" should show some speedup
+
+def loop(n) =
+    if n<0
+        pass
+    else
+        int("200")
+        loop(n-1)
+
+loop(10000)
+print "done"
+print int

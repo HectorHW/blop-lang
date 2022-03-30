@@ -291,7 +291,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         let jump = match chunk.code[ip] {
             Opcode::Print => {
                 let result = checked_stack_pop!()?;
-                println!("{}", result);
+                self.pretty_print(result);
                 InstructionExecution::NextInstruction
             }
             Opcode::LoadConst(idx) => {
@@ -680,7 +680,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
                         let builtins = self.builtins;
 
-                        let result = builtins.apply_builtin(name.as_ref(), args, self);
+                        let result = builtins.apply_builtin(*name, args, self);
                         let result = result.map_err(|e| {
                             runtime_error!(InterpretErrorKind::NativeError { message: e })
                         })?;
@@ -938,5 +938,15 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             return VM::get_chunk(value.unwrap_partial().unwrap().target.clone());
         }
         None
+    }
+
+    fn pretty_print(&self, value: Value) {
+        match value {
+            StackObject::Builtin(idx) => {
+                let pretty_name = self.builtins.get_builtin_name(idx).unwrap();
+                println!("{}", pretty_name);
+            }
+            other => println!("{}", other),
+        }
     }
 }

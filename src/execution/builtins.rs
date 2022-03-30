@@ -1,13 +1,13 @@
 ///
 /// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
 use crate::data::objects::{StackObject, VVec, Value};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use super::vm::VM;
 
 type BuiltinFuction = fn(Vec<Value>, &mut VM) -> BuiltinResult;
 
-pub struct BuiltinMap(HashMap<Box<str>, BuiltinFuction>);
+pub struct BuiltinMap(IndexMap<String, BuiltinFuction>);
 
 type BuiltinResult = std::result::Result<Value, String>;
 
@@ -17,23 +17,23 @@ impl BuiltinMap {
     }
 
     pub(self) fn add_builtin(&mut self, name: &'static str, f: BuiltinFuction) {
-        self.0.insert(name.to_owned().into_boxed_str(), f);
+        self.0.insert(name.to_owned(), f);
     }
 
-    pub fn apply_builtin(&self, name: &str, args: VVec, vm: &mut VM) -> BuiltinResult {
-        match self.0.get(name) {
-            Some(builtin) => builtin(args, vm),
+    pub fn apply_builtin(&self, idx: usize, args: VVec, vm: &mut VM) -> BuiltinResult {
+        match self.0.get_index(idx) {
+            Some((_, builtin)) => builtin(args, vm),
 
-            None => Err(format!("could not find builtin with name {}", name)),
+            None => Err(format!("could not find builtin with index {}", idx)),
         }
     }
 
     pub fn get_builtin(&self, name: &str) -> Option<Value> {
-        if self.0.get(name).is_some() {
-            Some(Value::Builtin(name.to_owned().into_boxed_str()))
-        } else {
-            None
-        }
+        self.0.get_full(name).map(|(idx, _, _)| Value::Builtin(idx))
+    }
+
+    pub fn get_builtin_name(&self, idx: usize) -> Option<&str> {
+        self.0.get_index(idx).map(|(k, _v)| k.as_str())
     }
 }
 

@@ -87,3 +87,5 @@ test_file! {lambdas}
 test_file! {partials}
 
 test_file! {structures}
+
+test_file! {strings}
