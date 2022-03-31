@@ -972,6 +972,16 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let pretty_name = self.builtins.get_builtin_name(idx).unwrap();
                 println!("{}", pretty_name);
             }
+
+            b if b.unwrap_builtin_method().is_some() => {
+                let method = b.unwrap_builtin_method().unwrap();
+                let pretty_name = self
+                    .builtins
+                    .get_method_name(method.class_id, method.method_id)
+                    .unwrap();
+                println!("{}", pretty_name)
+            }
+
             other => println!("{}", other),
         }
     }
