@@ -179,7 +179,6 @@ impl StructInstance {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnedObjectItem {
     ConstantString(String),
-    MutableString(String),
     Vector(VVec),
     Map(VMap),
     Box(ValueBox),
@@ -322,9 +321,9 @@ impl StackObject {
         }
     }
 
-    pub fn unwrap_mutable_string(&self) -> Option<&mut String> {
+    pub(super) fn unwrap_mutable_string(&self) -> Option<&mut String> {
         match self.as_heap_object() {
-            Some(OwnedObjectItem::MutableString(s)) => Some(s),
+            Some(OwnedObjectItem::ConstantString(s)) => Some(s),
             _ => None,
         }
     }
@@ -395,7 +394,6 @@ impl StackObject {
 
     pub fn unwrap_any_str(&self) -> Option<&str> {
         match self.as_heap_object() {
-            Some(OwnedObjectItem::MutableString(m)) => Some(m.as_str()),
             Some(OwnedObjectItem::ConstantString(s)) => Some(s.as_str()),
             _ => None,
         }
@@ -408,7 +406,6 @@ impl StackObject {
             StackObject::Builtin(_) => Ok(None),
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
                 OwnedObjectItem::ConstantString(_) => Err(()),
-                OwnedObjectItem::MutableString(_) => Err(()),
                 OwnedObjectItem::Vector(_) => Err(()),
                 OwnedObjectItem::Map(_) => Err(()),
                 OwnedObjectItem::Box(_) => Err(()),
@@ -428,7 +425,6 @@ impl StackObject {
             StackObject::Builtin(_) => None,
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
                 OwnedObjectItem::ConstantString(_) => None,
-                OwnedObjectItem::MutableString(_) => None,
                 OwnedObjectItem::Vector(_) => None,
                 OwnedObjectItem::Map(_) => None,
                 OwnedObjectItem::Box(_) => None,
@@ -526,10 +522,7 @@ impl Hash for StackObject {
 #[allow(dead_code)]
 impl OwnedObject {
     pub fn can_hash(&self) -> bool {
-        matches!(
-            &self.item,
-            OwnedObjectItem::MutableString(..) | OwnedObjectItem::ConstantString(..)
-        )
+        matches!(&self.item, OwnedObjectItem::ConstantString(..))
     }
 
     fn unwrap_map(&mut self) -> Option<&mut VMap> {
@@ -546,17 +539,9 @@ impl OwnedObject {
         }
     }
 
-    fn unwrap_string(&mut self) -> Option<&mut String> {
-        match &mut self.item {
-            OwnedObjectItem::MutableString(object) => Some(object),
-            _ => None,
-        }
-    }
-
     pub fn type_string(&self) -> String {
         match self.item {
-            OwnedObjectItem::ConstantString(_) => "ConstantString".to_string(),
-            OwnedObjectItem::MutableString(_) => "String".to_string(),
+            OwnedObjectItem::ConstantString(_) => "String".to_string(),
             OwnedObjectItem::Vector(_) => "Vector".to_string(),
             OwnedObjectItem::Map(_) => "Map".to_string(),
             OwnedObjectItem::Box(_) => "Box".to_string(),
@@ -572,8 +557,6 @@ impl OwnedObject {
 impl Hash for OwnedObject {
     fn hash<H: Hasher>(&self, _state: &mut H) {
         match &self.item {
-            OwnedObjectItem::MutableString(s) => s.hash(_state),
-
             OwnedObjectItem::ConstantString(s) => s.hash(_state),
 
             _ => panic!("unhashable type {:?}", self),
@@ -599,7 +582,6 @@ impl Debug for OwnedObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let content = match &self.item {
             OwnedObjectItem::ConstantString(s) => format!("ConstStr {:?} at {:p}", s, self),
-            OwnedObjectItem::MutableString(s) => format!("MutStr \"{:?}\" at {:p}", s, self),
             OwnedObjectItem::Vector(v) => format!("{:?}", v),
             OwnedObjectItem::Map(m) => {
                 format!("Map {:?} at {:p}", m, self)
@@ -640,7 +622,6 @@ impl Display for OwnedObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.item {
             OwnedObjectItem::ConstantString(ptr) => write!(f, "{}", ptr),
-            OwnedObjectItem::MutableString(ptr) => write!(f, "{}", ptr),
             OwnedObjectItem::Vector(ptr) => write!(f, "Vector {:?}", ptr),
             OwnedObjectItem::Map(ptr) => write!(f, "Map {:?}", ptr),
             OwnedObjectItem::Box(ptr) => write!(f, "box[{}]", ptr.0),

@@ -92,7 +92,7 @@ impl OwnedObject {
                     vec_elem.mark(value);
                 }
             }
-            OwnedObjectItem::MutableString(_) | OwnedObjectItem::ConstantString(_) => {} //has no children
+            OwnedObjectItem::ConstantString(_) => {} //has no children
             OwnedObjectItem::Box(ptr) => {
                 ptr.0.mark(value);
             }
@@ -133,7 +133,6 @@ impl OwnedObject {
     fn clear_references(&mut self) -> bool {
         match &mut self.item {
             OwnedObjectItem::ConstantString(_) => false,
-            OwnedObjectItem::MutableString(_) => false,
 
             OwnedObjectItem::Vector(v) => {
                 let f = !v.is_empty();
@@ -290,7 +289,7 @@ impl GCAlloc for String {
 
     fn store(obj: Self) -> OwnedObject {
         OwnedObject {
-            item: OwnedObjectItem::MutableString(obj),
+            item: OwnedObjectItem::ConstantString(obj),
             marker: UNMARKED_ONE,
         }
     }
@@ -298,20 +297,6 @@ impl GCAlloc for String {
 
 impl GCNew for String {}
 
-struct _ConstHeapString(String);
-
-impl GCAlloc for _ConstHeapString {
-    fn needs_gc() -> bool {
-        true
-    }
-
-    fn store(_obj: Self) -> OwnedObject {
-        OwnedObject {
-            item: OwnedObjectItem::ConstantString(_obj.0),
-            marker: UNMARKED_ONE,
-        }
-    }
-}
 impl GCNew for ValueBox {}
 
 impl GCAlloc for ValueBox {
@@ -639,7 +624,7 @@ impl GC {
             }
         }
 
-        self.store(_ConstHeapString(s.to_string()))
+        self.store(s.to_string())
     }
 
     pub(crate) fn new_partial(&mut self, target: Value, args: Vec<Value>) -> StackObject {
