@@ -89,3 +89,5 @@ test_file! {partials}
 test_file! {structures}
 
 test_file! {strings}
+
+test_file! {builtins}
