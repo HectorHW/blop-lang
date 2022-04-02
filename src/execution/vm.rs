@@ -1,9 +1,10 @@
 use crate::data::gc::GC;
-use crate::data::objects::{Closure, StackObject, Value, ValueBox};
+use crate::data::objects::{Closure, StackObject, VVec, Value, ValueBox};
 use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use super::arity::Arity;
 use super::builtins::BuiltinMap;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
@@ -672,6 +673,31 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         .unwrap();
                 }
 
+                let call_arity = object.get_arity(self).ok_or_else(|| {
+                    runtime_error!(TypeError {
+                        message: format!("expected callable but got {}", object.type_string())
+                    })
+                })?;
+
+                if !call_arity.accepts(arity) {
+                    return Err(runtime_error!(InterpretErrorKind::TypeError {
+                        message: format!("expected {call_arity} but got {arity}")
+                    }));
+                }
+
+                if call_arity.is_vararg() {
+                    let final_length = self.stack.len().saturating_sub(arity);
+                    let args = self.stack.split_off(final_length);
+
+                    let mut args = self.wrap_by_arity(args, call_arity).ok_or_else(|| {
+                        runtime_error!(InterpretErrorKind::TypeError {
+                            message: format!("expected {call_arity} but got {arity}")
+                        })
+                    })?;
+                    arity = args.len();
+                    self.stack.append(&mut args);
+                }
+
                 match &object {
                     Value::Builtin(name) => {
                         let final_length = self.stack.len().saturating_sub(arity);
@@ -682,7 +708,9 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
                         let result = builtins.apply_builtin(*name, args, self);
                         let result = result.map_err(|e| {
-                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                            runtime_error!(InterpretErrorKind::NativeError {
+                                message: e.to_string()
+                            })
                         })?;
                         self.stack.push(result);
                         InstructionExecution::NextInstruction
@@ -708,7 +736,9 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                             self,
                         );
                         let result = result.map_err(|e| {
-                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                            runtime_error!(InterpretErrorKind::NativeError {
+                                message: e.to_string()
+                            })
                         })?;
                         self.stack.push(result);
                         InstructionExecution::NextInstruction
@@ -755,17 +785,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
                         self.locals_offset = self.stack.len() - 1 - arity;
 
-                        if arity as usize != new_chunk.unwrap_function().unwrap().arity {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "mismatched arguments: expected {} but got {}",
-                                    new_chunk.unwrap_function().unwrap().arity,
-                                    arity
-                                )
-                            }));
-                        } else {
-                            InstructionExecution::EnterChunk(new_chunk)
-                        }
+                        InstructionExecution::EnterChunk(new_chunk)
                     }
                 }
             }
@@ -943,6 +963,23 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             _other => None,
+        }
+    }
+
+    fn wrap_by_arity(&mut self, mut args: VVec, arity: Arity) -> Option<VVec> {
+        if arity.accepts(args.len()) {
+            match arity {
+                Arity::Exact(_) => Some(args),
+                Arity::AtLeast(expected) => {
+                    let vararg_part = args.split_off(expected);
+
+                    let vararg_ptr = self.gc.store(vararg_part);
+                    args.push(vararg_ptr);
+                    Some(args)
+                }
+            }
+        } else {
+            None
         }
     }
 

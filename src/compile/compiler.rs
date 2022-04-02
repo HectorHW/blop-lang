@@ -2,6 +2,7 @@ use crate::compile::checks::{Annotations, VariableType};
 use crate::compile::code_blob::AnnotatedCodeBlob;
 use crate::data::gc::GC;
 use crate::data::objects::{StackObject, StructDescriptor, Value};
+use crate::execution::arity::Arity;
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
@@ -66,7 +67,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         annotations: Annotations,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), 0);
+        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), Arity::Exact(0));
 
         let mut compiler = Compiler::new(
             &annotations,
@@ -228,7 +229,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     ) -> Result<StackObject, String> {
         //save current compiler
 
-        let mut chunk = Chunk::new(name.clone(), args.len());
+        let mut chunk = Chunk::new(name.clone(), Arity::Exact(args.len()));
 
         let mut inner_compiler = Compiler::new(
             self.annotations,

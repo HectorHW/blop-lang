@@ -3,13 +3,15 @@ use crate::data::objects::Value;
 use crate::parsing::lexer::{Token, TokenKind};
 use std::fmt::{Display, Formatter};
 
+use super::arity::Arity;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
     pub constants: Vec<Value>,
     pub global_names: Vec<String>,
     pub code: Vec<Opcode>,
     pub name: Token,
-    pub arity: usize,
+    pub arity: Arity,
     pub opcode_to_line: Vec<usize>,
 }
 
@@ -82,7 +84,7 @@ impl Display for Opcode {
 }
 
 impl Chunk {
-    pub fn new(name: Token, arity: usize) -> Chunk {
+    pub fn new(name: Token, arity: Arity) -> Chunk {
         Chunk {
             constants: Vec::new(),
             global_names: Vec::new(),
@@ -188,7 +190,7 @@ mod chunk_pretty_printer {
                             //inside some function
                             if *idx == 0 {
                                 pretty_argument!("current function")
-                            } else if *idx as usize <= chunk.arity {
+                            } else if *idx as usize <= chunk.arity.into() {
                                 pretty_argument!(format!("argument {}", idx - 1))
                             } else {
                                 format!("{}", op)

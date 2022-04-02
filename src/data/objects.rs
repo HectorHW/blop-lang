@@ -1,4 +1,5 @@
 use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
+use crate::execution::arity::Arity;
 use crate::execution::vm::VM;
 use crate::Chunk;
 use indexmap::IndexMap;
@@ -8,8 +9,6 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-
-use super::gc::GC;
 
 pub type Value = StackObject;
 
@@ -81,6 +80,10 @@ impl Partial {
             args,
         }
     }
+
+    pub fn get_arity(&self) -> Arity {
+        Arity::Exact(self.count_blanks())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -131,24 +134,26 @@ impl StructInstance {
         &self,
         self_ptr: &Value,
         method_name: &str,
-        gc_context: &mut GC,
+        context: &mut VM,
     ) -> Option<Value> {
         self.descriptor
             .unwrap_struct_descriptor()
             .unwrap()
             .get_method(method_name)
             .and_then(|raw_method| {
-                let blanks = match raw_method.get_arity() {
-                    Ok(Some(n)) => vec![StackObject::Blank; n],
-                    Ok(None) => vec![StackObject::Blank],
-                    Err(_) => {
+                let blanks = match raw_method.get_arity(context) {
+                    Some(arity) => {
+                        vec![StackObject::Blank; arity.into()]
+                    }
+
+                    None => {
                         return None;
                     }
                 };
 
                 let partial = Partial::new(raw_method, blanks).substitute(vec![self_ptr.clone()]);
 
-                Some(gc_context.store(partial))
+                Some(context.gc.store(partial))
             })
     }
 
@@ -156,13 +161,8 @@ impl StructInstance {
         self.fields.get(field_name).cloned()
     }
 
-    pub fn lookup(
-        &self,
-        self_ptr: &Value,
-        entity_name: &str,
-        gc_context: &mut GC,
-    ) -> Option<Value> {
-        self.get_bound_method(self_ptr, entity_name, gc_context)
+    pub fn lookup(&self, self_ptr: &Value, entity_name: &str, context: &mut VM) -> Option<Value> {
+        self.get_bound_method(self_ptr, entity_name, context)
             .or_else(|| self.get_field(entity_name))
     }
 
@@ -414,22 +414,24 @@ impl StackObject {
         }
     }
 
-    pub fn get_arity(&self) -> Result<Option<usize>, ()> {
+    pub fn get_arity(&self, context: &mut VM) -> Option<Arity> {
         match self {
-            StackObject::Int(_) => Err(()),
-            StackObject::Blank => Err(()),
-            StackObject::Builtin(_) => Ok(None),
+            StackObject::Int(_) => None,
+            StackObject::Blank => None,
+            &StackObject::Builtin(idx) => context.builtins.get_builtin_arity(idx),
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
-                OwnedObjectItem::ConstantString(_) => Err(()),
-                OwnedObjectItem::Vector(_) => Err(()),
-                OwnedObjectItem::Map(_) => Err(()),
-                OwnedObjectItem::Box(_) => Err(()),
-                OwnedObjectItem::Closure(c) => c.underlying.get_arity(),
-                OwnedObjectItem::Function(f) => Ok(Some(f.arity)),
-                OwnedObjectItem::Partial(p) => Ok(Some(p.count_blanks())),
-                OwnedObjectItem::StructDescriptor(s) => Ok(Some(s.fields.len())),
-                OwnedObjectItem::StructInstance(_) => Err(()),
-                OwnedObjectItem::BuiltinMethod(_) => Ok(None),
+                OwnedObjectItem::ConstantString(_) => None,
+                OwnedObjectItem::Vector(_) => None,
+                OwnedObjectItem::Map(_) => None,
+                OwnedObjectItem::Box(_) => None,
+                OwnedObjectItem::Closure(c) => c.underlying.get_arity(context),
+                OwnedObjectItem::Function(f) => Some(f.arity),
+                OwnedObjectItem::Partial(p) => Some(p.get_arity()),
+                OwnedObjectItem::StructDescriptor(s) => Some(Arity::Exact(s.fields.len())),
+                OwnedObjectItem::StructInstance(_) => None,
+                OwnedObjectItem::BuiltinMethod(m) => {
+                    context.builtins.get_method_arity(m.class_id, m.method_id)
+                }
             },
         }
     }
@@ -439,7 +441,7 @@ impl StackObject {
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
                 OwnedObjectItem::Box(_) => None,
                 OwnedObjectItem::StructDescriptor(_) => None,
-                OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context.gc),
+                OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context),
 
                 _ => {
                     let builtins = context.builtins;
