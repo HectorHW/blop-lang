@@ -58,7 +58,7 @@ peg::parser! {
 
         rule function_decl_stmt() -> Stmt =
             [t!(Def)] n:name() args:maybe_arguments_and_equals() body:expr() {
-                Stmt::FunctionDeclaration{name:n, args, body}
+                Stmt::FunctionDeclaration{name:n, args: args.0, vararg: args.1, body}
             }
 
         rule struct_decl_stmt() -> Stmt =
@@ -97,14 +97,22 @@ peg::parser! {
                 m
             }
 
-        rule paren_name_list() -> Vec<Token> =
-            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {n}
+        rule paren_name_list() -> (Vec<Token>, Option<Token>) =
 
-        rule maybe_arguments_and_equals() -> Vec<Token> =
+            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)] v:vararg() [t!(Comma)]?  [t!(RParen)] {(n, Some(v))}
+            /
+            [t!(LParen)] n:name()**[t!(Comma)] [t!(Comma)]?  [t!(RParen)] {(n, None)}
+            /
+            [t!(LParen)] v:vararg() [t!(Comma)]? [t!(RParen)] {(vec![], Some(v))}
+
+        rule vararg() -> Token =
+            [t!(Star)] n: name() {n}
+
+        rule maybe_arguments_and_equals() -> (Vec<Token>, Option<Token>) =
             n:paren_name_list() [t!(Equals)] {
                 n
             }
-            / [t!(Equals)] {Vec::new()}
+            / [t!(Equals)] {(Vec::new(), None)}
 
         rule print_stmt() -> Stmt =
             [print_token@t!(Print)] e:expr() {Stmt::Print(print_token, e)}
@@ -186,7 +194,7 @@ peg::parser! {
 
         rule arrow() -> Expr =
             p:paren_name_list() [t@t!(Arrow)] b:simple_expr() {
-            Expr::AnonFunction(p, t, Box::new(b))
+            Expr::AnonFunction(p.0, p.1, t, Box::new(b))
         }
 
         rule arithmetic() -> Expr = precedence! {

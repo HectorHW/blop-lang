@@ -2,6 +2,7 @@ use crate::compile::checks::{Annotations, VariableType};
 use crate::compile::code_blob::AnnotatedCodeBlob;
 use crate::data::gc::GC;
 use crate::data::objects::{StackObject, StructDescriptor, Value};
+use crate::execution::arity::Arity;
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
@@ -34,7 +35,7 @@ pub struct Compiler<'gc, 'annotations, 'chunk> {
 }
 
 struct FunctionCompilationContext {
-    arity: usize,
+    arity: Arity,
     name: Token,
 }
 
@@ -43,7 +44,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         annotations: &'annotations Annotations,
         gc: &'gc mut GC,
         function_name: Token,
-        function_arity: usize,
+        function_arity: Arity,
         chunk: &'chunk mut Chunk,
     ) -> Compiler<'gc, 'annotations, 'chunk> {
         Compiler {
@@ -66,13 +67,13 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         annotations: Annotations,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), 0);
+        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), Arity::Exact(0));
 
         let mut compiler = Compiler::new(
             &annotations,
             gc,
             SCRIPT_TOKEN.clone(),
-            0,
+            Arity::Exact(0),
             &mut program_chunk,
         );
 
@@ -224,19 +225,21 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         &mut self,
         name: &Token,
         args: &[Token],
+        vararg: Option<&Token>,
         body: &Expr,
     ) -> Result<StackObject, String> {
         //save current compiler
 
-        let mut chunk = Chunk::new(name.clone(), args.len());
+        let arity = if vararg.is_some() {
+            Arity::AtLeast(args.len())
+        } else {
+            Arity::Exact(args.len())
+        };
 
-        let mut inner_compiler = Compiler::new(
-            self.annotations,
-            self.gc,
-            name.clone(),
-            args.len(),
-            &mut chunk,
-        );
+        let mut chunk = Chunk::new(name.clone(), arity);
+
+        let mut inner_compiler =
+            Compiler::new(self.annotations, self.gc, name.clone(), arity, &mut chunk);
 
         //compile body
 
@@ -257,7 +260,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         //define function inside itself
 
         inner_compiler.new_scope();
-        for arg_name in args {
+        for arg_name in args.iter().chain(vararg.into_iter()) {
             match inner_compiler.declare_local(arg_name.get_string().unwrap(), VariableType::Normal)
             {
                 Some(_) => {
@@ -512,8 +515,14 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     result.push(Opcode::Duplicate, struct_name.position.0);
                     //pointer
                     match item {
-                        Stmt::FunctionDeclaration { name, args, body } => {
-                            let base_function = self.compile_function(name, args, body)?;
+                        Stmt::FunctionDeclaration {
+                            name,
+                            args,
+                            vararg,
+                            body,
+                        } => {
+                            let base_function =
+                                self.compile_function(name, args, vararg.as_ref(), body)?;
                             let index = self.get_or_create_constant(base_function);
 
                             result.push(Opcode::LoadConst(index as u16), name.position.0);
@@ -653,9 +662,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             Stmt::FunctionDeclaration {
                 name: function_name,
                 args,
+                vararg,
                 body,
             } => {
-                let new_chunk_idx = self.compile_function(function_name, args, body)?;
+                let new_chunk_idx =
+                    self.compile_function(function_name, args, vararg.as_ref(), body)?;
 
                 let const_idx = self.get_or_create_constant(new_chunk_idx);
 
@@ -883,10 +894,12 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     && target.code.last().unwrap().eq(&Opcode::LoadLocal(0)) //we load current function
                     && self.needs_return_value()
                 //we will return after that
-                    && self.function_context.arity <= args.len()
+                    && usize::from(self.function_context.arity) <= args.len()
                 {
-                    if args.len() > self.function_context.arity {
-                        return Err(format!("compile error: arity mismatch when performing tail call: expected <={} but got {} args", 
+                    if !self.function_context.arity.is_vararg()
+                        && args.len() > self.function_context.arity.into()
+                    {
+                        return Err(format!("compile error: arity mismatch when performing tail call: expected {} but got {} args", 
                                            self.function_context.arity,
                                            args.len()
                         ));
@@ -902,14 +915,25 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                         self.pop_requirement(); //compile arg load
                         argument_indices.push((1 + i) as u16);
                     }
-                    //store arguments which are on stack in reverse order
-                    for index in argument_indices.into_iter().rev() {
+
+                    if let Arity::AtLeast(var_arity) = self.function_context.arity {
+                        let listed_args: usize = argument_indices.len() - var_arity;
+                        result.push(
+                            Opcode::MakeList(listed_args as u16),
+                            self.function_context.name.position.0,
+                        );
+                        let remaining_args = var_arity + 1usize;
+                        argument_indices.truncate(remaining_args);
+                    }
+
+                    //store arguments that are on stack in reverse order
+                    for &index in argument_indices.iter().rev() {
                         result.push(Opcode::StoreLocal(index), result.last_index().unwrap());
                     }
                     //pop locals
                     let locals_to_pop = self.total_variables
                         - 1 //current function
-                        - args.len(); //arguments
+                        - argument_indices.len(); //arguments
                     if locals_to_pop != 0 {
                         result.push(
                             Opcode::Pop(locals_to_pop as u16),
@@ -975,8 +999,8 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 result = body;
             }
-            Expr::AnonFunction(args, name, body) => {
-                let new_chunk_idx = self.compile_function(name, args, body)?;
+            Expr::AnonFunction(args, vararg, name, body) => {
+                let new_chunk_idx = self.compile_function(name, args, vararg.as_ref(), body)?;
 
                 let const_idx = self.get_or_create_constant(new_chunk_idx);
 

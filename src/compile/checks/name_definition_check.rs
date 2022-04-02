@@ -59,6 +59,7 @@ impl Visitor<String> for NameRedefinitionChecker {
         &mut self,
         name: &Token,
         args: &[Token],
+        vararg: Option<&Token>,
         body: &Expr,
     ) -> Result<(), String> {
         self.declare_name(name).map_err(|e| {
@@ -71,7 +72,7 @@ impl Visitor<String> for NameRedefinitionChecker {
         })?;
 
         self.new_scope();
-        for arg_name in args {
+        for arg_name in args.iter().chain(vararg.into_iter()) {
             self.declare_name(arg_name).map_err(|_e| {
                 format!(
                     "argument {} repeats in function {} at [{}]",
@@ -103,12 +104,13 @@ impl Visitor<String> for NameRedefinitionChecker {
     fn visit_anon_function_expr(
         &mut self,
         args: &[Token],
+        vararg: Option<&Token>,
         arrow: &Token,
         body: &Expr,
     ) -> Result<(), String> {
         self.new_scope();
 
-        for arg_name in args {
+        for arg_name in args.iter().chain(vararg.into_iter()) {
             self.declare_name(arg_name).map_err(|_e| {
                 format!(
                     "argument {} repeats in anonymous function at [{}]",
@@ -157,8 +159,13 @@ impl Visitor<String> for NameRedefinitionChecker {
 
         for f in implementations {
             match f {
-                Stmt::FunctionDeclaration { name, args, body } => {
-                    self.visit_method(name, args, body)?;
+                Stmt::FunctionDeclaration {
+                    name,
+                    args,
+                    vararg,
+                    body,
+                } => {
+                    self.visit_method(name, args, vararg.as_ref(), body)?;
                 }
                 _ => unreachable!(),
             }
@@ -168,7 +175,13 @@ impl Visitor<String> for NameRedefinitionChecker {
         Ok(())
     }
 
-    fn visit_method(&mut self, name: &Token, args: &[Token], body: &Expr) -> Result<(), String> {
+    fn visit_method(
+        &mut self,
+        name: &Token,
+        args: &[Token],
+        vararg: Option<&Token>,
+        body: &Expr,
+    ) -> Result<(), String> {
         if args.is_empty() {
             return Err(format!(
                 "method {} [{}] should have at least one argument",
@@ -177,6 +190,6 @@ impl Visitor<String> for NameRedefinitionChecker {
             ));
         }
 
-        self.visit_function_declaration_statement(name, args, body)
+        self.visit_function_declaration_statement(name, args, vararg, body)
     }
 }

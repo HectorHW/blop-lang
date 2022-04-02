@@ -1,11 +1,11 @@
 // this module defines api for working with objects from memory side
 
 use super::objects::{
-    BuiltinMethod, OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance,
-    VMap, VVec,
+    OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance, VMap, VVec,
 };
 use crate::data::marked_counter::UNMARKED_ONE;
 use crate::data::objects::{Closure, Partial, Value, ValueBox};
+use crate::execution::arity::Arity;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::CallStackValue;
 use std::pin::Pin;
@@ -41,6 +41,13 @@ impl Clone for StackObject {
             }
 
             StackObject::Builtin(s) => StackObject::Builtin(*s),
+            &StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            },
             StackObject::Blank => StackObject::Blank,
         }
     }
@@ -60,7 +67,7 @@ impl Drop for StackObject {
                     ptr.unwrap_ref().marker.counter()
                 );
             }
-            StackObject::Builtin(..) | StackObject::Blank => {}
+            StackObject::Builtin(..) | StackObject::Blank | Self::BuiltinMethod { .. } => {}
         }
     }
 }
@@ -127,10 +134,6 @@ impl OwnedObject {
                 for field in s.fields.values() {
                     field.mark(value);
                 }
-            }
-
-            OwnedObjectItem::BuiltinMethod(b) => {
-                b.self_object.mark(value);
             }
         }
     }
@@ -201,11 +204,6 @@ impl OwnedObject {
             OwnedObjectItem::StructInstance(s) => {
                 s.descriptor = StackObject::Int(0);
                 s.fields.clear();
-                true
-            }
-
-            OwnedObjectItem::BuiltinMethod(m) => {
-                m.self_object = StackObject::Int(0);
                 true
             }
         }
@@ -382,19 +380,6 @@ impl GCAlloc for StructInstance {
     fn store(obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::StructInstance(obj),
-            marker: UNMARKED_ONE,
-        }
-    }
-}
-
-impl GCAlloc for BuiltinMethod {
-    fn needs_gc() -> bool {
-        true
-    }
-
-    fn store(obj: Self) -> OwnedObject {
-        OwnedObject {
-            item: OwnedObjectItem::BuiltinMethod(obj),
             marker: UNMARKED_ONE,
         }
     }
@@ -593,7 +578,8 @@ impl GC {
                 }
             }
 
-            StackObject::Builtin(s) => StackObject::Builtin(*s),
+            b @ StackObject::Builtin(..) => b.clone(),
+            b @ StackObject::BuiltinMethod { .. } => b.clone(),
             StackObject::Blank => StackObject::Blank,
         }
     }
@@ -650,8 +636,13 @@ impl GC {
         self.store(s.to_string())
     }
 
-    pub(crate) fn new_partial(&mut self, target: Value, args: Vec<Value>) -> StackObject {
-        self.store(Partial::new(target, args))
+    pub(crate) fn new_partial(
+        &mut self,
+        target: Value,
+        arity: Arity,
+        args: Vec<Value>,
+    ) -> StackObject {
+        self.store(Partial::new(target, arity, args))
     }
 
     pub fn try_inplace_string_concat(

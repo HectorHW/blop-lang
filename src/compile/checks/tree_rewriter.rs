@@ -13,9 +13,12 @@ pub(super) trait Rewriter<E> {
             Stmt::Expression(e) => self.visit_expr_stmt(e),
             Stmt::Assert(keyword, value) => self.visit_assert_statement(keyword, value),
             Stmt::Pass(keyword) => self.visit_pass_stmt(keyword),
-            Stmt::FunctionDeclaration { name, args, body } => {
-                self.visit_function_declaration_statement(name, args, body)
-            }
+            Stmt::FunctionDeclaration {
+                name,
+                args,
+                vararg,
+                body,
+            } => self.visit_function_declaration_statement(name, args, vararg, body),
 
             Stmt::StructDeclaration { name, fields } => {
                 self.visit_struct_declaration_statement(name, fields)
@@ -67,11 +70,13 @@ pub(super) trait Rewriter<E> {
         &mut self,
         name: Token,
         args: Vec<Token>,
+        vararg: Option<Token>,
         body: Expr,
     ) -> Result<Stmt, E> {
         Ok(Stmt::FunctionDeclaration {
             name,
             args,
+            vararg,
             body: self.visit_expr(body)?,
         })
     }
@@ -117,8 +122,8 @@ pub(super) trait Rewriter<E> {
             Expr::SingleStatement(s) => self.visit_single_statement_expr(s),
             Expr::Call(target, args) => self.visit_call_expr(target, args),
             Expr::PartialCall(target, args) => self.visit_partial_call_expr(target, args),
-            Expr::AnonFunction(args, arrow, body) => {
-                self.visit_anon_function_expr(args, arrow, body)
+            Expr::AnonFunction(args, vararg, arrow, body) => {
+                self.visit_anon_function_expr(args, vararg, arrow, body)
             }
             Expr::PropertyAccess(target, prop) => self.visit_property_access(target, prop),
             Expr::PropertyTest(target, prop) => self.visit_property_check(target, prop),
@@ -226,10 +231,11 @@ pub(super) trait Rewriter<E> {
     fn visit_anon_function_expr(
         &mut self,
         args: Vec<Token>,
+        vararg: Option<Token>,
         arrow: Token,
         body: Box<Expr>,
     ) -> Result<Expr, E> {
         let body = Box::new(self.visit_expr(*body)?);
-        Ok(Expr::AnonFunction(args, arrow, body))
+        Ok(Expr::AnonFunction(args, vararg, arrow, body))
     }
 }

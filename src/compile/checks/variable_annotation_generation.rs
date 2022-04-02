@@ -149,11 +149,12 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
         &mut self,
         name: &Token,
         args: &[Token],
+        vararg: Option<&Token>,
         body: &Expr,
     ) -> Result<(), String> {
         self.new_scope(ScopeType::Function, name);
         self.annotations.get_or_create_closure_scope(name);
-        for arg_name in args {
+        for arg_name in args.iter().chain(vararg.into_iter()) {
             self.declare_name(arg_name);
             self.define_name(arg_name);
         }
@@ -207,12 +208,13 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
     fn visit_anon_function_expr(
         &mut self,
         args: &[Token],
+        vararg: Option<&Token>,
         arrow: &Token,
         body: &Expr,
     ) -> Result<(), String> {
         self.new_scope(ScopeType::Function, arrow);
         self.annotations.get_or_create_closure_scope(arrow);
-        for arg_name in args {
+        for arg_name in args.iter().chain(vararg.into_iter()) {
             self.declare_name(arg_name);
             self.define_name(arg_name);
         }

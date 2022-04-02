@@ -43,6 +43,18 @@ Functions are first-class meaning that you can freely pass them around, return f
 
 Functions also support partial calls written as `f(_, _, arg2, _)` which returns special function-like partial object that now accepts arguments where blanks `_` are placed.
 
+You can define vararg functions using `*args` syntax:
+```
+def function_accepting_args(*args) = 
+    print args
+```
+
+Later, this function may be called like any other function if provided enough arguments (0 in our case):
+```
+function_accepting_args(1, 2, 3)
+# prints "Vector [Int 1, Int 2, Int 3]"
+```
+
 The language currently does not provide common loop constructs but offers tail call optimization.
 
 To define complex structures you may use `struct` keyword:

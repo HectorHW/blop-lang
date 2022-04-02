@@ -12,6 +12,7 @@ pub enum Stmt {
     FunctionDeclaration {
         name: Token,
         args: Vec<Token>,
+        vararg: Option<Token>,
         body: Expr,
     },
     StructDeclaration {
@@ -37,7 +38,7 @@ pub enum Expr {
     SingleStatement(Box<Stmt>),
     Call(Box<Expr>, Vec<Expr>),
     PartialCall(Box<Expr>, Vec<Option<Expr>>),
-    AnonFunction(Vec<Token>, Token, Box<Expr>),
+    AnonFunction(Vec<Token>, Option<Token>, Token, Box<Expr>),
     PropertyAccess(Box<Expr>, Token),
     PropertyTest(Box<Expr>, Token),
 }
