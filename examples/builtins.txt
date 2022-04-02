@@ -1,0 +1,33 @@
+# builtin functions
+var n = int("2")
+print n
+assert n==2
+
+print int
+
+var negative_number = 0-5
+
+#calling methods on builtin types
+
+print negative_number.abs
+print negative_number.abs()
+assert negative_number.abs() == 5
+
+#methods may accept arguments
+# (parens so number is never parsed as float)
+assert (12)._mod(5)==2
+print (12)._mod(5)
+# running this with --features "bench" should show some speedup from using strings for indexing
+
+def loop(n) =
+    if n<0
+        pass
+    else
+        int("200")
+        loop(n-1)
+
+loop(10000)
+print "done"
+print int
+
+

@@ -177,9 +177,15 @@ impl StructInstance {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuiltinMethod {
+    pub(crate) self_object: Value,
+    pub(crate) class_id: usize,
+    pub(crate) method_id: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnedObjectItem {
     ConstantString(String),
-    MutableString(String),
     Vector(VVec),
     Map(VMap),
     Box(ValueBox),
@@ -188,6 +194,7 @@ pub enum OwnedObjectItem {
     Partial(Partial),
     StructDescriptor(StructDescriptor),
     StructInstance(StructInstance),
+    BuiltinMethod(BuiltinMethod),
 }
 
 pub type VVec = Vec<StackObject>;
@@ -322,9 +329,9 @@ impl StackObject {
         }
     }
 
-    pub fn unwrap_mutable_string(&self) -> Option<&mut String> {
+    pub(super) fn unwrap_mutable_string(&self) -> Option<&mut String> {
         match self.as_heap_object() {
-            Some(OwnedObjectItem::MutableString(s)) => Some(s),
+            Some(OwnedObjectItem::ConstantString(s)) => Some(s),
             _ => None,
         }
     }
@@ -393,9 +400,15 @@ impl StackObject {
         }
     }
 
+    pub fn unwrap_builtin_method(&self) -> Option<&BuiltinMethod> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::BuiltinMethod(m)) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn unwrap_any_str(&self) -> Option<&str> {
         match self.as_heap_object() {
-            Some(OwnedObjectItem::MutableString(m)) => Some(m.as_str()),
             Some(OwnedObjectItem::ConstantString(s)) => Some(s.as_str()),
             _ => None,
         }
@@ -408,7 +421,6 @@ impl StackObject {
             StackObject::Builtin(_) => Ok(None),
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
                 OwnedObjectItem::ConstantString(_) => Err(()),
-                OwnedObjectItem::MutableString(_) => Err(()),
                 OwnedObjectItem::Vector(_) => Err(()),
                 OwnedObjectItem::Map(_) => Err(()),
                 OwnedObjectItem::Box(_) => Err(()),
@@ -417,27 +429,28 @@ impl StackObject {
                 OwnedObjectItem::Partial(p) => Ok(Some(p.count_blanks())),
                 OwnedObjectItem::StructDescriptor(s) => Ok(Some(s.fields.len())),
                 OwnedObjectItem::StructInstance(_) => Err(()),
+                OwnedObjectItem::BuiltinMethod(_) => Ok(None),
             },
         }
     }
 
     pub fn lookup(&self, field_name: &str, context: &mut VM) -> Option<Value> {
         match self {
-            StackObject::Int(_) => None,
-            StackObject::Blank => None,
-            StackObject::Builtin(_) => None,
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
-                OwnedObjectItem::ConstantString(_) => None,
-                OwnedObjectItem::MutableString(_) => None,
-                OwnedObjectItem::Vector(_) => None,
-                OwnedObjectItem::Map(_) => None,
                 OwnedObjectItem::Box(_) => None,
-                OwnedObjectItem::Closure(_) => None,
-                OwnedObjectItem::Function(_) => None,
-                OwnedObjectItem::Partial(_) => None,
                 OwnedObjectItem::StructDescriptor(_) => None,
                 OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context.gc),
+
+                _ => {
+                    let builtins = context.builtins;
+                    builtins.bind_method(self.clone(), field_name, context)
+                }
             },
+
+            _ => {
+                let builtins = context.builtins;
+                builtins.bind_method(self.clone(), field_name, context)
+            }
         }
     }
 
@@ -456,11 +469,11 @@ impl StackObject {
         }
     }
 
-    pub fn type_string(&self) -> String {
+    pub fn type_string(&self) -> &'static str {
         match self {
-            StackObject::Int(_) => "int".to_string(),
-            StackObject::Builtin(_) => "Builtin".to_string(),
-            StackObject::Blank => "Blank".to_string(),
+            StackObject::Int(_) => "Int",
+            StackObject::Builtin(_) => "Builtin",
+            StackObject::Blank => "Blank",
             StackObject::HeapObject(ptr) => ptr.unwrap_ref().type_string(),
         }
     }
@@ -526,10 +539,7 @@ impl Hash for StackObject {
 #[allow(dead_code)]
 impl OwnedObject {
     pub fn can_hash(&self) -> bool {
-        matches!(
-            &self.item,
-            OwnedObjectItem::MutableString(..) | OwnedObjectItem::ConstantString(..)
-        )
+        matches!(&self.item, OwnedObjectItem::ConstantString(..))
     }
 
     fn unwrap_map(&mut self) -> Option<&mut VMap> {
@@ -546,25 +556,18 @@ impl OwnedObject {
         }
     }
 
-    fn unwrap_string(&mut self) -> Option<&mut String> {
-        match &mut self.item {
-            OwnedObjectItem::MutableString(object) => Some(object),
-            _ => None,
-        }
-    }
-
-    pub fn type_string(&self) -> String {
+    pub fn type_string(&self) -> &'static str {
         match self.item {
-            OwnedObjectItem::ConstantString(_) => "ConstantString".to_string(),
-            OwnedObjectItem::MutableString(_) => "String".to_string(),
-            OwnedObjectItem::Vector(_) => "Vector".to_string(),
-            OwnedObjectItem::Map(_) => "Map".to_string(),
-            OwnedObjectItem::Box(_) => "Box".to_string(),
-            OwnedObjectItem::Closure(_) => "Closure".to_string(),
-            OwnedObjectItem::Partial(_) => "Partial".to_string(),
-            OwnedObjectItem::Function(..) => "Function".to_string(),
-            OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor".to_string(),
-            OwnedObjectItem::StructInstance(..) => "Struct".to_string(),
+            OwnedObjectItem::ConstantString(_) => "String",
+            OwnedObjectItem::Vector(_) => "Vector",
+            OwnedObjectItem::Map(_) => "Map",
+            OwnedObjectItem::Box(_) => "Box",
+            OwnedObjectItem::Closure(_) => "Closure",
+            OwnedObjectItem::Partial(_) => "Partial",
+            OwnedObjectItem::Function(..) => "Function",
+            OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor",
+            OwnedObjectItem::StructInstance(..) => "Struct",
+            OwnedObjectItem::BuiltinMethod(..) => "BuiltinMethod",
         }
     }
 }
@@ -572,8 +575,6 @@ impl OwnedObject {
 impl Hash for OwnedObject {
     fn hash<H: Hasher>(&self, _state: &mut H) {
         match &self.item {
-            OwnedObjectItem::MutableString(s) => s.hash(_state),
-
             OwnedObjectItem::ConstantString(s) => s.hash(_state),
 
             _ => panic!("unhashable type {:?}", self),
@@ -599,7 +600,6 @@ impl Debug for OwnedObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let content = match &self.item {
             OwnedObjectItem::ConstantString(s) => format!("ConstStr {:?} at {:p}", s, self),
-            OwnedObjectItem::MutableString(s) => format!("MutStr \"{:?}\" at {:p}", s, self),
             OwnedObjectItem::Vector(v) => format!("{:?}", v),
             OwnedObjectItem::Map(m) => {
                 format!("Map {:?} at {:p}", m, self)
@@ -630,6 +630,10 @@ impl Debug for OwnedObject {
                     instance.descriptor, instance.fields
                 )
             }
+
+            OwnedObjectItem::BuiltinMethod(b) => {
+                format!("builtin method #{} over {:?}", b.method_id, b.self_object)
+            }
         };
 
         write!(f, "object [{}], RC={}", content, self.marker.counter())
@@ -640,7 +644,6 @@ impl Display for OwnedObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.item {
             OwnedObjectItem::ConstantString(ptr) => write!(f, "{}", ptr),
-            OwnedObjectItem::MutableString(ptr) => write!(f, "{}", ptr),
             OwnedObjectItem::Vector(ptr) => write!(f, "Vector {:?}", ptr),
             OwnedObjectItem::Map(ptr) => write!(f, "Map {:?}", ptr),
             OwnedObjectItem::Box(ptr) => write!(f, "box[{}]", ptr.0),
@@ -676,6 +679,14 @@ impl Display for OwnedObject {
                         .map(|(k, v)| { format!("{}={}", k, v) })
                         .collect::<Vec<_>>()
                         .join(", ")
+                )
+            }
+
+            OwnedObjectItem::BuiltinMethod(m) => {
+                write!(
+                    f,
+                    "builtin method #{} over class #{}",
+                    m.method_id, m.class_id
                 )
             }
         }
