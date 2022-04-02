@@ -120,13 +120,15 @@ impl Display for Chunk {
         )?;
         writeln!(
             f,
-            "constants: {}",
+            "constants:\n{}",
             self.constants
                 .iter()
-                .map(|v| { format!("{}", v) })
+                .enumerate()
+                .map(|(i, v)| { format!("  {i}: {v:?}") })
                 .collect::<Vec<String>>()
-                .join(", ")
+                .join("\n")
         )?;
+        writeln!(f, "code:")?;
         let strings = chunk_pretty_printer::draw_chunk(self);
         for s in &strings {
             writeln!(f, "{}", s)?

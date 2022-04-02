@@ -719,7 +719,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 }
             }
             Expr::ConstString(s) => {
-                let obj_ptr = self.gc.new_const_string(s.get_string().unwrap());
+                let obj_ptr = self.gc.new_interned_string(s.get_string().unwrap());
                 let constant_index = self.get_or_create_constant(obj_ptr);
                 result.push(Opcode::LoadConst(constant_index as u16), s.position.0);
                 if !self.needs_value() {
