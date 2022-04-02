@@ -5,8 +5,11 @@ use crate::execution::builtins::builtin_factory;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::VM;
 use crate::parsing::ast::Expr;
+use execution::chunk::Opcode;
+use execution::vm::InterpretError;
 use peg::error::ParseError;
 use std::env;
+use std::fmt::Write;
 use std::io::{stdin, BufRead};
 #[cfg(feature = "bench")]
 use std::time::Instant;
@@ -102,15 +105,8 @@ fn main() {
 
     let _ = vm
         .run(entry_point)
-        .map_err(|error| {
-            println!(
-                "error {:?} at instruction {}\nat line {}",
-                error,
-                error.chunk.unwrap_function().unwrap().code[error.opcode_index],
-                error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index],
-            );
-        })
-        .unwrap(); /**/
+        .map_err(|error| eprintln!("\n{}", display_error(file_content.as_str(), error)))
+        .unwrap();
     #[cfg(feature = "bench")]
     {
         let end_time = Instant::now();
@@ -122,6 +118,23 @@ fn normalize_string(s: String) -> String {
     s.lines().collect::<Vec<_>>().join("\n")
 }
 
+fn display_error(source: &str, error: InterpretError) -> String {
+    let mut result = String::new();
+    writeln!(result, "error: {:?}", error.kind).unwrap();
+    let instruction: Opcode = error.chunk.unwrap_function().unwrap().code[error.opcode_index];
+    writeln!(result, "    at {}", instruction).unwrap();
+    let line_idx = error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index];
+    writeln!(
+        result,
+        "    at line {}: `{}`",
+        line_idx,
+        source.lines().nth(line_idx - 1).unwrap()
+    )
+    .unwrap();
+
+    result
+}
+
 pub fn run_file(filename: &str) -> Result<(), String> {
     let mut gc = unsafe { GC::default_gc() };
 
@@ -130,12 +143,7 @@ pub fn run_file(filename: &str) -> Result<(), String> {
 
     let mut vm = VM::new(&mut gc, &builtins);
     vm.run(entry_point).map_err(|error| {
-        format!(
-            "error {:?} at instruction {}\nat line {}",
-            error,
-            error.chunk.unwrap_function().unwrap().code[error.opcode_index],
-            error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index],
-        )
+        display_error(std::fs::read_to_string(filename).unwrap().as_str(), error)
     })?;
     Ok(())
 }
