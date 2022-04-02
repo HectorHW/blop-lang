@@ -16,7 +16,7 @@ pub struct VM<'gc, 'builtins> {
     locals_offset: usize,
     stack_max_size: usize,
     pub gc: &'gc mut GC,
-    builtins: &'builtins BuiltinMap,
+    pub(crate) builtins: &'builtins BuiltinMap,
 }
 
 pub struct CallStackValue {
@@ -688,6 +688,32 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         InstructionExecution::NextInstruction
                     }
 
+                    obj @ Value::HeapObject(..) if obj.unwrap_builtin_method().is_some() => {
+                        let final_length = self.stack.len().saturating_sub(arity);
+                        let args = self.stack.split_off(final_length);
+
+                        let bound_method = self.stack.pop().unwrap();
+
+                        let bound_method = bound_method.unwrap_builtin_method().unwrap();
+
+                        let self_ptr = bound_method.self_object.clone();
+
+                        let builtins = self.builtins;
+
+                        let result = builtins.apply_method(
+                            bound_method.class_id,
+                            bound_method.method_id,
+                            self_ptr,
+                            args,
+                            self,
+                        );
+                        let result = result.map_err(|e| {
+                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                        })?;
+                        self.stack.push(result);
+                        InstructionExecution::NextInstruction
+                    }
+
                     obj @ Value::HeapObject(..) if obj.unwrap_struct_descriptor().is_some() => {
                         let final_length = self.stack.len().saturating_sub(arity);
                         let args = self.stack.split_off(final_length);
@@ -946,6 +972,16 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let pretty_name = self.builtins.get_builtin_name(idx).unwrap();
                 println!("{}", pretty_name);
             }
+
+            b if b.unwrap_builtin_method().is_some() => {
+                let method = b.unwrap_builtin_method().unwrap();
+                let pretty_name = self
+                    .builtins
+                    .get_method_name(method.class_id, method.method_id)
+                    .unwrap();
+                println!("{}", pretty_name)
+            }
+
             other => println!("{}", other),
         }
     }
