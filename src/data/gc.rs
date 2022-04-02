@@ -3,8 +3,9 @@
 use super::objects::{
     OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance, VMap, VVec,
 };
+use super::short_string::ShortString;
 use crate::data::marked_counter::UNMARKED_ONE;
-use crate::data::objects::{Closure, Partial, Value, ValueBox};
+use crate::data::objects::{Closure, Partial, Value, ValueBox, SHORT_STRING_BUF_SIZE};
 use crate::execution::arity::Arity;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::CallStackValue;
@@ -35,6 +36,7 @@ impl Clone for StackObject {
     fn clone(&self) -> Self {
         match self {
             StackObject::Int(i) => StackObject::Int(*i),
+            &StackObject::ShortString(s) => StackObject::ShortString(s),
             StackObject::HeapObject(ptr) => {
                 ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::HeapObject(*ptr)
@@ -57,6 +59,7 @@ impl Drop for StackObject {
     fn drop(&mut self) {
         match self {
             StackObject::Int(_) => {}
+            StackObject::ShortString(..) => {}
 
             StackObject::HeapObject(ptr) => {
                 ptr.unwrap_ref_mut().dec_gc_counter();
@@ -565,6 +568,7 @@ impl GC {
         //copies underlying object
         match obj {
             StackObject::Int(i) => StackObject::Int(*i), //no cloning necessary
+            s @ StackObject::ShortString(..) => s.clone(),
 
             h @ StackObject::HeapObject(ptr) => {
                 if matches!(ptr.unwrap_ref().item, OwnedObjectItem::ConstantString(..)) {
@@ -589,10 +593,18 @@ impl GC {
     }
 
     pub fn new_string(&mut self, s: &str) -> StackObject {
+        if let Some(ss) = ShortString::<8>::try_new(s) {
+            return StackObject::ShortString(ss);
+        }
+
         self.store(s.to_string())
     }
 
-    pub fn new_const_string(&mut self, s: &str) -> StackObject {
+    pub fn new_interned_string(&mut self, s: &str) -> StackObject {
+        if let Some(ss) = ShortString::<8>::try_new(s) {
+            return StackObject::ShortString(ss);
+        }
+
         for item in &mut self.young_objects {
             match &item.item {
                 OwnedObjectItem::ConstantString(obj) if obj.as_str() == s => {
@@ -662,6 +674,13 @@ impl GC {
                 "second argument of string concatenation is not string-like (got {})",
                 s2.type_string()
             ));
+        }
+
+        if let Some(ss) = ShortString::<SHORT_STRING_BUF_SIZE>::try_concat(
+            s1.unwrap_any_str().unwrap(),
+            s2.unwrap_any_str().unwrap(),
+        ) {
+            return Ok(StackObject::ShortString(ss));
         }
 
         #[cfg(feature = "debug-gc")]

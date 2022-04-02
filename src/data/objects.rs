@@ -10,13 +10,18 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
+use super::short_string::ShortString;
+
 pub type Value = StackObject;
+
+pub const SHORT_STRING_BUF_SIZE: usize = 8;
 
 pub enum StackObject {
     Int(i64),
     Blank,
     Builtin(usize),
     BuiltinMethod { class_idx: u32, method_idx: u32 },
+    ShortString(ShortString<SHORT_STRING_BUF_SIZE>),
     HeapObject(PrivatePtr<OwnedObject>),
 }
 
@@ -307,6 +312,9 @@ impl Display for StackObject {
             StackObject::Blank => {
                 write!(f, "Blank")
             }
+            StackObject::ShortString(s) => {
+                write!(f, "{}", s.as_str())
+            }
             s @ StackObject::BuiltinMethod { .. } => write!(f, "{:?}", s),
         }
     }
@@ -328,6 +336,7 @@ impl Debug for StackObject {
             StackObject::Blank => {
                 write!(f, "Blank")
             }
+            Self::ShortString(s) => write!(f, "{:?}", s),
         }
     }
 }
@@ -342,6 +351,7 @@ impl StackObject {
         use StackObject::*;
         match self {
             Int(..) => true,
+            ShortString(..) => true,
             Builtin(..) | Blank | BuiltinMethod { .. } => false,
             HeapObject(ptr) => ptr.unwrap_ref().can_hash(),
         }
@@ -440,8 +450,12 @@ impl StackObject {
     }
 
     pub fn unwrap_any_str(&self) -> Option<&str> {
-        match self.as_heap_object() {
-            Some(OwnedObjectItem::ConstantString(s)) => Some(s.as_str()),
+        match self {
+            StackObject::ShortString(s) => Some(s.as_str()),
+            h if h.as_heap_object().is_some() => match self.as_heap_object() {
+                Some(OwnedObjectItem::ConstantString(s)) => Some(s.as_str()),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -449,6 +463,7 @@ impl StackObject {
     pub fn get_arity(&self, context: &mut VM) -> Option<Arity> {
         match self {
             StackObject::Int(_) => None,
+            StackObject::ShortString(..) => None,
             StackObject::Blank => None,
             &StackObject::Builtin(idx) => context.builtins.get_builtin_arity(idx),
             &Self::BuiltinMethod {
@@ -520,6 +535,7 @@ impl StackObject {
     pub fn type_string(&self) -> &'static str {
         match self {
             StackObject::Int(_) => "Int",
+            StackObject::ShortString(..) => "String",
             StackObject::Builtin(_) => "Builtin",
             Self::BuiltinMethod { .. } => "BuiltinMethod",
             StackObject::Blank => "Blank",
@@ -579,6 +595,7 @@ impl Hash for StackObject {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             StackObject::Int(i) => i.hash(state),
+            StackObject::ShortString(s) => s.as_str().hash(state),
             StackObject::HeapObject(ptr) => ptr.unwrap_ref().hash(state),
             other => panic!("cannot hash {:?}", other),
         }

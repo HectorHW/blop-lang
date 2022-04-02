@@ -1,5 +1,16 @@
 var s1 = "abcd" # creation of strings
-var s2 = "efg" # constant strings are internalized, s1 and s2 point to same object
+
+# we apply short string optimization: 
+# instead of storing string on the heap, we store small strings inside stack object
+
+print "small" # 5 bytes
+
+print "heap allocated string"
+
+
+#strings are interned at compile time, these two will point on the same object
+s1 = "efg"
+var s2 = "efg"
 print s1
 
 var s3 = s1 + " " + s2 # can concatenate strings
