@@ -1,4 +1,7 @@
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    ops::{Add, Sub},
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Arity {
@@ -41,5 +44,27 @@ impl Display for Arity {
                 Arity::AtLeast(args) => format!("at least {args} args"),
             }
         )
+    }
+}
+
+impl Add<usize> for Arity {
+    type Output = Arity;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        match self {
+            Arity::Exact(i) => Arity::Exact(i + rhs),
+            Arity::AtLeast(i) => Arity::AtLeast(i + rhs),
+        }
+    }
+}
+
+impl Sub<usize> for Arity {
+    type Output = Arity;
+
+    fn sub(self, rhs: usize) -> Self::Output {
+        match self {
+            Arity::Exact(i) => Arity::Exact(i - rhs),
+            Arity::AtLeast(i) => Arity::AtLeast(i - rhs),
+        }
     }
 }

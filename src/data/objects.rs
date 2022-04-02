@@ -16,6 +16,7 @@ pub enum StackObject {
     Int(i64),
     Blank,
     Builtin(usize),
+    BuiltinMethod { class_idx: u32, method_idx: u32 },
     HeapObject(PrivatePtr<OwnedObject>),
 }
 
@@ -218,13 +219,6 @@ impl StructInstance {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BuiltinMethod {
-    pub(crate) self_object: Value,
-    pub(crate) class_id: usize,
-    pub(crate) method_id: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnedObjectItem {
     ConstantString(String),
     Vector(VVec),
@@ -235,7 +229,6 @@ pub enum OwnedObjectItem {
     Partial(Partial),
     StructDescriptor(StructDescriptor),
     StructInstance(StructInstance),
-    BuiltinMethod(BuiltinMethod),
 }
 
 pub type VVec = Vec<StackObject>;
@@ -314,6 +307,7 @@ impl Display for StackObject {
             StackObject::Blank => {
                 write!(f, "Blank")
             }
+            s @ StackObject::BuiltinMethod { .. } => write!(f, "{:?}", s),
         }
     }
 }
@@ -327,6 +321,10 @@ impl Debug for StackObject {
             }
 
             StackObject::Builtin(name) => write!(f, "Builtin[{}]", name),
+            StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => write!(f, "BuiltinMethod[{},{}]", class_idx, method_idx),
             StackObject::Blank => {
                 write!(f, "Blank")
             }
@@ -344,7 +342,7 @@ impl StackObject {
         use StackObject::*;
         match self {
             Int(..) => true,
-            Builtin(..) | Blank => false,
+            Builtin(..) | Blank | BuiltinMethod { .. } => false,
             HeapObject(ptr) => ptr.unwrap_ref().can_hash(),
         }
     }
@@ -441,13 +439,6 @@ impl StackObject {
         }
     }
 
-    pub fn unwrap_builtin_method(&self) -> Option<&BuiltinMethod> {
-        match self.as_heap_object() {
-            Some(OwnedObjectItem::BuiltinMethod(m)) => Some(m),
-            _ => None,
-        }
-    }
-
     pub fn unwrap_any_str(&self) -> Option<&str> {
         match self.as_heap_object() {
             Some(OwnedObjectItem::ConstantString(s)) => Some(s.as_str()),
@@ -460,6 +451,10 @@ impl StackObject {
             StackObject::Int(_) => None,
             StackObject::Blank => None,
             &StackObject::Builtin(idx) => context.builtins.get_builtin_arity(idx),
+            &Self::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => context.builtins.get_method_arity(class_idx, method_idx),
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
                 OwnedObjectItem::ConstantString(_) => None,
                 OwnedObjectItem::Vector(_) => None,
@@ -470,9 +465,6 @@ impl StackObject {
                 OwnedObjectItem::Partial(p) => Some(p.get_arity()),
                 OwnedObjectItem::StructDescriptor(s) => Some(Arity::Exact(s.fields.len())),
                 OwnedObjectItem::StructInstance(_) => None,
-                OwnedObjectItem::BuiltinMethod(m) => {
-                    context.builtins.get_method_arity(m.class_id, m.method_id)
-                }
             },
         }
     }
@@ -484,17 +476,30 @@ impl StackObject {
                 OwnedObjectItem::StructDescriptor(_) => None,
                 OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context),
 
-                _ => {
-                    let builtins = context.builtins;
-                    builtins.bind_method(self.clone(), field_name, context)
-                }
+                _ => Self::bind_builtin_method(self.clone(), field_name, context),
             },
 
-            _ => {
-                let builtins = context.builtins;
-                builtins.bind_method(self.clone(), field_name, context)
-            }
+            _ => Self::bind_builtin_method(self.clone(), field_name, context),
         }
+    }
+
+    fn bind_builtin_method(object: Value, method_name: &str, context: &mut VM) -> Option<Value> {
+        let method = context
+            .builtins
+            .get_method(object.type_string(), method_name)?;
+
+        let arity = match method {
+            StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => context.builtins.get_method_arity(class_idx, method_idx),
+            _ => unreachable!(),
+        }?;
+
+        let blanks = vec![StackObject::Blank; arity.into()];
+
+        let partial = Partial::new(method, arity, blanks).add_bound_value(object);
+        Some(context.gc.store(partial))
     }
 
     pub fn set_field(&self, field_name: &str, value: Value, _context: &mut VM) -> Result<(), ()> {
@@ -516,6 +521,7 @@ impl StackObject {
         match self {
             StackObject::Int(_) => "Int",
             StackObject::Builtin(_) => "Builtin",
+            Self::BuiltinMethod { .. } => "BuiltinMethod",
             StackObject::Blank => "Blank",
             StackObject::HeapObject(ptr) => ptr.unwrap_ref().type_string(),
         }
@@ -610,7 +616,6 @@ impl OwnedObject {
             OwnedObjectItem::Function(..) => "Function",
             OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor",
             OwnedObjectItem::StructInstance(..) => "Struct",
-            OwnedObjectItem::BuiltinMethod(..) => "BuiltinMethod",
         }
     }
 }
@@ -673,10 +678,6 @@ impl Debug for OwnedObject {
                     instance.descriptor, instance.fields
                 )
             }
-
-            OwnedObjectItem::BuiltinMethod(b) => {
-                format!("builtin method #{} over {:?}", b.method_id, b.self_object)
-            }
         };
 
         write!(f, "object [{}], RC={}", content, self.marker.counter())
@@ -722,14 +723,6 @@ impl Display for OwnedObject {
                         .map(|(k, v)| { format!("{}={}", k, v) })
                         .collect::<Vec<_>>()
                         .join(", ")
-                )
-            }
-
-            OwnedObjectItem::BuiltinMethod(m) => {
-                write!(
-                    f,
-                    "builtin method #{} over class #{}",
-                    m.method_id, m.class_id
                 )
             }
         }

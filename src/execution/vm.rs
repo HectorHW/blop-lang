@@ -721,30 +721,29 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         InstructionExecution::NextInstruction
                     }
 
-                    obj @ Value::HeapObject(..) if obj.unwrap_builtin_method().is_some() => {
+                    &Value::BuiltinMethod {
+                        class_idx,
+                        method_idx,
+                    } => {
                         let final_length = self.stack.len().saturating_sub(arity);
                         let args = self.stack.split_off(final_length);
 
-                        let bound_method = self.stack.pop().unwrap();
+                        let mut all_args = args;
+                        let args = all_args.split_off(1);
 
-                        let bound_method = bound_method.unwrap_builtin_method().unwrap();
-
-                        let self_ptr = bound_method.self_object.clone();
+                        let self_ptr = all_args.pop().unwrap();
 
                         let builtins = self.builtins;
 
-                        let result = builtins.apply_method(
-                            bound_method.class_id,
-                            bound_method.method_id,
-                            self_ptr,
-                            args,
-                            self,
-                        );
+                        let result =
+                            builtins.apply_method(class_idx, method_idx, self_ptr, args, self);
+
                         let result = result.map_err(|e| {
                             runtime_error!(InterpretErrorKind::NativeError {
                                 message: e.to_string()
                             })
                         })?;
+
                         self.stack.push(result);
                         InstructionExecution::NextInstruction
                     }
@@ -1011,11 +1010,12 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
     }
 
     fn is_callable(value: &StackObject) -> bool {
-        matches!(value, StackObject::Builtin(_))
-            || value.unwrap_closure().is_some()
+        matches!(
+            value,
+            StackObject::Builtin(_) | StackObject::BuiltinMethod { .. }
+        ) || value.unwrap_closure().is_some()
             || value.unwrap_partial().is_some()
             || value.unwrap_function().is_some()
-            || value.unwrap_builtin_method().is_some()
     }
 
     fn get_chunk(value: StackObject) -> Option<StackObject> {
@@ -1038,11 +1038,13 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 println!("{}", pretty_name);
             }
 
-            b if b.unwrap_builtin_method().is_some() => {
-                let method = b.unwrap_builtin_method().unwrap();
+            StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => {
                 let pretty_name = self
                     .builtins
-                    .get_method_name(method.class_id, method.method_id)
+                    .get_method_name(class_idx, method_idx)
                     .unwrap();
                 println!("{}", pretty_name)
             }

@@ -11,8 +11,6 @@ type BuiltinFuction = fn(Vec<Value>, &mut VM) -> Result;
 
 type BuiltinMethod = fn(Value, Vec<Value>, &mut VM) -> Result;
 
-use crate::data::objects::BuiltinMethod as MethodInstance;
-
 #[derive(Default)]
 pub struct BuiltinMap {
     functions: IndexMap<String, (Arity, BuiltinFuction)>,
@@ -79,16 +77,16 @@ impl BuiltinMap {
         }
     }
 
-    pub fn get_method(
+    pub fn get_method_full(
         &self,
-        class_idx: usize,
-        method_idx: usize,
+        class_idx: u32,
+        method_idx: u32,
     ) -> Option<(&'_ str, &'_ str, Arity, &'_ BuiltinMethod)> {
         self.methods
-            .get_index(class_idx)
+            .get_index(class_idx as usize)
             .and_then(|(class_name, method_map)| {
                 method_map
-                    .get_index(method_idx)
+                    .get_index(method_idx as usize)
                     .map(|(method_name, method)| {
                         (
                             class_name.as_str(),
@@ -102,15 +100,15 @@ impl BuiltinMap {
 
     pub fn apply_method(
         &self,
-        class_idx: usize,
-        method_idx: usize,
+        class_idx: u32,
+        method_idx: u32,
         self_ref: Value,
         args: VVec,
         vm: &mut VM,
     ) -> Result {
-        match self.get_method(class_idx, method_idx) {
+        match self.get_method_full(class_idx, method_idx) {
             Some((_, _, arity, method)) => {
-                check_arity(arity, args.len())?;
+                check_arity(arity - 1, args.len())?;
                 method(self_ref, args, vm)
             }
 
@@ -128,18 +126,15 @@ impl BuiltinMap {
             .map(|(idx, _, _)| Value::Builtin(idx))
     }
 
-    pub fn bind_method(&self, object: Value, method_name: &str, context: &mut VM) -> Option<Value> {
+    pub fn get_method(&self, class_name: &str, method_name: &str) -> Option<Value> {
         self.methods
-            .get_full(object.type_string())
+            .get_full(class_name)
             .and_then(|(class_idx, _, class_methods)| {
                 class_methods
                     .get_full(method_name)
-                    .map(|(method_idx, _, _)| {
-                        context.gc.store(MethodInstance {
-                            self_object: object,
-                            class_id: class_idx,
-                            method_id: method_idx,
-                        })
+                    .map(|(method_idx, _, _)| Value::BuiltinMethod {
+                        class_idx: class_idx as u32,
+                        method_idx: method_idx as u32,
                     })
             })
     }
@@ -148,8 +143,8 @@ impl BuiltinMap {
         self.functions.get_index(idx).map(|(k, _v)| k.as_str())
     }
 
-    pub fn get_method_name(&self, class_idx: usize, method_idx: usize) -> Option<String> {
-        self.get_method(class_idx, method_idx)
+    pub fn get_method_name(&self, class_idx: u32, method_idx: u32) -> Option<String> {
+        self.get_method_full(class_idx, method_idx)
             .map(|(class_name, method_name, ..)| format!("{}.{}", class_name, method_name))
     }
 
@@ -157,8 +152,8 @@ impl BuiltinMap {
         self.functions.get_index(idx).map(|(_k, v)| v.0)
     }
 
-    pub fn get_method_arity(&self, class_idx: usize, method_idx: usize) -> Option<Arity> {
-        self.get_method(class_idx, method_idx)
+    pub fn get_method_arity(&self, class_idx: u32, method_idx: u32) -> Option<Arity> {
+        self.get_method_full(class_idx, method_idx)
             .map(|(_, _, arity, _)| arity)
     }
 }
@@ -189,7 +184,7 @@ pub fn builtin_factory() -> BuiltinMap {
         ($classname:expr, $($method_name:expr => $arity:expr => $function: expr);* $(;)? ) => {
             {
                 $(
-                    map.add_method($classname, $method_name, $arity, $function);
+                    map.add_method($classname, $method_name, $arity + 1, $function);
                 )*
             }
         }
