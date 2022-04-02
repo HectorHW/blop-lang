@@ -6,6 +6,7 @@ use super::objects::{
 };
 use crate::data::marked_counter::UNMARKED_ONE;
 use crate::data::objects::{Closure, Partial, Value, ValueBox};
+use crate::execution::arity::Arity;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::CallStackValue;
 use std::pin::Pin;
@@ -650,8 +651,13 @@ impl GC {
         self.store(s.to_string())
     }
 
-    pub(crate) fn new_partial(&mut self, target: Value, args: Vec<Value>) -> StackObject {
-        self.store(Partial::new(target, args))
+    pub(crate) fn new_partial(
+        &mut self,
+        target: Value,
+        arity: Arity,
+        args: Vec<Value>,
+    ) -> StackObject {
+        self.store(Partial::new(target, arity, args))
     }
 
     pub fn try_inplace_string_concat(

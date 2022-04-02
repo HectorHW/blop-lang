@@ -42,25 +42,57 @@ pub struct Closure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Partial {
     pub target: Value,
+    pub arity: Arity,
     pub args: Vec<Value>,
 }
 
 impl Partial {
-    pub fn new(target: Value, args: Vec<Value>) -> Self {
-        Partial { target, args }
+    pub fn new(target: Value, target_arity: Arity, args: Vec<Value>) -> Self {
+        let blanks = Self::count_blanks(&args);
+
+        let my_arity = match target_arity {
+            Arity::Exact(_) => Arity::Exact(blanks),
+            Arity::AtLeast(_) => Arity::AtLeast(blanks),
+        };
+
+        Partial {
+            target,
+            arity: my_arity,
+            args,
+        }
     }
 
-    pub fn count_blanks(&self) -> usize {
-        self.args
-            .iter()
+    pub fn count_blanks(args: &[Value]) -> usize {
+        args.iter()
             .filter(|value| matches!(value, StackObject::Blank))
             .count()
     }
 
-    pub fn substitute(&self, values: VVec) -> Self {
-        let mut subs = values.into_iter();
+    fn add_bound_value(&self, value: Value) -> Self {
+        let mut args = self.args.clone();
 
-        let args = self
+        args[0] = value;
+        let blanks = Self::count_blanks(&args);
+
+        let arity = match self.arity {
+            Arity::Exact(_) => Arity::Exact(blanks),
+            Arity::AtLeast(_) => Arity::AtLeast(blanks),
+        };
+
+        Partial {
+            target: self.target.clone(),
+            arity,
+            args,
+        }
+    }
+
+    pub fn substitute(&self, mut values: VVec) -> Self {
+        let mut tail = values.split_off(self.arity.into());
+        let head = values;
+
+        let mut subs = head.into_iter();
+
+        let mut args: VVec = self
             .args
             .iter()
             .map(|value| match value {
@@ -75,14 +107,24 @@ impl Partial {
             })
             .collect();
 
+        args.append(&mut tail);
+
+        let blanks = Self::count_blanks(&args);
+
+        let arity = match self.arity {
+            Arity::Exact(_) => Arity::Exact(blanks),
+            Arity::AtLeast(_) => Arity::AtLeast(blanks),
+        };
+
         Partial {
             target: self.target.clone(),
+            arity,
             args,
         }
     }
 
     pub fn get_arity(&self) -> Arity {
-        Arity::Exact(self.count_blanks())
+        self.arity
     }
 }
 
@@ -141,17 +183,16 @@ impl StructInstance {
             .unwrap()
             .get_method(method_name)
             .and_then(|raw_method| {
-                let blanks = match raw_method.get_arity(context) {
-                    Some(arity) => {
-                        vec![StackObject::Blank; arity.into()]
-                    }
+                let (blanks, arity) = match raw_method.get_arity(context) {
+                    Some(arity) => (vec![StackObject::Blank; arity.into()], arity),
 
                     None => {
                         return None;
                     }
                 };
 
-                let partial = Partial::new(raw_method, blanks).substitute(vec![self_ptr.clone()]);
+                let partial =
+                    Partial::new(raw_method, arity, blanks).add_bound_value(self_ptr.clone());
 
                 Some(context.gc.store(partial))
             })

@@ -33,6 +33,11 @@ assert arity(double) == 2
 assert arity(double(_, _)) == 2
 assert not is_vararg(double(_, _))
 
+var partial_vararg = sum(_, _, _)
+assert is_vararg(partial_vararg)
+assert arity(partial_vararg) == 3
+assert partial_vararg(1, 2, 3, 4) == 10
+
 # functions can be declared as vararg using *arg syntax
 def F(a, b, c, *other) = 
     a+b+c
@@ -45,3 +50,14 @@ def G(a, *args) =
     args
 
 assert G(1, 2, 3) == list(2, 3)
+
+struct S
+
+impl S:
+    def accepting_args(self, a, *args) =
+        assert a == 1
+        assert args == list(2, 3)
+
+var s = S()
+
+s.accepting_args(1, 2, 3)

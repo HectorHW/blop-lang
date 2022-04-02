@@ -645,11 +645,16 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     let target = checked_stack_pop!()?;
 
                     //check that all blanks are filled for fully defined call
-                    if args.len() != target.unwrap_partial().unwrap().count_blanks() {
+                    if !target
+                        .unwrap_partial()
+                        .unwrap()
+                        .get_arity()
+                        .accepts(args.len())
+                    {
                         return Err(runtime_error!(TypeError {
                             message: format!(
-                                "expected {} args when calling partial but got {}",
-                                target.unwrap_partial().unwrap().count_blanks(),
+                                "expected {} when calling partial but got {}",
+                                target.unwrap_partial().unwrap().get_arity(),
                                 args.len()
                             )
                         }));
@@ -811,11 +816,19 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     }));
                 }
 
+                let target_arity = target.get_arity(self).unwrap();
+
+                if !target_arity.accepts(arity as usize) {
+                    return Err(runtime_error!(TypeError {
+                        message: format!("expected {} but got {} args", target_arity, arity)
+                    }));
+                }
+
                 let value = if let Some(partial) = target.unwrap_partial() {
                     let subs_partial = partial.substitute(args);
                     self.gc.store(subs_partial)
                 } else {
-                    self.gc.new_partial(target, args)
+                    self.gc.new_partial(target, target_arity, args)
                 };
 
                 self.stack.push(value);

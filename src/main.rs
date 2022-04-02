@@ -122,7 +122,12 @@ fn display_error(source: &str, error: InterpretError) -> String {
     let mut result = String::new();
     writeln!(result, "error: {:?}", error.kind).unwrap();
     let instruction: Opcode = error.chunk.unwrap_function().unwrap().code[error.opcode_index];
-    writeln!(result, "    at {}", instruction).unwrap();
+    writeln!(
+        result,
+        "    at instruction #{} {}",
+        error.opcode_index, instruction
+    )
+    .unwrap();
     let line_idx = error.chunk.unwrap_function().unwrap().opcode_to_line[error.opcode_index];
     writeln!(
         result,
