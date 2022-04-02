@@ -32,4 +32,16 @@ assert arity(double) == 2
 # partials should inherit arity of underlying callable minus passed values
 assert arity(double(_, _)) == 2
 assert not is_vararg(double(_, _))
-assert is_vararg(sum(_, _, _))
+
+# functions can be declared as vararg using *arg syntax
+def F(a, b, c, *other) = 
+    a+b+c
+
+assert F(1, 2, 3) == 6
+assert F(1, 2, 3, 4) == 6
+assert F(1, 2, 3, 4, 5, 6, 7) == 6
+
+def G(a, *args) =
+    args
+
+assert G(1, 2, 3) == list(2, 3)

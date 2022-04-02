@@ -944,6 +944,20 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 self.stack.push(StackObject::Blank);
                 InstructionExecution::NextInstruction
             }
+
+            Opcode::MakeList(size) => {
+                let size = size as usize;
+                self.check_underflow(size + 1)
+                    .map_err(|_e| runtime_error!(StackUnderflow))?;
+
+                let new_length = self.stack.len().saturating_sub(size);
+
+                let items = self.stack.split_off(new_length);
+
+                self.stack.push(self.gc.store(items));
+
+                InstructionExecution::NextInstruction
+            }
         };
         Ok(jump)
     }

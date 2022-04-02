@@ -69,6 +69,8 @@ pub enum Opcode {
     Pop(u16),
 
     Call(u16),
+
+    MakeList(u16),
     Return,
 
     Nop,
