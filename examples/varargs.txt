@@ -1,0 +1,63 @@
+# some functions accept variable number of arguments
+assert is_vararg(sum)
+assert not is_vararg(int)
+
+# when calling, varargs are placed in a list which is passed as additional argument
+assert sum(1, 2, 3, 4, 5) == 15
+
+# because of that, implementing list building function is trivial
+print list(1, 2, 3)
+#  (works under the hood like so: list(*a) = a)
+
+# argument count is checked, mismatch when calling will result in error
+def none = 0
+def single(x) = x
+def double(x, y) = x+y
+
+
+#will fail
+# none(1)
+# single(1, 2)
+
+# double(1)
+# double(1, 2, 3)
+
+assert not is_vararg(none)
+assert not is_vararg(single)
+
+assert arity(none) == 0
+assert arity(single) == 1
+assert arity(double) == 2
+
+# partials should inherit arity of underlying callable minus passed values
+assert arity(double(_, _)) == 2
+assert not is_vararg(double(_, _))
+
+var partial_vararg = sum(_, _, _)
+assert is_vararg(partial_vararg)
+assert arity(partial_vararg) == 3
+assert partial_vararg(1, 2, 3, 4) == 10
+
+# functions can be declared as vararg using *arg syntax
+def F(a, b, c, *other) = 
+    a+b+c
+
+assert F(1, 2, 3) == 6
+assert F(1, 2, 3, 4) == 6
+assert F(1, 2, 3, 4, 5, 6, 7) == 6
+
+def G(a, *args) =
+    args
+
+assert G(1, 2, 3) == list(2, 3)
+
+struct S
+
+impl S:
+    def accepting_args(self, a, *args) =
+        assert a == 1
+        assert args == list(2, 3)
+
+var s = S()
+
+s.accepting_args(1, 2, 3)

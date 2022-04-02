@@ -12,9 +12,12 @@ pub(super) trait Visitor<E> {
             Stmt::Expression(e) => self.visit_expr_stmt(e),
             Stmt::Assert(keyword, value) => self.visit_assert_statement(keyword, value),
             Stmt::Pass(keyword) => self.visit_pass_stmt(keyword),
-            Stmt::FunctionDeclaration { name, args, body } => {
-                self.visit_function_declaration_statement(name, args, body)
-            }
+            Stmt::FunctionDeclaration {
+                name,
+                args,
+                vararg,
+                body,
+            } => self.visit_function_declaration_statement(name, args, vararg.as_ref(), body),
             Stmt::StructDeclaration { name, fields } => {
                 self.visit_struct_declaration_statement(name, fields)
             }
@@ -60,13 +63,20 @@ pub(super) trait Visitor<E> {
         &mut self,
         name: &Token,
         args: &[Token],
+        vararg: Option<&Token>,
         body: &Expr,
     ) -> Result<(), E> {
         self.visit_expr(body)
     }
 
-    fn visit_method(&mut self, name: &Token, args: &[Token], body: &Expr) -> Result<(), E> {
-        self.visit_function_declaration_statement(name, args, body)
+    fn visit_method(
+        &mut self,
+        name: &Token,
+        args: &[Token],
+        vararg: Option<&Token>,
+        body: &Expr,
+    ) -> Result<(), E> {
+        self.visit_function_declaration_statement(name, args, vararg, body)
     }
 
     fn visit_struct_declaration_statement(
@@ -105,8 +115,8 @@ pub(super) trait Visitor<E> {
             Expr::SingleStatement(s) => self.visit_single_statement_expr(s),
             Expr::Call(target, args) => self.visit_call_expr(target, args),
             Expr::PartialCall(target, args) => self.visit_partial_call_expr(target, args),
-            Expr::AnonFunction(args, arrow, body) => {
-                self.visit_anon_function_expr(args, arrow, body)
+            Expr::AnonFunction(args, vararg, arrow, body) => {
+                self.visit_anon_function_expr(args, vararg.as_ref(), arrow, body)
             }
             Expr::PropertyAccess(target, prop) => self.visit_property_access(target.as_ref(), prop),
             Expr::PropertyTest(target, prop) => self.visit_property_check(target.as_ref(), prop),
@@ -186,6 +196,7 @@ pub(super) trait Visitor<E> {
     fn visit_anon_function_expr(
         &mut self,
         args: &[Token],
+        vararg: Option<&Token>,
         arrow: &Token,
         body: &Expr,
     ) -> Result<(), E> {

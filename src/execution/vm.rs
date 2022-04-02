@@ -1,9 +1,10 @@
 use crate::data::gc::GC;
-use crate::data::objects::{Closure, StackObject, Value, ValueBox};
+use crate::data::objects::{Closure, StackObject, VVec, Value, ValueBox};
 use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use super::arity::Arity;
 use super::builtins::BuiltinMap;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
@@ -644,11 +645,16 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     let target = checked_stack_pop!()?;
 
                     //check that all blanks are filled for fully defined call
-                    if args.len() != target.unwrap_partial().unwrap().count_blanks() {
+                    if !target
+                        .unwrap_partial()
+                        .unwrap()
+                        .get_arity()
+                        .accepts(args.len())
+                    {
                         return Err(runtime_error!(TypeError {
                             message: format!(
-                                "expected {} args when calling partial but got {}",
-                                target.unwrap_partial().unwrap().count_blanks(),
+                                "expected {} when calling partial but got {}",
+                                target.unwrap_partial().unwrap().get_arity(),
                                 args.len()
                             )
                         }));
@@ -672,6 +678,31 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         .unwrap();
                 }
 
+                let call_arity = object.get_arity(self).ok_or_else(|| {
+                    runtime_error!(TypeError {
+                        message: format!("expected callable but got {}", object.type_string())
+                    })
+                })?;
+
+                if !call_arity.accepts(arity) {
+                    return Err(runtime_error!(InterpretErrorKind::TypeError {
+                        message: format!("expected {call_arity} but got {arity}")
+                    }));
+                }
+
+                if call_arity.is_vararg() {
+                    let final_length = self.stack.len().saturating_sub(arity);
+                    let args = self.stack.split_off(final_length);
+
+                    let mut args = self.wrap_by_arity(args, call_arity).ok_or_else(|| {
+                        runtime_error!(InterpretErrorKind::TypeError {
+                            message: format!("expected {call_arity} but got {arity}")
+                        })
+                    })?;
+                    arity = args.len();
+                    self.stack.append(&mut args);
+                }
+
                 match &object {
                     Value::Builtin(name) => {
                         let final_length = self.stack.len().saturating_sub(arity);
@@ -682,34 +713,37 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
                         let result = builtins.apply_builtin(*name, args, self);
                         let result = result.map_err(|e| {
-                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                            runtime_error!(InterpretErrorKind::NativeError {
+                                message: e.to_string()
+                            })
                         })?;
                         self.stack.push(result);
                         InstructionExecution::NextInstruction
                     }
 
-                    obj @ Value::HeapObject(..) if obj.unwrap_builtin_method().is_some() => {
+                    &Value::BuiltinMethod {
+                        class_idx,
+                        method_idx,
+                    } => {
                         let final_length = self.stack.len().saturating_sub(arity);
                         let args = self.stack.split_off(final_length);
 
-                        let bound_method = self.stack.pop().unwrap();
+                        let mut all_args = args;
+                        let args = all_args.split_off(1);
 
-                        let bound_method = bound_method.unwrap_builtin_method().unwrap();
-
-                        let self_ptr = bound_method.self_object.clone();
+                        let self_ptr = all_args.pop().unwrap();
 
                         let builtins = self.builtins;
 
-                        let result = builtins.apply_method(
-                            bound_method.class_id,
-                            bound_method.method_id,
-                            self_ptr,
-                            args,
-                            self,
-                        );
+                        let result =
+                            builtins.apply_method(class_idx, method_idx, self_ptr, args, self);
+
                         let result = result.map_err(|e| {
-                            runtime_error!(InterpretErrorKind::NativeError { message: e })
+                            runtime_error!(InterpretErrorKind::NativeError {
+                                message: e.to_string()
+                            })
                         })?;
+
                         self.stack.push(result);
                         InstructionExecution::NextInstruction
                     }
@@ -755,17 +789,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
                         self.locals_offset = self.stack.len() - 1 - arity;
 
-                        if arity as usize != new_chunk.unwrap_function().unwrap().arity {
-                            return Err(runtime_error!(TypeError {
-                                message: format!(
-                                    "mismatched arguments: expected {} but got {}",
-                                    new_chunk.unwrap_function().unwrap().arity,
-                                    arity
-                                )
-                            }));
-                        } else {
-                            InstructionExecution::EnterChunk(new_chunk)
-                        }
+                        InstructionExecution::EnterChunk(new_chunk)
                     }
                 }
             }
@@ -791,11 +815,19 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     }));
                 }
 
+                let target_arity = target.get_arity(self).unwrap();
+
+                if !target_arity.accepts(arity as usize) {
+                    return Err(runtime_error!(TypeError {
+                        message: format!("expected {} but got {} args", target_arity, arity)
+                    }));
+                }
+
                 let value = if let Some(partial) = target.unwrap_partial() {
                     let subs_partial = partial.substitute(args);
                     self.gc.store(subs_partial)
                 } else {
-                    self.gc.new_partial(target, args)
+                    self.gc.new_partial(target, target_arity, args)
                 };
 
                 self.stack.push(value);
@@ -924,6 +956,20 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 self.stack.push(StackObject::Blank);
                 InstructionExecution::NextInstruction
             }
+
+            Opcode::MakeList(size) => {
+                let size = size as usize;
+                self.check_underflow(size + 1)
+                    .map_err(|_e| runtime_error!(StackUnderflow))?;
+
+                let new_length = self.stack.len().saturating_sub(size);
+
+                let items = self.stack.split_off(new_length);
+
+                self.stack.push(self.gc.store(items));
+
+                InstructionExecution::NextInstruction
+            }
         };
         Ok(jump)
     }
@@ -946,9 +992,28 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         }
     }
 
+    fn wrap_by_arity(&mut self, mut args: VVec, arity: Arity) -> Option<VVec> {
+        if arity.accepts(args.len()) {
+            match arity {
+                Arity::Exact(_) => Some(args),
+                Arity::AtLeast(expected) => {
+                    let vararg_part = args.split_off(expected);
+
+                    let vararg_ptr = self.gc.store(vararg_part);
+                    args.push(vararg_ptr);
+                    Some(args)
+                }
+            }
+        } else {
+            None
+        }
+    }
+
     fn is_callable(value: &StackObject) -> bool {
-        matches!(value, StackObject::Builtin(_))
-            || value.unwrap_closure().is_some()
+        matches!(
+            value,
+            StackObject::Builtin(_) | StackObject::BuiltinMethod { .. }
+        ) || value.unwrap_closure().is_some()
             || value.unwrap_partial().is_some()
             || value.unwrap_function().is_some()
     }
@@ -973,11 +1038,13 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 println!("{}", pretty_name);
             }
 
-            b if b.unwrap_builtin_method().is_some() => {
-                let method = b.unwrap_builtin_method().unwrap();
+            StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => {
                 let pretty_name = self
                     .builtins
-                    .get_method_name(method.class_id, method.method_id)
+                    .get_method_name(class_idx, method_idx)
                     .unwrap();
                 println!("{}", pretty_name)
             }

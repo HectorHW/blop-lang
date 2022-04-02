@@ -1,4 +1,5 @@
 use crate::data::marked_counter::{MarkedCounter, UNMARKED_ONE};
+use crate::execution::arity::Arity;
 use crate::execution::vm::VM;
 use crate::Chunk;
 use indexmap::IndexMap;
@@ -9,14 +10,13 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
-use super::gc::GC;
-
 pub type Value = StackObject;
 
 pub enum StackObject {
     Int(i64),
     Blank,
     Builtin(usize),
+    BuiltinMethod { class_idx: u32, method_idx: u32 },
     HeapObject(PrivatePtr<OwnedObject>),
 }
 
@@ -43,25 +43,57 @@ pub struct Closure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Partial {
     pub target: Value,
+    pub arity: Arity,
     pub args: Vec<Value>,
 }
 
 impl Partial {
-    pub fn new(target: Value, args: Vec<Value>) -> Self {
-        Partial { target, args }
+    pub fn new(target: Value, target_arity: Arity, args: Vec<Value>) -> Self {
+        let blanks = Self::count_blanks(&args);
+
+        let my_arity = match target_arity {
+            Arity::Exact(_) => Arity::Exact(blanks),
+            Arity::AtLeast(_) => Arity::AtLeast(blanks),
+        };
+
+        Partial {
+            target,
+            arity: my_arity,
+            args,
+        }
     }
 
-    pub fn count_blanks(&self) -> usize {
-        self.args
-            .iter()
+    pub fn count_blanks(args: &[Value]) -> usize {
+        args.iter()
             .filter(|value| matches!(value, StackObject::Blank))
             .count()
     }
 
-    pub fn substitute(&self, values: VVec) -> Self {
-        let mut subs = values.into_iter();
+    fn add_bound_value(&self, value: Value) -> Self {
+        let mut args = self.args.clone();
 
-        let args = self
+        args[0] = value;
+        let blanks = Self::count_blanks(&args);
+
+        let arity = match self.arity {
+            Arity::Exact(_) => Arity::Exact(blanks),
+            Arity::AtLeast(_) => Arity::AtLeast(blanks),
+        };
+
+        Partial {
+            target: self.target.clone(),
+            arity,
+            args,
+        }
+    }
+
+    pub fn substitute(&self, mut values: VVec) -> Self {
+        let mut tail = values.split_off(self.arity.into());
+        let head = values;
+
+        let mut subs = head.into_iter();
+
+        let mut args: VVec = self
             .args
             .iter()
             .map(|value| match value {
@@ -76,10 +108,24 @@ impl Partial {
             })
             .collect();
 
+        args.append(&mut tail);
+
+        let blanks = Self::count_blanks(&args);
+
+        let arity = match self.arity {
+            Arity::Exact(_) => Arity::Exact(blanks),
+            Arity::AtLeast(_) => Arity::AtLeast(blanks),
+        };
+
         Partial {
             target: self.target.clone(),
+            arity,
             args,
         }
+    }
+
+    pub fn get_arity(&self) -> Arity {
+        self.arity
     }
 }
 
@@ -131,24 +177,25 @@ impl StructInstance {
         &self,
         self_ptr: &Value,
         method_name: &str,
-        gc_context: &mut GC,
+        context: &mut VM,
     ) -> Option<Value> {
         self.descriptor
             .unwrap_struct_descriptor()
             .unwrap()
             .get_method(method_name)
             .and_then(|raw_method| {
-                let blanks = match raw_method.get_arity() {
-                    Ok(Some(n)) => vec![StackObject::Blank; n],
-                    Ok(None) => vec![StackObject::Blank],
-                    Err(_) => {
+                let (blanks, arity) = match raw_method.get_arity(context) {
+                    Some(arity) => (vec![StackObject::Blank; arity.into()], arity),
+
+                    None => {
                         return None;
                     }
                 };
 
-                let partial = Partial::new(raw_method, blanks).substitute(vec![self_ptr.clone()]);
+                let partial =
+                    Partial::new(raw_method, arity, blanks).add_bound_value(self_ptr.clone());
 
-                Some(gc_context.store(partial))
+                Some(context.gc.store(partial))
             })
     }
 
@@ -156,13 +203,8 @@ impl StructInstance {
         self.fields.get(field_name).cloned()
     }
 
-    pub fn lookup(
-        &self,
-        self_ptr: &Value,
-        entity_name: &str,
-        gc_context: &mut GC,
-    ) -> Option<Value> {
-        self.get_bound_method(self_ptr, entity_name, gc_context)
+    pub fn lookup(&self, self_ptr: &Value, entity_name: &str, context: &mut VM) -> Option<Value> {
+        self.get_bound_method(self_ptr, entity_name, context)
             .or_else(|| self.get_field(entity_name))
     }
 
@@ -177,13 +219,6 @@ impl StructInstance {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BuiltinMethod {
-    pub(crate) self_object: Value,
-    pub(crate) class_id: usize,
-    pub(crate) method_id: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnedObjectItem {
     ConstantString(String),
     Vector(VVec),
@@ -194,7 +229,6 @@ pub enum OwnedObjectItem {
     Partial(Partial),
     StructDescriptor(StructDescriptor),
     StructInstance(StructInstance),
-    BuiltinMethod(BuiltinMethod),
 }
 
 pub type VVec = Vec<StackObject>;
@@ -273,6 +307,7 @@ impl Display for StackObject {
             StackObject::Blank => {
                 write!(f, "Blank")
             }
+            s @ StackObject::BuiltinMethod { .. } => write!(f, "{:?}", s),
         }
     }
 }
@@ -286,6 +321,10 @@ impl Debug for StackObject {
             }
 
             StackObject::Builtin(name) => write!(f, "Builtin[{}]", name),
+            StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => write!(f, "BuiltinMethod[{},{}]", class_idx, method_idx),
             StackObject::Blank => {
                 write!(f, "Blank")
             }
@@ -303,7 +342,7 @@ impl StackObject {
         use StackObject::*;
         match self {
             Int(..) => true,
-            Builtin(..) | Blank => false,
+            Builtin(..) | Blank | BuiltinMethod { .. } => false,
             HeapObject(ptr) => ptr.unwrap_ref().can_hash(),
         }
     }
@@ -400,13 +439,6 @@ impl StackObject {
         }
     }
 
-    pub fn unwrap_builtin_method(&self) -> Option<&BuiltinMethod> {
-        match self.as_heap_object() {
-            Some(OwnedObjectItem::BuiltinMethod(m)) => Some(m),
-            _ => None,
-        }
-    }
-
     pub fn unwrap_any_str(&self) -> Option<&str> {
         match self.as_heap_object() {
             Some(OwnedObjectItem::ConstantString(s)) => Some(s.as_str()),
@@ -414,22 +446,25 @@ impl StackObject {
         }
     }
 
-    pub fn get_arity(&self) -> Result<Option<usize>, ()> {
+    pub fn get_arity(&self, context: &mut VM) -> Option<Arity> {
         match self {
-            StackObject::Int(_) => Err(()),
-            StackObject::Blank => Err(()),
-            StackObject::Builtin(_) => Ok(None),
+            StackObject::Int(_) => None,
+            StackObject::Blank => None,
+            &StackObject::Builtin(idx) => context.builtins.get_builtin_arity(idx),
+            &Self::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => context.builtins.get_method_arity(class_idx, method_idx),
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
-                OwnedObjectItem::ConstantString(_) => Err(()),
-                OwnedObjectItem::Vector(_) => Err(()),
-                OwnedObjectItem::Map(_) => Err(()),
-                OwnedObjectItem::Box(_) => Err(()),
-                OwnedObjectItem::Closure(c) => c.underlying.get_arity(),
-                OwnedObjectItem::Function(f) => Ok(Some(f.arity)),
-                OwnedObjectItem::Partial(p) => Ok(Some(p.count_blanks())),
-                OwnedObjectItem::StructDescriptor(s) => Ok(Some(s.fields.len())),
-                OwnedObjectItem::StructInstance(_) => Err(()),
-                OwnedObjectItem::BuiltinMethod(_) => Ok(None),
+                OwnedObjectItem::ConstantString(_) => None,
+                OwnedObjectItem::Vector(_) => None,
+                OwnedObjectItem::Map(_) => None,
+                OwnedObjectItem::Box(_) => None,
+                OwnedObjectItem::Closure(c) => c.underlying.get_arity(context),
+                OwnedObjectItem::Function(f) => Some(f.arity),
+                OwnedObjectItem::Partial(p) => Some(p.get_arity()),
+                OwnedObjectItem::StructDescriptor(s) => Some(Arity::Exact(s.fields.len())),
+                OwnedObjectItem::StructInstance(_) => None,
             },
         }
     }
@@ -439,19 +474,32 @@ impl StackObject {
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
                 OwnedObjectItem::Box(_) => None,
                 OwnedObjectItem::StructDescriptor(_) => None,
-                OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context.gc),
+                OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context),
 
-                _ => {
-                    let builtins = context.builtins;
-                    builtins.bind_method(self.clone(), field_name, context)
-                }
+                _ => Self::bind_builtin_method(self.clone(), field_name, context),
             },
 
-            _ => {
-                let builtins = context.builtins;
-                builtins.bind_method(self.clone(), field_name, context)
-            }
+            _ => Self::bind_builtin_method(self.clone(), field_name, context),
         }
+    }
+
+    fn bind_builtin_method(object: Value, method_name: &str, context: &mut VM) -> Option<Value> {
+        let method = context
+            .builtins
+            .get_method(object.type_string(), method_name)?;
+
+        let arity = match method {
+            StackObject::BuiltinMethod {
+                class_idx,
+                method_idx,
+            } => context.builtins.get_method_arity(class_idx, method_idx),
+            _ => unreachable!(),
+        }?;
+
+        let blanks = vec![StackObject::Blank; arity.into()];
+
+        let partial = Partial::new(method, arity, blanks).add_bound_value(object);
+        Some(context.gc.store(partial))
     }
 
     pub fn set_field(&self, field_name: &str, value: Value, _context: &mut VM) -> Result<(), ()> {
@@ -473,6 +521,7 @@ impl StackObject {
         match self {
             StackObject::Int(_) => "Int",
             StackObject::Builtin(_) => "Builtin",
+            Self::BuiltinMethod { .. } => "BuiltinMethod",
             StackObject::Blank => "Blank",
             StackObject::HeapObject(ptr) => ptr.unwrap_ref().type_string(),
         }
@@ -567,7 +616,6 @@ impl OwnedObject {
             OwnedObjectItem::Function(..) => "Function",
             OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor",
             OwnedObjectItem::StructInstance(..) => "Struct",
-            OwnedObjectItem::BuiltinMethod(..) => "BuiltinMethod",
         }
     }
 }
@@ -630,10 +678,6 @@ impl Debug for OwnedObject {
                     instance.descriptor, instance.fields
                 )
             }
-
-            OwnedObjectItem::BuiltinMethod(b) => {
-                format!("builtin method #{} over {:?}", b.method_id, b.self_object)
-            }
         };
 
         write!(f, "object [{}], RC={}", content, self.marker.counter())
@@ -679,14 +723,6 @@ impl Display for OwnedObject {
                         .map(|(k, v)| { format!("{}={}", k, v) })
                         .collect::<Vec<_>>()
                         .join(", ")
-                )
-            }
-
-            OwnedObjectItem::BuiltinMethod(m) => {
-                write!(
-                    f,
-                    "builtin method #{} over class #{}",
-                    m.method_id, m.class_id
                 )
             }
         }
