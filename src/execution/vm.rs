@@ -951,6 +951,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             || value.unwrap_closure().is_some()
             || value.unwrap_partial().is_some()
             || value.unwrap_function().is_some()
+            || value.unwrap_builtin_method().is_some()
     }
 
     fn get_chunk(value: StackObject) -> Option<StackObject> {
