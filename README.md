@@ -49,7 +49,7 @@ def function_accepting_args(*args) =
     print args
 ```
 
-Later, this function may be called like any other function if provided enough arguments (0 in our case):
+Later, this function may be called like any other function if provided enough arguments (at least 0 in our case):
 ```
 function_accepting_args(1, 2, 3)
 # prints "Vector [Int 1, Int 2, Int 3]"
