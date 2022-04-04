@@ -6,4 +6,4 @@ def add(n) =
 var add2 = add(2)
 
 assert add2(3)==5
-print add2(3)
+print(add2(3))

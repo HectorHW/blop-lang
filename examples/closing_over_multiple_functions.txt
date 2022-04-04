@@ -8,4 +8,4 @@ var add2 = add()
 
 
 assert add2(4)==6
-print add2(4)
+print(add2(4))

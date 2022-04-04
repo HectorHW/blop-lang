@@ -18,5 +18,5 @@ def find_munchausen(start, stop) =
             find_munchausen(start+1, stop, total)
     find_munchausen(start, stop, 0)
 var total = find_munchausen(1, 5000)
-print total
+print(total)
 assert total==2

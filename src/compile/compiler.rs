@@ -446,18 +446,6 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
         match stmt {
-            Stmt::Print(t, e) => {
-                self.require_value();
-                let compiled_expression = self.visit_expr(e)?;
-                self.pop_requirement();
-                result.append(compiled_expression);
-                result.push(Opcode::Print, t.position.0);
-
-                if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0), t.position.0);
-                }
-            }
-
             Stmt::VarDeclaration(n, e) => {
                 let mut right_side = AnnotatedCodeBlob::new();
 

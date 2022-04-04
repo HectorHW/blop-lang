@@ -4,4 +4,4 @@ var a =
         )
     b
 assert a==3
-print a
+print(a)

@@ -259,6 +259,20 @@ pub fn builtin_factory() -> BuiltinMap {
         Ok(Value::Int(if v { 1 } else { 0 }))
     });
 
+    builtin!("print", AtLeast(0), |args, vm| {
+        let values: &mut VVec = args[0].unwrap_vector().unwrap();
+
+        let s = values
+            .iter()
+            .map(|value| crate::data::objects::pretty_format(value, vm))
+            .collect::<Vec<String>>()
+            .join(" ");
+
+        println!("{}", s);
+
+        Ok(Value::Int(0))
+    });
+
     methods!("Int",
         "abs" => Exact(0) => |obj, _args, _context| {
             Ok(Value::Int(obj.unwrap_int().unwrap().abs()))

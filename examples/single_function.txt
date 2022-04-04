@@ -2,9 +2,9 @@ var a =
     def a =
         1+1
     a
-print a
-print a()
+print(a)
+print(a())
 
 def add(a, b)=
     a+b
-print add(a(), 4)
+print(add(a(), 4))

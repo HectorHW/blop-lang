@@ -42,7 +42,6 @@ peg::parser! {
             / function_decl_stmt()
             / struct_decl_stmt()
             / implementation_stmt()
-            / print_stmt()
             / assignment_stmt()
             / assert_stmt()
             / pass_stmt()
@@ -113,9 +112,6 @@ peg::parser! {
                 n
             }
             / [t!(Equals)] {(Vec::new(), None)}
-
-        rule print_stmt() -> Stmt =
-            [print_token@t!(Print)] e:expr() {Stmt::Print(print_token, e)}
 
         rule assignment_stmt() -> Stmt =
             target:assignment_target() [t!(Equals)] e:expr() {

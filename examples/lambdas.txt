@@ -1,13 +1,13 @@
 # simple anon functions
 var addition = (a,b) => a+b
 assert addition(1,2)==3
-print addition(1,2)
+print(addition(1,2))
 
 # anon functions may return functions
 var addition_factory = () => (a, b) => a+b
 #parenthesised as () => ( (a, b) => a+b )
 
-print addition_factory()(1, 2)
+print(addition_factory()(1, 2))
 assert addition_factory()(1, 2) == 3
 
 #anon functions may close over variables
@@ -16,9 +16,9 @@ var some_var = 1
 var closed_lambda = () => some_var
 some_var = 2
 assert closed_lambda()==2
-print closed_lambda()
+print(closed_lambda())
 
 #closing works through other functions and arguments
 var nested = (arg1) => () => arg1+some_var
 assert nested(2)() == 4
-print nested(2)()
+print(nested(2)())

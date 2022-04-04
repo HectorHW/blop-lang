@@ -46,7 +46,7 @@ Functions also support partial calls written as `f(_, _, arg2, _)` which returns
 You can define vararg functions using `*args` syntax:
 ```
 def function_accepting_args(*args) = 
-    print args
+    print(args)
 ```
 
 Later, this function may be called like any other function if provided enough arguments (0 in our case):

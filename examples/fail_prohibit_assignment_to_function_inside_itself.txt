@@ -3,4 +3,4 @@ def x =
     x = 2
     abc
 
-print x()
+print(x())

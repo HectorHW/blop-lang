@@ -61,7 +61,6 @@ pub enum TokenKind {
     Name(String),
     ConstString(String),
 
-    Print,
     Assert,
     Var,
     If,
@@ -142,7 +141,6 @@ impl<'input> Lexer<'input> {
         use self::TokenKind::*;
         let keywords = vec![
             ("assert", Assert),
-            ("print", Print),
             ("var", Var),
             ("if", If),
             ("elif", Elif),

@@ -43,8 +43,6 @@ impl Rewriter<String> for ExpressionLifter {
     fn visit_single_statement_expr(&mut self, stmt: Box<Stmt>) -> Result<Expr, String> {
         Ok(match *stmt {
             //singleStatement is artificial node representing block with single statement
-            Stmt::Print(t, p) => Expr::SingleStatement(Box::new(Stmt::Print(t, p))),
-
             Stmt::VarDeclaration(_name, maybe_body) => {
                 /*
                 thing like
