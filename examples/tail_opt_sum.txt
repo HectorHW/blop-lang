@@ -9,5 +9,5 @@ def sum(a, b) =
 set_stack_limit(20)
 
 var result = sum(1, 1000)
-print result
+print(result)
 assert result == 500500

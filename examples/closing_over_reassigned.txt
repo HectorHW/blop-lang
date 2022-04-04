@@ -4,9 +4,9 @@ var a = 2
 
 var value = f()
 assert value == 2
-print value
+print(value)
 
 a = 3
 value = f()
 assert value == 3
-print value
+print(value)

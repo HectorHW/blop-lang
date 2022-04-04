@@ -2,4 +2,4 @@ var a =
     var b = 3
     var c = 5
     b+c
-print a
+print(a)

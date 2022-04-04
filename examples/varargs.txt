@@ -6,7 +6,7 @@ assert not is_vararg(int)
 assert sum(1, 2, 3, 4, 5) == 15
 
 # because of that, implementing list building function is trivial
-print list(1, 2, 3)
+print(list(1, 2, 3))
 #  (works under the hood like so: list(*a) = a)
 
 # argument count is checked, mismatch when calling will result in error

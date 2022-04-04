@@ -7,7 +7,6 @@ use crate::Expr;
 pub(super) trait Rewriter<E> {
     fn visit_stmt(&mut self, stmt: Stmt) -> Result<Stmt, E> {
         match stmt {
-            Stmt::Print(a, b) => self.visit_print_stmt(a, b),
             Stmt::VarDeclaration(a, b) => self.visit_var_stmt(a, b),
             Stmt::Assignment(target, value) => self.visit_assignment_stmt(target, value),
             Stmt::Expression(e) => self.visit_expr_stmt(e),
@@ -33,10 +32,6 @@ pub(super) trait Rewriter<E> {
                 implementations,
             } => self.visit_impl_block(name, implementations),
         }
-    }
-
-    fn visit_print_stmt(&mut self, t: Token, e: Expr) -> Result<Stmt, E> {
-        Ok(Stmt::Print(t, self.visit_expr(e)?))
     }
 
     fn visit_var_stmt(&mut self, name: Token, rhs: Option<Expr>) -> Result<Stmt, E> {

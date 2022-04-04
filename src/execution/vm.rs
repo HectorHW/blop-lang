@@ -132,13 +132,14 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
             #[cfg(feature = "print-execution")]
             {
+                use crate::data::objects::pretty_format;
                 print!("[");
                 for item in &self.stack[..self.locals_offset] {
-                    print!("{} ", item);
+                    print!("{} ", pretty_format(item, self));
                 }
                 print!("| ");
                 for item in &self.stack[self.locals_offset..] {
-                    print!("{} ", item);
+                    print!("{} ", pretty_format(item, self));
                 }
                 println!("]");
             }
@@ -290,11 +291,6 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         }
 
         let jump = match chunk.code[ip] {
-            Opcode::Print => {
-                let result = checked_stack_pop!()?;
-                self.pretty_print(result);
-                InstructionExecution::NextInstruction
-            }
             Opcode::LoadConst(idx) => {
                 let idx = idx as usize;
                 let value = chunk
@@ -733,6 +729,9 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
                         let self_ptr = all_args.pop().unwrap();
 
+                        //pop called builtin method off the stack
+                        self.stack.pop();
+
                         let builtins = self.builtins;
 
                         let result =
@@ -1029,27 +1028,5 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             return VM::get_chunk(value.unwrap_partial().unwrap().target.clone());
         }
         None
-    }
-
-    fn pretty_print(&self, value: Value) {
-        match value {
-            StackObject::Builtin(idx) => {
-                let pretty_name = self.builtins.get_builtin_name(idx).unwrap();
-                println!("{}", pretty_name);
-            }
-
-            StackObject::BuiltinMethod {
-                class_idx,
-                method_idx,
-            } => {
-                let pretty_name = self
-                    .builtins
-                    .get_method_name(class_idx, method_idx)
-                    .unwrap();
-                println!("{}", pretty_name)
-            }
-
-            other => println!("{}", other),
-        }
     }
 }

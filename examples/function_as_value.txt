@@ -5,4 +5,4 @@ def a() =
 
 var value = a()(4)
 assert value==5
-print value
+print(value)

@@ -11,4 +11,4 @@ def b(x) =
 
 var value = a(4)
 assert value ==3
-print value
+print(value)

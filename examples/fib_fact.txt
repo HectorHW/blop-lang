@@ -6,7 +6,7 @@ def fib(n) =
 
 var fibvalue = fib(10)
 assert fibvalue==89
-print fibvalue
+print(fibvalue)
 
 def fact(n) =
     def fact(n, a) =
@@ -19,4 +19,4 @@ def fact(n) =
 
 var factvalue = fact(5)
 assert factvalue==120
-print factvalue
+print(factvalue)

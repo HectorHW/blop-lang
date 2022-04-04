@@ -2,7 +2,6 @@ use crate::parsing::lexer::Token;
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Print(Token, Expr),
     VarDeclaration(Token, Option<Expr>),
     Assignment(Token, Expr),
     PropertyAssignment(Expr, Expr),

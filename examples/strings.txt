@@ -3,20 +3,20 @@ var s1 = "abcd" # creation of strings
 # we apply short string optimization: 
 # instead of storing string on the heap, we store small strings inside stack object
 
-print "small" # 5 bytes
+print ("small") # 5 bytes
 
-print "heap allocated string"
+print("heap allocated string")
 
 
 #strings are interned at compile time, these two will point on the same object
 s1 = "efg"
 var s2 = "efg"
-print s1
+print(s1)
 
 var s3 = s1 + " " + s2 # can concatenate strings
 # string concatenation always results in mut_str
 #in some cases (if there are no other pointers to str) its buffer can be reused
-print s3
+print(s3)
 
 var s11 = "a"
 var s12 = "b"
@@ -27,6 +27,6 @@ var s22 = "b"
 s2 = s21 + s22
 
 if s1==s2 # strings are compared for equality by content
-    print "equal"
+    print("equal")
 else
-    print "not equal"
+    print("not equal")

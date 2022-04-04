@@ -762,3 +762,19 @@ impl Clone for OwnedObject {
         }
     }
 }
+
+pub fn pretty_format(value: &Value, context: &VM) -> String {
+    match value {
+        &StackObject::Builtin(idx) => context.builtins.get_builtin_name(idx).unwrap().to_string(),
+
+        &StackObject::BuiltinMethod {
+            class_idx,
+            method_idx,
+        } => context
+            .builtins
+            .get_method_name(class_idx, method_idx)
+            .unwrap(),
+
+        other => format!("{}", other),
+    }
+}

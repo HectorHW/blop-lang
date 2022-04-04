@@ -17,7 +17,6 @@ pub struct Chunk {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Opcode {
-    Print,
     LoadConst(u16),
     LoadGlobal(u16),
     LoadLocal(u16),

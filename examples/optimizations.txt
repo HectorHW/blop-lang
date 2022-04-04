@@ -6,4 +6,4 @@ var a =
     a
 var value = a()
 assert value ?= 2
-print value
+print(value)
