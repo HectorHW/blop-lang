@@ -598,6 +598,11 @@ impl StackObject {
                     d.add_method(field_name, value);
                     Ok(())
                 }
+
+                OwnedObjectItem::EnumDescriptor(d) => {
+                    d.add_method(field_name, value);
+                    Ok(())
+                }
                 OwnedObjectItem::StructInstance(s) => s.set_field(field_name, value),
                 _ => Err(()),
             },

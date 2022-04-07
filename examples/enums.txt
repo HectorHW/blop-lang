@@ -3,6 +3,16 @@ enum Option:
         value
     None
 
+
+impl Option:
+    def is_some(self) = self?value
+    def is_none(self) = not self.is_some()
+    def map(self, op) = 
+        if self.is_none()
+            self
+        else
+            Option.Some(op(self.value))
+
 enum Result:
     Ok:
         ok
@@ -11,6 +21,9 @@ enum Result:
 
 
 var some = Option.Some(1)
+var none = Option.None() 
+# parens are mandatory right now as under the hood Option.None is 
+# still a struct descriptor
 
 assert some.value == 1
 print(some)
@@ -18,3 +31,8 @@ print(Option.None())
 
 print(Result.Ok(1))
 print(Result.Err("no such file"))
+
+var operator = (x) => x+1
+
+assert some.map(operator) == Option.Some(2)
+assert none.map(operator) == Option.None()

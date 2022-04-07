@@ -119,7 +119,9 @@ impl Visitor<String> for NameRedefinitionChecker {
                 )
             })?;
         }
-        self.visit_expr(body)
+        self.visit_expr(body)?;
+        self.pop_scope();
+        Ok(())
     }
 
     fn visit_struct_declaration_statement(
@@ -173,6 +175,7 @@ impl Visitor<String> for NameRedefinitionChecker {
         for variant in variants {
             self.visit_struct_declaration_statement(&variant.name, &variant.fields)?;
         }
+        self.pop_scope();
         Ok(())
     }
 
