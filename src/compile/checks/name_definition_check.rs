@@ -1,5 +1,5 @@
 use crate::compile::checks::tree_visitor::Visitor;
-use crate::parsing::ast::{Program, Stmt};
+use crate::parsing::ast::{EnumVariant, Program, Stmt};
 use crate::parsing::lexer::Token;
 use crate::Expr;
 use std::collections::HashMap;
@@ -141,7 +141,7 @@ impl Visitor<String> for NameRedefinitionChecker {
         for field in fields {
             self.declare_name(field).map_err(|e| {
                 format!(
-                    "field {} [{}] is redefined in struct, previous definition at [{}]",
+                    "field {} [{}] is redefined in struct/enum, previous definition at [{}]",
                     field.get_string().unwrap(),
                     field.position,
                     e.position
@@ -151,6 +151,28 @@ impl Visitor<String> for NameRedefinitionChecker {
 
         self.pop_scope();
 
+        Ok(())
+    }
+
+    fn visit_enum_declaration(
+        &mut self,
+        name: &Token,
+        variants: &[EnumVariant],
+    ) -> Result<(), String> {
+        self.declare_name(name).map_err(|e| {
+            format!(
+                "name {} [{}] is redefined in block, previous definition at [{}]",
+                name.get_string().unwrap(),
+                name.position,
+                e.position
+            )
+        })?;
+
+        self.new_scope();
+
+        for variant in variants {
+            self.visit_struct_declaration_statement(&variant.name, &variant.fields)?;
+        }
         Ok(())
     }
 

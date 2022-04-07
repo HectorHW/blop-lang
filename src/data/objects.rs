@@ -134,11 +134,12 @@ impl Partial {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StructDescriptor {
     pub name: String,
     pub fields: Vec<String>,
     pub(crate) methods: HashMap<String, Value>,
+    pub enum_ref: Option<Value>,
 }
 
 impl StructDescriptor {
@@ -167,7 +168,70 @@ impl StructDescriptor {
     }
 
     pub fn get_method(&self, method_name: &str) -> Option<Value> {
+        self.methods.get(method_name).cloned().or_else(|| {
+            self.enum_ref
+                .as_ref()
+                .and_then(|e| e.unwrap_enum_descriptor().unwrap().get_method(method_name))
+        })
+    }
+
+    fn set_enum_descriptor(&mut self, descriptor: Value) {
+        self.enum_ref = Some(descriptor)
+    }
+}
+
+impl Debug for StructDescriptor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(enum_ref) = self.enum_ref.as_ref() {
+            write!(
+                f,
+                "{}.{}",
+                enum_ref.unwrap_enum_descriptor().unwrap().name,
+                self.name
+            )?;
+        } else {
+            write!(f, "{}", self.name)?;
+        }
+
+        write!(f, " = [{}]", self.fields.join(" * "))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumDescriptor {
+    pub name: String,
+    pub variants: IndexMap<String, Value>,
+    pub(crate) methods: HashMap<String, Value>,
+}
+
+impl EnumDescriptor {
+    pub fn add_method(&mut self, method_name: &str, method: Value) {
+        self.methods.insert(method_name.to_string(), method);
+    }
+
+    pub fn get_method(&self, method_name: &str) -> Option<Value> {
         self.methods.get(method_name).cloned()
+    }
+
+    pub fn get_variant_descriptor(&self, variant_name: &str) -> Option<Value> {
+        self.variants.get(variant_name).cloned()
+    }
+
+    pub fn lookup(&self, field_name: &str) -> Option<Value> {
+        self.variants
+            .get(field_name)
+            .cloned()
+            .or_else(|| self.methods.get(field_name).cloned())
+    }
+
+    ///adds variant to internal map, registers itself inside variant struct
+    pub fn register_variant(&mut self, self_ref: Value, variant: Value) {
+        variant
+            .unwrap_struct_descriptor()
+            .unwrap()
+            .set_enum_descriptor(self_ref);
+        let key = variant.unwrap_struct_descriptor().unwrap().name.clone();
+        self.variants.insert(key, variant);
     }
 }
 
@@ -233,6 +297,7 @@ pub enum OwnedObjectItem {
     Function(Chunk),
     Partial(Partial),
     StructDescriptor(StructDescriptor),
+    EnumDescriptor(EnumDescriptor),
     StructInstance(StructInstance),
 }
 
@@ -442,6 +507,13 @@ impl StackObject {
         }
     }
 
+    pub fn unwrap_enum_descriptor(&self) -> Option<&mut EnumDescriptor> {
+        match self.as_heap_object() {
+            Some(OwnedObjectItem::EnumDescriptor(d)) => Some(d),
+            _ => None,
+        }
+    }
+
     pub fn unwrap_struct_instance(&self) -> Option<&mut StructInstance> {
         match self.as_heap_object() {
             Some(OwnedObjectItem::StructInstance(i)) => Some(i),
@@ -475,6 +547,7 @@ impl StackObject {
                 OwnedObjectItem::Vector(_) => None,
                 OwnedObjectItem::Map(_) => None,
                 OwnedObjectItem::Box(_) => None,
+                OwnedObjectItem::EnumDescriptor(_) => None,
                 OwnedObjectItem::Closure(c) => c.underlying.get_arity(context),
                 OwnedObjectItem::Function(f) => Some(f.arity),
                 OwnedObjectItem::Partial(p) => Some(p.get_arity()),
@@ -489,6 +562,7 @@ impl StackObject {
             h @ StackObject::HeapObject(_) => match h.as_heap_object().unwrap() {
                 OwnedObjectItem::Box(_) => None,
                 OwnedObjectItem::StructDescriptor(_) => None,
+                OwnedObjectItem::EnumDescriptor(e) => e.lookup(field_name),
                 OwnedObjectItem::StructInstance(i) => i.lookup(self, field_name, context),
 
                 _ => Self::bind_builtin_method(self.clone(), field_name, context),
@@ -633,6 +707,7 @@ impl OwnedObject {
             OwnedObjectItem::Function(..) => "Function",
             OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor",
             OwnedObjectItem::StructInstance(..) => "Struct",
+            OwnedObjectItem::EnumDescriptor(..) => "Enum",
         }
     }
 }
@@ -689,6 +764,10 @@ impl Debug for OwnedObject {
                 format!("{:?}", desc)
             }
 
+            OwnedObjectItem::EnumDescriptor(desc) => {
+                format!("{:?}", desc)
+            }
+
             OwnedObjectItem::StructInstance(instance) => {
                 format!(
                     "instance of {:?}: {:?}",
@@ -729,6 +808,17 @@ impl Display for OwnedObject {
             }
             OwnedObjectItem::StructDescriptor(StructDescriptor { name, fields, .. }) => {
                 write!(f, "Struct {name} = {}", fields.join(" * "))
+            }
+            OwnedObjectItem::EnumDescriptor(EnumDescriptor { name, variants, .. }) => {
+                write!(
+                    f,
+                    "Enum {name} = {}",
+                    variants
+                        .keys()
+                        .map(|k| k.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" or ")
+                )
             }
             OwnedObjectItem::StructInstance(StructInstance { descriptor, fields }) => {
                 write!(

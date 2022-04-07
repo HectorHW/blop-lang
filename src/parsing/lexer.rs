@@ -69,6 +69,7 @@ pub enum TokenKind {
     Def,
     Pass,
     Struct,
+    Enum,
     Impl,
 }
 
@@ -153,6 +154,7 @@ impl<'input> Lexer<'input> {
             ("not", Not),
             ("_", Blank),
             ("struct", Struct),
+            ("enum", Enum),
             ("impl", Impl),
         ]
         .into_iter()

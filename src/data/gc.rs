@@ -1,7 +1,8 @@
 // this module defines api for working with objects from memory side
 
 use super::objects::{
-    OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance, VMap, VVec,
+    EnumDescriptor, OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance,
+    VMap, VVec,
 };
 use super::short_string::ShortString;
 use crate::data::marked_counter::UNMARKED_ONE;
@@ -130,6 +131,20 @@ impl OwnedObject {
                 for method in d.methods.values() {
                     method.mark(value);
                 }
+
+                if let Some(e) = d.enum_ref.as_ref() {
+                    e.mark(value)
+                }
+            }
+
+            OwnedObjectItem::EnumDescriptor(d) => {
+                for variant in d.variants.values() {
+                    variant.mark(value);
+                }
+
+                for method in d.methods.values() {
+                    method.mark(value);
+                }
             }
 
             OwnedObjectItem::StructInstance(s) => {
@@ -200,10 +215,19 @@ impl OwnedObject {
             }
 
             OwnedObjectItem::StructDescriptor(d) => {
-                let f = d.methods.is_empty();
+                let f = !d.methods.is_empty() || d.enum_ref.is_some();
+                d.enum_ref.take();
                 d.methods.clear();
                 f
             }
+
+            OwnedObjectItem::EnumDescriptor(d) => {
+                let f = !d.methods.is_empty() || !d.variants.is_empty();
+                d.methods.clear();
+                d.variants.clear();
+                f
+            }
+
             OwnedObjectItem::StructInstance(s) => {
                 s.descriptor = StackObject::Int(0);
                 s.fields.clear();
@@ -370,6 +394,19 @@ impl GCAlloc for StructDescriptor {
     fn store(obj: Self) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::StructDescriptor(obj),
+            marker: UNMARKED_ONE,
+        }
+    }
+}
+
+impl GCAlloc for EnumDescriptor {
+    fn needs_gc() -> bool {
+        true
+    }
+
+    fn store(obj: Self) -> OwnedObject {
+        OwnedObject {
+            item: OwnedObjectItem::EnumDescriptor(obj),
             marker: UNMARKED_ONE,
         }
     }

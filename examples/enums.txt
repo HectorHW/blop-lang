@@ -1,0 +1,20 @@
+enum Option:
+    Some:
+        value
+    None
+
+enum Result:
+    Ok:
+        ok
+    Err:
+        err
+
+
+var some = Option.Some(1)
+
+assert some.value == 1
+print(some)
+print(Option.None())
+
+print(Result.Ok(1))
+print(Result.Err("no such file"))

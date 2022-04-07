@@ -1,4 +1,4 @@
-use crate::parsing::ast::Stmt;
+use crate::parsing::ast::{EnumVariant, Stmt};
 use crate::parsing::lexer::Token;
 use crate::Expr;
 
@@ -20,6 +20,9 @@ pub(super) trait Visitor<E> {
             Stmt::StructDeclaration { name, fields } => {
                 self.visit_struct_declaration_statement(name, fields)
             }
+
+            Stmt::EnumDeclaration { name, variants } => self.visit_enum_declaration(name, variants),
+
             Stmt::PropertyAssignment(target, value) => {
                 self.visit_property_assignment(target, value)
             }
@@ -79,6 +82,10 @@ pub(super) trait Visitor<E> {
         name: &Token,
         fields: &[Token],
     ) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_enum_declaration(&mut self, name: &Token, variants: &[EnumVariant]) -> Result<(), E> {
         Ok(())
     }
 
