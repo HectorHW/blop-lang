@@ -1,5 +1,7 @@
 // this module defines api for working with objects from memory side
 
+use nohash_hasher::IntMap;
+
 use super::objects::{
     EnumDescriptor, OwnedObject, OwnedObjectItem, StackObject, StructDescriptor, StructInstance,
     VMap, VVec,
@@ -17,7 +19,7 @@ const GC_OLD_THR_DEFAULT: usize = 16000;
 const GC_YOUNG_PASSES_DEFAULT: usize = 3;
 
 pub struct GC {
-    old_objects: Vec<Pin<Box<OwnedObject>>>,
+    old_objects: IntMap<usize, Pin<Box<OwnedObject>>>,
     young_objects: Vec<Pin<Box<OwnedObject>>>,
     old_allocations: usize,
     pub new_allocations_threshold: usize,
@@ -447,8 +449,8 @@ impl GC {
     /// * `young_passes` - amount of passes over young object in attempt to free more objects
     pub unsafe fn new(thr: usize, thr_young: usize, young_passes: usize) -> Self {
         GC {
-            old_objects: Vec::new(),
-            young_objects: Vec::new(),
+            old_objects: Default::default(),
+            young_objects: Default::default(),
             old_allocations: 0,
             new_allocations_threshold: thr,
             new_allocations_threshold_young: thr_young,
@@ -534,7 +536,7 @@ impl GC {
         }
 
         //clean refs
-        for obj in &mut self.old_objects {
+        for obj in &mut self.old_objects.values_mut() {
             if !obj.is_marked() {
                 #[cfg(feature = "debug-gc")]
                 println!("long pass: cleared refs in {:p}", obj.as_ref());
@@ -543,9 +545,9 @@ impl GC {
         }
 
         //sweep - drop unmarked objects
-        self.old_objects.retain(|obj| obj.is_marked());
+        self.old_objects.retain(|_, obj| obj.is_marked());
 
-        for item in &mut self.old_objects {
+        for item in &mut self.old_objects.values_mut() {
             item.mark_shallow(false);
         }
 
@@ -583,7 +585,13 @@ impl GC {
         self.old_allocations += self.young_objects.len();
         #[cfg(feature = "debug-gc")]
         println!("added {} old object(s)", self.young_objects.len());
-        self.old_objects.append(&mut self.young_objects);
+        self.old_objects
+            .extend(&mut self.young_objects.drain(..).map(|item| {
+                let key = Pin::get_ref(item.as_ref()) as *const _ as usize;
+                #[cfg(feature = "debug-gc")]
+                println!("object: {:p}, key: {:x}", item.as_ref(), key);
+                (key, item)
+            }));
         #[cfg(feature = "debug-gc")]
         println!("end quick_pass");
     }
@@ -614,7 +622,7 @@ impl GC {
                     let new_obj = ptr.unwrap_ref().clone();
                     let boxed = Pin::new(Box::new(new_obj));
                     self.young_objects.push(boxed);
-                    let mut_ref = self.old_objects.last_mut().unwrap();
+                    let mut_ref = self.young_objects.last_mut().unwrap();
                     OwnedObject::make_stack_object(mut_ref)
                 }
             }
@@ -662,7 +670,7 @@ impl GC {
             }
         }
 
-        for item in &mut self.old_objects {
+        for item in &mut self.old_objects.values_mut() {
             match &item.item {
                 OwnedObjectItem::ConstantString(obj) if obj.as_str() == s => {
                     #[cfg(feature = "debug-gc")]
@@ -780,7 +788,7 @@ impl GC {
     }
 
     pub(crate) fn items(&self) -> impl Iterator<Item = &'_ Pin<Box<OwnedObject>>> {
-        self.young_objects.iter().chain(self.old_objects.iter())
+        self.young_objects.iter().chain(self.old_objects.values())
     }
 }
 
@@ -792,7 +800,7 @@ impl Drop for GC {
         for obj in &mut self.young_objects {
             obj.clear_references();
         }
-        for obj in &mut self.old_objects {
+        for obj in &mut self.old_objects.values_mut() {
             obj.clear_references();
         }
         #[cfg(feature = "debug-gc")]
