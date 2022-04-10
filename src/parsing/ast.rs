@@ -1,6 +1,12 @@
 use crate::parsing::lexer::Token;
 
 #[derive(Clone, Debug)]
+pub struct EnumVariant {
+    pub name: Token,
+    pub fields: Vec<Token>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Stmt {
     VarDeclaration(Token, Option<Expr>),
     Assignment(Token, Expr),
@@ -17,6 +23,11 @@ pub enum Stmt {
     StructDeclaration {
         name: Token,
         fields: Vec<Token>,
+    },
+
+    EnumDeclaration {
+        name: Token,
+        variants: Vec<EnumVariant>,
     },
 
     ImplBlock {

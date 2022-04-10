@@ -1,6 +1,6 @@
 #![allow(clippy::boxed_local)]
 
-use crate::parsing::ast::Stmt;
+use crate::parsing::ast::{EnumVariant, Stmt};
 use crate::parsing::lexer::Token;
 use crate::Expr;
 
@@ -22,6 +22,8 @@ pub(super) trait Rewriter<E> {
             Stmt::StructDeclaration { name, fields } => {
                 self.visit_struct_declaration_statement(name, fields)
             }
+
+            Stmt::EnumDeclaration { name, variants } => self.visit_enum_declaration(name, variants),
 
             Stmt::PropertyAssignment(target, value) => {
                 self.visit_property_assignment(target, value)
@@ -82,6 +84,14 @@ pub(super) trait Rewriter<E> {
         fields: Vec<Token>,
     ) -> Result<Stmt, E> {
         Ok(Stmt::StructDeclaration { name, fields })
+    }
+
+    fn visit_enum_declaration(
+        &mut self,
+        name: Token,
+        variants: Vec<EnumVariant>,
+    ) -> Result<Stmt, E> {
+        Ok(Stmt::EnumDeclaration { name, variants })
     }
 
     fn visit_property_assignment(&mut self, target: Expr, value: Expr) -> Result<Stmt, E> {

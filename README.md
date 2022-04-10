@@ -87,9 +87,22 @@ impl Pair:
 ```
 (Note `self` parameter: declared methods are required to have at least one argument to store reference to bound object).
 
+Use `enum` keyword to define enums:
+
+```
+enum Option:
+    Some:
+        value
+    None
+```
+
+Each enum variant is a struct under the hood, so `.` and `?` are supported. You can add methods using `impl Option`, these methods will be available to all variants.
+
+
 For additional features refer to files in [examples directory](examples).
 
 The language is still in early development stage. Features that are currently planned:
-* Rust-like enums with impl blocks and pattern matching
+* Pattern matching
 * Optional typechecking
 * Standard library
+* Modules

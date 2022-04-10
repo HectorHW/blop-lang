@@ -93,3 +93,5 @@ test_file! {strings}
 test_file! {builtins}
 
 test_file! {varargs}
+
+test_file! {enums}
