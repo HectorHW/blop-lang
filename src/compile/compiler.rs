@@ -1,7 +1,7 @@
 use crate::compile::checks::{Annotations, VariableType};
 use crate::compile::code_blob::AnnotatedCodeBlob;
 use crate::data::gc::GC;
-use crate::data::objects::{StackObject, StructDescriptor, Value};
+use crate::data::objects::{EnumDescriptor, StackObject, StructDescriptor, Value};
 use crate::execution::arity::Arity;
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::parsing::ast::{Expr, Program, Stmt};
@@ -443,6 +443,20 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
     }
 
+    fn make_struct(&mut self, name: &Token, fields: &[Token]) -> Result<StackObject, String> {
+        let struct_descriptor = StructDescriptor {
+            name: name.get_string().unwrap().to_string(),
+            fields: fields
+                .iter()
+                .map(|f| f.get_string().unwrap().to_string())
+                .collect(),
+            methods: HashMap::new(),
+            enum_ref: None,
+        };
+
+        Ok(self.gc.store(struct_descriptor))
+    }
+
     fn visit_stmt(&mut self, stmt: &Stmt) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
         match stmt {
@@ -466,17 +480,37 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 }
             }
 
-            Stmt::StructDeclaration { name, fields } => {
-                let struct_descriptor = StructDescriptor {
+            Stmt::EnumDeclaration { name, variants } => {
+                let descriptor = EnumDescriptor {
                     name: name.get_string().unwrap().to_string(),
-                    fields: fields
-                        .iter()
-                        .map(|f| f.get_string().unwrap().to_string())
-                        .collect(),
-                    methods: HashMap::new(),
+                    variants: Default::default(),
+                    methods: Default::default(),
                 };
 
-                let struct_object_pointer = self.gc.store(struct_descriptor);
+                let descriptor = self.gc.store(descriptor);
+
+                let constant_ref = self.get_or_create_constant(descriptor.clone());
+
+                let mut right_side = AnnotatedCodeBlob::new();
+                right_side += (Opcode::LoadConst(constant_ref as u16), name.position.0);
+
+                let self_ref = descriptor.clone();
+
+                let descriptor = descriptor.unwrap_enum_descriptor().unwrap();
+
+                for variant in variants {
+                    let variant = self.make_struct(&variant.name, &variant.fields)?;
+                    descriptor.register_variant(self_ref.clone(), variant);
+                }
+
+                result.append(self.create_named_entity(name, right_side)?);
+                if self.needs_value() {
+                    result.push(Opcode::LoadImmediateInt(0), result.last_index().unwrap());
+                }
+            }
+
+            Stmt::StructDeclaration { name, fields } => {
+                let struct_object_pointer = self.make_struct(name, fields)?;
                 let constant_idx = self.get_or_create_constant(struct_object_pointer);
 
                 let struct_load_code = {
