@@ -28,6 +28,7 @@ pub enum StackObject {
 pub struct OwnedObject {
     pub item: OwnedObjectItem,
     pub marker: MarkedCounter,
+    pub(super) owning_gc: NonNull<super::gc::GC>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,7 +177,7 @@ impl StructDescriptor {
     }
 
     fn set_enum_descriptor(&mut self, descriptor: Value) {
-        self.enum_ref = Some(descriptor)
+        let _ = self.enum_ref.insert(descriptor);
     }
 }
 
@@ -710,7 +711,7 @@ impl OwnedObject {
             OwnedObjectItem::Closure(_) => "Closure",
             OwnedObjectItem::Partial(_) => "Partial",
             OwnedObjectItem::Function(..) => "Function",
-            OwnedObjectItem::StructDescriptor(..) => "StructDesctiptor",
+            OwnedObjectItem::StructDescriptor(..) => "StructDescriptor",
             OwnedObjectItem::StructInstance(..) => "Struct",
             OwnedObjectItem::EnumDescriptor(..) => "Enum",
         }
@@ -854,6 +855,7 @@ impl Clone for OwnedObject {
         OwnedObject {
             marker: UNMARKED_ONE,
             item: self.item.clone(),
+            owning_gc: self.owning_gc,
         }
     }
 }
