@@ -323,6 +323,7 @@ peg::parser! {
 
         rule term() -> Expr
             = [num@t!(Number(..))] {Expr::Number(num)}
+            / [b@t!(True) | b@t!(False)] {Expr::Bool(b)}
             / t:name()
                 {Expr::Name(t)}
             / [s@t!(ConstString(..))] {Expr::ConstString(s)}

@@ -5,6 +5,9 @@ assert n==2
 
 print(int)
 
+print(true)
+print(false)
+
 var negative_number = 0-5
 
 #calling methods on builtin types
