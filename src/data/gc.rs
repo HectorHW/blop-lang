@@ -13,18 +13,15 @@ use crate::execution::arity::Arity;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::CallStackValue;
 use std::pin::Pin;
+use std::ptr::NonNull;
 
-const GC_YOUNG_THR_DEFAULT: usize = 100;
-const GC_OLD_THR_DEFAULT: usize = 16000;
-const GC_YOUNG_PASSES_DEFAULT: usize = 3;
+const GC_THR_DEFAULT: usize = 16000;
 
 pub struct GC {
-    old_objects: IntMap<usize, Pin<Box<OwnedObject>>>,
-    young_objects: Vec<Pin<Box<OwnedObject>>>,
-    old_allocations: usize,
-    pub new_allocations_threshold: usize,
-    pub new_allocations_threshold_young: usize,
-    gc_young_passes: usize,
+    objects: IntMap<usize, Option<Pin<Box<OwnedObject>>>>,
+    allocations: usize,
+    pub allocations_threshold: usize,
+    is_dropping: bool,
 }
 
 impl StackObject {
@@ -38,14 +35,14 @@ impl StackObject {
 impl Clone for StackObject {
     fn clone(&self) -> Self {
         match self {
-            StackObject::Int(i) => StackObject::Int(*i),
+            &StackObject::Int(i) => StackObject::Int(i),
             &StackObject::ShortString(s) => StackObject::ShortString(s),
             StackObject::HeapObject(ptr) => {
                 ptr.unwrap_ref_mut().inc_gc_counter();
                 StackObject::HeapObject(*ptr)
             }
 
-            StackObject::Builtin(s) => StackObject::Builtin(*s),
+            &StackObject::Builtin(s) => StackObject::Builtin(s),
             &StackObject::BuiltinMethod {
                 class_idx,
                 method_idx,
@@ -60,18 +57,34 @@ impl Clone for StackObject {
 
 impl Drop for StackObject {
     fn drop(&mut self) {
+        #[cfg(feature = "verbose-gc")]
+        let type_ = self.type_string();
         match self {
             StackObject::Int(_) => {}
             StackObject::ShortString(..) => {}
 
             StackObject::HeapObject(ptr) => {
                 ptr.unwrap_ref_mut().dec_gc_counter();
-                #[cfg(feature = "debug-gc")]
+                #[cfg(feature = "verbose-gc")]
                 println!(
-                    "drop stackobject of {:p}, RC is now {}",
+                    "drop stackobject of {:p} ({}), RC is now {}",
                     ptr.unwrap_ref(),
+                    type_,
                     ptr.unwrap_ref().marker.counter()
                 );
+
+                if ptr.unwrap_ref_mut().get_gc_counter() == 0 {
+                    //no pointers left
+                    #[cfg(feature = "verbose-gc")]
+                    println!("reached 0 refs, requesting drop");
+                    unsafe {
+                        let ptr = ptr.unwrap_ref_mut();
+                        let addr = GC::get_addressable_index(ptr);
+                        let gc = ptr.get_gc();
+
+                        gc.drop_notify(addr);
+                    }
+                }
             }
             StackObject::Builtin(..) | StackObject::Blank | Self::BuiltinMethod { .. } => {}
         }
@@ -159,6 +172,8 @@ impl OwnedObject {
     }
 
     fn clear_references(&mut self) -> bool {
+        #[cfg(feature = "verbose-gc")]
+        let ptr = self as *const _ as usize;
         match &mut self.item {
             OwnedObjectItem::ConstantString(_) => false,
 
@@ -218,14 +233,25 @@ impl OwnedObject {
 
             OwnedObjectItem::StructDescriptor(d) => {
                 let f = !d.methods.is_empty() || d.enum_ref.is_some();
-                d.enum_ref.take();
+                #[cfg(feature = "verbose-gc")]
+                println!(
+                    "taking enum_ref in {ptr:x} which is {}",
+                    d.enum_ref.is_some()
+                );
+                let _ = d.enum_ref.take();
+                #[cfg(feature = "verbose-gc")]
+                println!("clearing methods in struct {ptr:#x}");
                 d.methods.clear();
                 f
             }
 
             OwnedObjectItem::EnumDescriptor(d) => {
                 let f = !d.methods.is_empty() || !d.variants.is_empty();
+                #[cfg(feature = "verbose-gc")]
+                println!("clearing methods in enum {ptr:#x}");
                 d.methods.clear();
+                #[cfg(feature = "verbose-gc")]
+                println!("clearing variants in enum {ptr:#x}");
                 d.variants.clear();
                 f
             }
@@ -246,6 +272,10 @@ impl OwnedObject {
         self.marker.dec()
     }
 
+    fn get_gc_counter(&self) -> usize {
+        self.marker.counter()
+    }
+
     fn mark_shallow(&mut self, value: bool) {
         self.marker.set_flag(value);
     }
@@ -258,7 +288,7 @@ impl OwnedObject {
 pub trait GCAlloc: Sized {
     fn needs_gc() -> bool;
 
-    fn store(_obj: Self) -> OwnedObject {
+    fn store(_obj: Self, _gc: &mut GC) -> OwnedObject {
         panic!("store on non-gc object")
     } // for objects that need GC
 
@@ -268,8 +298,8 @@ pub trait GCAlloc: Sized {
 }
 
 pub trait GCNew: GCAlloc + Default {
-    fn allocate_new() -> OwnedObject {
-        Self::store(Self::default())
+    fn allocate_new(gc: &mut GC) -> OwnedObject {
+        Self::store(Self::default(), gc)
     } // for objects that need GC
 
     fn make_new() -> StackObject {
@@ -294,10 +324,11 @@ impl GCAlloc for VMap {
         true
     }
 
-    fn store(obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Map(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -309,10 +340,11 @@ impl GCAlloc for VVec {
         true
     }
 
-    fn store(obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::Vector(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -324,10 +356,11 @@ impl GCAlloc for String {
         true
     }
 
-    fn store(obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::ConstantString(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -341,10 +374,11 @@ impl GCAlloc for ValueBox {
         true
     }
 
-    fn store(_obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
-            item: OwnedObjectItem::Box(_obj),
+            item: OwnedObjectItem::Box(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -354,10 +388,11 @@ impl GCAlloc for Closure {
         true
     }
 
-    fn store(_obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
-            item: OwnedObjectItem::Closure(_obj),
+            item: OwnedObjectItem::Closure(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -367,10 +402,11 @@ impl GCAlloc for Partial {
         true
     }
 
-    fn store(_obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
-            item: OwnedObjectItem::Partial(_obj),
+            item: OwnedObjectItem::Partial(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -380,10 +416,11 @@ impl GCAlloc for Chunk {
         true
     }
 
-    fn store(_obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
-            item: OwnedObjectItem::Function(_obj),
+            item: OwnedObjectItem::Function(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -393,10 +430,11 @@ impl GCAlloc for StructDescriptor {
         true
     }
 
-    fn store(obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::StructDescriptor(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -406,10 +444,11 @@ impl GCAlloc for EnumDescriptor {
         true
     }
 
-    fn store(obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::EnumDescriptor(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
@@ -419,18 +458,25 @@ impl GCAlloc for StructInstance {
         true
     }
 
-    fn store(obj: Self) -> OwnedObject {
+    fn store(obj: Self, gc: &mut GC) -> OwnedObject {
         OwnedObject {
             item: OwnedObjectItem::StructInstance(obj),
             marker: UNMARKED_ONE,
+            owning_gc: NonNull::from(gc),
         }
     }
 }
 
-#[cfg(feature = "debug-gc")]
+#[cfg(feature = "verbose-gc")]
 impl Drop for OwnedObject {
     fn drop(&mut self) {
-        println!("drop {:p}", self);
+        println!("drop {:p} ({})", self, self.type_string());
+    }
+}
+
+impl OwnedObject {
+    pub(super) unsafe fn get_gc(&mut self) -> &mut GC {
+        self.owning_gc.as_mut()
     }
 }
 
@@ -443,34 +489,24 @@ impl GC {
     /// creates new instance of GC.
     ///
     /// # Arguments
-    /// * `thr` - threshhold of old allocations. This many allocations of old objects will trigger
+    /// * `thr` - threshhold of allocations. This many allocations of objects will trigger
     /// mark and sweeep algorithm
-    /// * `thr_young` - threshhold of new allocations. This may allocations wil trigger quck pass
-    /// * `young_passes` - amount of passes over young object in attempt to free more objects
-    pub unsafe fn new(thr: usize, thr_young: usize, young_passes: usize) -> Self {
+    pub unsafe fn new(thr: usize) -> Self {
         GC {
-            old_objects: Default::default(),
-            young_objects: Default::default(),
-            old_allocations: 0,
-            new_allocations_threshold: thr,
-            new_allocations_threshold_young: thr_young,
-            gc_young_passes: young_passes,
+            objects: Default::default(),
+            allocations: 0,
+            allocations_threshold: thr,
+            is_dropping: false,
         }
     }
-    ///create instance of GC with default config (see GC_YOUNG_PASSES_DEFAULT, GC_YOUNG_THR_DEFAULT
-    /// and GC_OLD_THR_DEFAULT)
+    ///create instance of GC with default config (see GC_THR_DEFAULT)
     pub unsafe fn default_gc() -> Self {
-        let young_thr = if cfg!(feature = "debug-gc") {
+        let thr = if cfg!(feature = "debug-gc") {
             10
         } else {
-            GC_YOUNG_THR_DEFAULT
+            GC_THR_DEFAULT
         };
-        let old_thr = if cfg!(feature = "debug-gc") {
-            10
-        } else {
-            GC_OLD_THR_DEFAULT
-        };
-        Self::new(old_thr, young_thr, GC_YOUNG_PASSES_DEFAULT)
+        Self::new(thr)
     }
 
     pub fn allocate_new<T: GCNew>(&mut self) -> StackObject {
@@ -479,13 +515,18 @@ impl GC {
 
     pub fn store<T: GCAlloc>(&mut self, item: T) -> StackObject {
         if T::needs_gc() {
-            let obj = T::store(item);
-            let boxed = Box::new(obj);
-            self.young_objects.push(Pin::new(boxed));
+            let obj = T::store(item, self);
+            let mut boxed = Box::new(obj);
 
-            let box_ref = self.young_objects.last_mut().unwrap(); //obj is not null
+            let stack_ptr = OwnedObject::make_stack_object(boxed.as_mut());
 
-            OwnedObject::make_stack_object(box_ref)
+            let index = GC::get_addressable_index(boxed.as_mut());
+
+            self.objects.insert(index, Some(Pin::new(boxed)));
+
+            self.allocations += 1;
+
+            stack_ptr
         } else {
             T::make(item)
         }
@@ -493,7 +534,7 @@ impl GC {
 
     /// quick check to determine if we need to trigger any stage of garbage collection
     pub fn needs_collection(&self) -> bool {
-        self.young_objects.len() >= self.new_allocations_threshold_young
+        self.allocations >= self.allocations_threshold
     }
 
     /// (maybe) collects garbage from internal list of objects (created with allocate_new or store)
@@ -514,14 +555,6 @@ impl GC {
             return;
         }
 
-        self.quick_pass();
-
-        if self.old_allocations < self.new_allocations_threshold {
-            return;
-        }
-
-        debug_assert!(self.young_objects.is_empty());
-
         #[cfg(feature = "debug-gc")]
         println!("begin slow_pass");
 
@@ -535,78 +568,43 @@ impl GC {
             chunk.mark(true);
         }
 
+        self.is_dropping = true;
+
         //clean refs
-        for obj in &mut self.old_objects.values_mut() {
+        for obj in &mut self.objects.values_mut().filter_map(|obj| obj.as_mut()) {
             if !obj.is_marked() {
-                #[cfg(feature = "debug-gc")]
+                #[cfg(feature = "verbose-gc")]
                 println!("long pass: cleared refs in {:p}", obj.as_ref());
                 obj.clear_references();
             }
         }
 
-        //sweep - drop unmarked objects
-        self.old_objects.retain(|_, obj| obj.is_marked());
+        self.is_dropping = false;
 
-        for item in &mut self.old_objects.values_mut() {
-            item.mark_shallow(false);
+        //sweep - drop unmarked objects
+        self.objects
+            .retain(|_, obj| obj.as_ref().map(|item| item.is_marked()).unwrap_or(false));
+
+        for item in &mut self.objects.values_mut() {
+            item.as_mut().unwrap().mark_shallow(false);
         }
 
-        self.old_allocations = 0;
+        self.allocations = 0;
         #[cfg(feature = "debug-gc")]
         println!("end slow_pass");
     }
 
-    unsafe fn quick_pass(&mut self) {
-        #[cfg(feature = "debug-gc")]
-        println!("begin quick_pass");
-        if self.gc_young_passes == 0 {
-            loop {
-                let before = self.young_objects.len();
-                self.gc_quick_pass_step();
-                let after = self.young_objects.len();
-                if before == after {
-                    break;
-                }
-            }
-        } else {
-            for _i in 0..self.gc_young_passes {
-                #[cfg(feature = "debug-gc")]
-                println!("quick pass step {}", _i);
-                let before = self.young_objects.len();
-                self.gc_quick_pass_step();
-                let after = self.young_objects.len();
-                if before == after {
-                    break;
-                }
-            }
+    /// drop object identified by address `addr` (probably produced by GC::get_addressable_index)
+    ///
+    /// This function is unsafe because in non-debug environment existence of pointers to named
+    /// object is not checked, which may lead to dropping memory that is still referenced somewhere
+    pub unsafe fn drop_notify(&mut self, addr: usize) {
+        if self.is_dropping {
+            return; //do not drop objects inside clear
         }
-
-        //move young objects into old
-        self.old_allocations += self.young_objects.len();
-        #[cfg(feature = "debug-gc")]
-        println!("added {} old object(s)", self.young_objects.len());
-        self.old_objects
-            .extend(&mut self.young_objects.drain(..).map(|item| {
-                let key = Pin::get_ref(item.as_ref()) as *const _ as usize;
-                #[cfg(feature = "debug-gc")]
-                println!("object: {:p}, key: {:x}", item.as_ref(), key);
-                (key, item)
-            }));
-        #[cfg(feature = "debug-gc")]
-        println!("end quick_pass");
-    }
-
-    unsafe fn gc_quick_pass_step(&mut self) {
-        //drop young objects whose RC is zero
-        self.young_objects.retain(|obj| {
-            #[cfg(feature = "debug-gc")]
-            println!(
-                "retain check on {:p}, RC is {}",
-                obj.as_ref(),
-                obj.marker.counter()
-            );
-            obj.marker.counter() > 0
-        });
+        let object = self.objects.get_mut(&addr).unwrap();
+        debug_assert!(object.is_none() || object.as_ref().unwrap().get_gc_counter() == 0);
+        let _ = object.take();
     }
 
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
@@ -619,11 +617,17 @@ impl GC {
                 if matches!(ptr.unwrap_ref().item, OwnedObjectItem::ConstantString(..)) {
                     h.clone()
                 } else {
-                    let new_obj = ptr.unwrap_ref().clone();
-                    let boxed = Pin::new(Box::new(new_obj));
-                    self.young_objects.push(boxed);
-                    let mut_ref = self.young_objects.last_mut().unwrap();
-                    OwnedObject::make_stack_object(mut_ref)
+                    let mut boxed = Box::new(ptr.unwrap_ref().clone());
+
+                    let stack_ptr = OwnedObject::make_stack_object(boxed.as_mut());
+
+                    let index = GC::get_addressable_index(boxed.as_mut());
+
+                    self.objects.insert(index, Some(Pin::new(boxed)));
+
+                    self.allocations += 1;
+
+                    stack_ptr
                 }
             }
 
@@ -634,7 +638,7 @@ impl GC {
     }
 
     pub fn len(&self) -> usize {
-        self.old_objects.len()
+        self.objects.len()
     }
 
     pub fn new_string(&mut self, s: &str) -> StackObject {
@@ -650,30 +654,10 @@ impl GC {
             return StackObject::ShortString(ss);
         }
 
-        for item in &mut self.young_objects {
+        for item in &mut self.objects.values_mut().filter_map(|obj| obj.as_mut()) {
             match &item.item {
                 OwnedObjectItem::ConstantString(obj) if obj.as_str() == s => {
-                    #[cfg(feature = "debug-gc")]
-                    println!(
-                        "found string {} in young objects [{:p}] with RC = {}",
-                        s,
-                        item.as_ref(),
-                        item.marker.counter()
-                    );
-                    let ptr = OwnedObject::make_stack_object(item);
-                    item.inc_gc_counter();
-                    #[cfg(feature = "debug-gc")]
-                    println!("new RC is {}", item.marker.counter());
-                    return ptr;
-                }
-                _ => {}
-            }
-        }
-
-        for item in &mut self.old_objects.values_mut() {
-            match &item.item {
-                OwnedObjectItem::ConstantString(obj) if obj.as_str() == s => {
-                    #[cfg(feature = "debug-gc")]
+                    #[cfg(feature = "verbose-gc")]
                     println!(
                         "found string {} in old objects [{:p}] with RC = {}",
                         s,
@@ -682,7 +666,7 @@ impl GC {
                     );
                     let ptr = OwnedObject::make_stack_object(item);
                     item.inc_gc_counter();
-                    #[cfg(feature = "debug-gc")]
+                    #[cfg(feature = "verbose-gc")]
                     println!("new RC is {}", item.marker.counter());
                     return ptr;
                 }
@@ -728,7 +712,7 @@ impl GC {
             return Ok(StackObject::ShortString(ss));
         }
 
-        #[cfg(feature = "debug-gc")]
+        #[cfg(feature = "verbose-gc")]
         println!("try_inplace_string_concat");
 
         match (&mut s1.as_heap_object(), &mut s2.as_heap_object()) {
@@ -736,7 +720,7 @@ impl GC {
                 if s1.unwrap_traceable().unwrap().marker.counter() == 1
                     && s1.unwrap_mutable_string().is_some() =>
             {
-                #[cfg(feature = "debug-gc")]
+                #[cfg(feature = "verbose-gc")]
                 println!(
                     "RC of s1[{:p}] is 1, reusing it",
                     s1.unwrap_traceable().unwrap()
@@ -751,7 +735,7 @@ impl GC {
                 if s2.unwrap_traceable().unwrap().marker.counter() == 1
                     && s2.unwrap_mutable_string().is_some() =>
             {
-                #[cfg(feature = "debug-gc")]
+                #[cfg(feature = "verbose-gc")]
                 println!(
                     "RC of s2[{:p}] is 1, reusing it",
                     s2.unwrap_traceable().unwrap()
@@ -763,7 +747,7 @@ impl GC {
             }
             (_, _) => {}
         };
-        #[cfg(feature = "debug-gc")]
+        #[cfg(feature = "verbose-gc")]
         println!(
             "RC(s1[{:p}])={}, RC(s2[{:p}])={}, creating new",
             s1.unwrap_traceable().unwrap(),
@@ -788,7 +772,17 @@ impl GC {
     }
 
     pub(crate) fn items(&self) -> impl Iterator<Item = &'_ Pin<Box<OwnedObject>>> {
-        self.young_objects.iter().chain(self.old_objects.values())
+        self.objects.values().filter_map(|obj| obj.as_ref())
+    }
+
+    pub fn get_addressable_index(object: &mut OwnedObject) -> usize {
+        let addr_value = object as *const _ as usize;
+
+        let multiplier = std::mem::align_of::<OwnedObject>();
+
+        //if this assert fails Rust is probably broken (refs are aligned)
+        debug_assert_eq!(addr_value % multiplier, 0);
+        addr_value / multiplier
     }
 }
 
@@ -796,13 +790,18 @@ impl Drop for GC {
     fn drop(&mut self) {
         #[cfg(feature = "debug-gc")]
         println!("begin drop gc");
+        self.is_dropping = true;
         //clean refs
-        for obj in &mut self.young_objects {
+        for mut obj in self
+            .objects
+            .values_mut()
+            .filter_map(|item| item.as_mut().map(|i| i.as_mut()))
+        {
+            #[cfg(feature = "verbose-gc")]
+            println!("working on {:p}", obj.as_mut());
             obj.clear_references();
         }
-        for obj in &mut self.old_objects.values_mut() {
-            obj.clear_references();
-        }
+        self.is_dropping = false;
         #[cfg(feature = "debug-gc")]
         println!("end drop gc");
     }
