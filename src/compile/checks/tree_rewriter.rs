@@ -117,6 +117,7 @@ pub(super) trait Rewriter<E> {
         match expr {
             Expr::Bool(b) => self.visit_bool_expr(b),
             Expr::Number(n) => self.visit_number_expr(n),
+            Expr::FloatNumber(n) => self.visit_float_number_expr(n),
             Expr::Name(n) => self.visit_variable_expr(n),
             Expr::ConstString(s) => self.visit_string_expr(s),
             Expr::Binary(op, a, b) => self.visit_binary_expr(op, a, b),
@@ -142,6 +143,10 @@ pub(super) trait Rewriter<E> {
 
     fn visit_number_expr(&mut self, token: Token) -> Result<Expr, E> {
         Ok(Expr::Number(token))
+    }
+
+    fn visit_float_number_expr(&mut self, token: Token) -> Result<Expr, E> {
+        Ok(Expr::FloatNumber(token))
     }
 
     fn visit_variable_expr(&mut self, variable_name: Token) -> Result<Expr, E> {

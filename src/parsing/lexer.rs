@@ -5,6 +5,8 @@ use std::iter::Peekable;
 use std::mem;
 use std::str::CharIndices;
 
+use ordered_float::NotNan;
+
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Index(pub usize, pub usize);
 
@@ -58,6 +60,7 @@ pub enum TokenKind {
     Colon,
 
     Number(i64),
+    FloatNumber(NotNan<f64>),
     Name(String),
     ConstString(String),
 
@@ -120,6 +123,13 @@ impl Token {
     pub fn get_number(&self) -> Option<i64> {
         match &self.kind {
             TokenKind::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub fn get_float(&self) -> Option<f64> {
+        match &self.kind {
+            &TokenKind::FloatNumber(n) => Some(n.into_inner()),
             _ => None,
         }
     }
@@ -331,9 +341,22 @@ impl<'input> Lexer<'input> {
 
                     self.read_while(&|c| c.is_numeric());
 
-                    let end_idx = self.compute_input_shift();
-                    let number: i64 = self.input_string[start_idx..end_idx].parse().unwrap();
-                    result.push(token!(token_index, Number(number)));
+                    if let Some((_, '.')) = self.input_iterator.peek() {
+                        self.input_iterator.next();
+                        self.read_while(&|c| c.is_numeric());
+                        let end_idx = self.compute_input_shift();
+                        let string = self.input_string[start_idx..end_idx].to_string();
+                        let number: f64 = string.parse().unwrap();
+                        result.push(token!(
+                            token_index,
+                            FloatNumber(NotNan::new(number).unwrap())
+                        ));
+                    } else {
+                        let end_idx = self.compute_input_shift();
+                        let string = self.input_string[start_idx..end_idx].to_string();
+                        let number: i64 = string.parse().unwrap();
+                        result.push(token!(token_index, Number(number)));
+                    }
                 }
 
                 x if x.is_alphabetic() || x == '_' => {

@@ -741,6 +741,15 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 }
             }
 
+            Expr::FloatNumber(n) => {
+                let value = n.get_float().unwrap();
+                let constant_index = self.get_or_create_constant(Value::from(value));
+                result += (Opcode::LoadConst(constant_index as u16), n.position.0);
+                if !self.needs_value() {
+                    result += (Opcode::Pop(1), n.position.0);
+                }
+            }
+
             Expr::Number(token) => {
                 let n = token.get_number().unwrap();
                 if n >= (i16::MIN as i64) && n <= (i16::MAX as i64) {
