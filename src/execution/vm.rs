@@ -1,5 +1,6 @@
 use crate::data::gc::GC;
 use crate::data::objects::{Closure, StackObject, VVec, Value, ValueBox};
+use crate::data::value_ops::{self, cast_binary, numeric_cast, NumberCastResult};
 use crate::execution::chunk::Opcode;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -249,12 +250,15 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             ($pat:pat) => {{
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
-                let value = match first_operand.partial_cmp(&second_operand) {
-                    $pat => Ok(true.into()),
-                    Some(_) => Ok(false.into()),
+                let value = match crate::data::value_ops::comparison_operator!(
+                    &first_operand,
+                    &second_operand,
+                    $pat
+                ) {
+                    Some(v) => Ok(v.into()),
                     None => Err(runtime_error!(InterpretErrorKind::TypeError {
                         message: format!(
-                            "got unsupported argument types ({} and {})",
+                            "got unsupported values in comparison ({} and {})",
                             first_operand.type_string(),
                             second_operand.type_string()
                         )
@@ -310,56 +314,89 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
 
-                match (&first_operand, &second_operand) {
+                let value = match (&first_operand, &second_operand) {
                     (s1, s2) if s1.unwrap_any_str().is_some() && s2.unwrap_any_str().is_some() => {
-                        let resulting_string = self
-                            .gc
+                        self.gc
                             .try_inplace_string_concat(first_operand, second_operand)
-                            .map_err(|o| {
-                                runtime_error!(InterpretErrorKind::TypeError { message: o })
-                            })?;
-                        self.stack.push(resulting_string);
+                            .unwrap()
                     }
 
-                    (StackObject::Int(n1), StackObject::Int(n2)) => {
-                        self.stack.push(Value::Int(*n1 + *n2));
+                    (_, _) => {
+                        cast_binary!(&first_operand, +, &second_operand).ok_or_else(|| {
+                            runtime_error!(InterpretErrorKind::TypeError {
+                                message: format!(
+                                    "uncompatible types in Add (got {} and {})",
+                                    first_operand.type_string(),
+                                    second_operand.type_string()
+                                )
+                            })
+                        })?
                     }
-                    (other_1, other_2) => {
-                        return Err(runtime_error!(InterpretErrorKind::TypeError {
-                            message: format!(
-                                "uncompatible types in Add (got {} and {})",
-                                other_1.type_string(),
-                                other_2.type_string()
-                            )
-                        }));
-                    }
-                }
+                };
+                self.stack.push(value);
 
                 InstructionExecution::NextInstruction
             }
 
             Opcode::Sub => {
-                let second_operand = as_int!(checked_stack_pop!()?)?;
-                let first_operand = as_int!(checked_stack_pop!()?)?;
-                self.stack.push(Value::Int(first_operand - second_operand));
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
+                self.stack
+                    .push(
+                        cast_binary!(&first_operand, -, &second_operand).ok_or_else(|| {
+                            runtime_error!(InterpretErrorKind::TypeError {
+                                message: format!(
+                                    "uncompatible types in Sub (got {} and {})",
+                                    first_operand.type_string(),
+                                    second_operand.type_string()
+                                )
+                            })
+                        })?,
+                    );
                 InstructionExecution::NextInstruction
             }
 
             Opcode::Mul => {
-                let second_operand = as_int!(checked_stack_pop!()?)?;
-                let first_operand = as_int!(checked_stack_pop!()?)?;
-                self.stack.push(Value::Int(first_operand * second_operand));
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
+                self.stack
+                    .push(
+                        cast_binary!(&first_operand, *, &second_operand).ok_or_else(|| {
+                            runtime_error!(InterpretErrorKind::TypeError {
+                                message: format!(
+                                    "uncompatible types in Multiply (got {} and {})",
+                                    first_operand.type_string(),
+                                    second_operand.type_string()
+                                )
+                            })
+                        })?,
+                    );
                 InstructionExecution::NextInstruction
             }
 
             Opcode::Div => {
-                let second_operand = as_int!(checked_stack_pop!()?)?;
-                let first_operand = as_int!(checked_stack_pop!()?)?;
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
 
-                let value = first_operand
-                    .checked_div(second_operand)
-                    .ok_or(runtime_error!(ZeroDivision))?;
-                self.stack.push(Value::Int(value));
+                if second_operand.unwrap_int().map(|i| i == 0i64) == Some(true)
+                    || second_operand.unwrap_float().map(|f| f.abs() == 0f64) == Some(true)
+                {
+                    return Err(runtime_error!(ZeroDivision));
+                }
+
+                self.stack
+                    .push(
+                        cast_binary!(&first_operand, /, &second_operand).ok_or_else(|| {
+                            runtime_error!(InterpretErrorKind::TypeError {
+                                message: format!(
+                                    "uncompatible types in Divide (got {} and {})",
+                                    first_operand.type_string(),
+                                    second_operand.type_string()
+                                )
+                            })
+                        })?,
+                    );
+
                 InstructionExecution::NextInstruction
             }
 
@@ -375,10 +412,35 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             }
 
             Opcode::Power => {
-                let second_operand = as_int!(checked_stack_pop!()?)?;
-                let first_operand = as_int!(checked_stack_pop!()?)?;
-                let value = first_operand.pow(second_operand as u64 as u32);
-                self.stack.push(Value::Int(value));
+                let second_operand = checked_stack_pop!()?;
+                let first_operand = checked_stack_pop!()?;
+
+                let value: Value =
+                    match (numeric_cast(&first_operand), numeric_cast(&second_operand)) {
+                        (Some(NumberCastResult::Int(a)), Some(NumberCastResult::Int(b))) => {
+                            if b < 0 || b > u32::MAX as i64 {
+                                return Err(runtime_error!(InterpretErrorKind::NativeError {
+                                    message: format!("unsupported operand {} in pow", b)
+                                }));
+                            }
+                            a.pow(b as u64 as u32).into()
+                        }
+
+                        (Some(first), Some(second)) => {
+                            (first.downgrade().powf(second.downgrade())).into()
+                        }
+                        _ => {
+                            return Err(runtime_error!(InterpretErrorKind::TypeError {
+                                message: format!(
+                                    "expected numbers in pow, got {} and {}",
+                                    first_operand.type_string(),
+                                    second_operand.type_string()
+                                )
+                            }));
+                        }
+                    };
+
+                self.stack.push(value);
                 InstructionExecution::NextInstruction
             }
 
@@ -504,29 +566,31 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             Opcode::TestEquals => {
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
-                self.stack.push((second_operand == first_operand).into());
+                self.stack
+                    .push(value_ops::equality_operator(&first_operand, &second_operand).into());
                 InstructionExecution::NextInstruction
             }
 
             Opcode::TestNotEquals => {
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
-                self.stack.push((second_operand != first_operand).into());
+                self.stack
+                    .push((!value_ops::equality_operator(&first_operand, &second_operand)).into());
                 InstructionExecution::NextInstruction
             }
 
             Opcode::TestGreater => {
-                comparison_operator!(Some(Ordering::Greater))
+                comparison_operator!(Ordering::Greater)
             }
 
             Opcode::TestGreaterEqual => {
-                comparison_operator!(Some(Ordering::Equal | Ordering::Greater))
+                comparison_operator!(Ordering::Equal | Ordering::Greater)
             }
 
-            Opcode::TestLess => comparison_operator!(Some(Ordering::Less)),
+            Opcode::TestLess => comparison_operator!(Ordering::Less),
 
             Opcode::TestLessEqual => {
-                comparison_operator!(Some(Ordering::Equal | Ordering::Less))
+                comparison_operator!(Ordering::Equal | Ordering::Less)
             }
 
             Opcode::TestProperty(idx) => {

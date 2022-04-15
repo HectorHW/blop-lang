@@ -508,6 +508,13 @@ impl StackObject {
         }
     }
 
+    pub fn unwrap_float(&self) -> Option<f64> {
+        match self {
+            &StackObject::Float(f) => Some(f),
+            _ => None,
+        }
+    }
+
     pub fn unwrap_partial(&self) -> Option<&mut Partial> {
         match self.as_heap_object() {
             Some(OwnedObjectItem::Partial(p)) => Some(p),

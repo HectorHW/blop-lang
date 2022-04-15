@@ -36,4 +36,10 @@ assert 1<2 or should_not_execute()
 assert not (1==2 and should_not_execute())
 
 #float-point numbers
-print(0.5+1)
+assert 1.0 == 1.0
+
+#ints are converted to floats when needed for comparison
+assert 1 < 1.5
+#and also converted whe performing operations with floats
+assert 5/2 == 2
+assert 5/2.0 == 2.5
