@@ -250,8 +250,8 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
                 let value = match first_operand.partial_cmp(&second_operand) {
-                    $pat => Ok(1),
-                    Some(_) => Ok(0),
+                    $pat => Ok(true.into()),
+                    Some(_) => Ok(false.into()),
                     None => Err(runtime_error!(InterpretErrorKind::TypeError {
                         message: format!(
                             "got unsupported argument types ({} and {})",
@@ -260,7 +260,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                         )
                     })),
                 }?;
-                self.stack.push(Value::Int(value));
+                self.stack.push(value);
                 InstructionExecution::NextInstruction
             }};
         }
@@ -504,24 +504,14 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             Opcode::TestEquals => {
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
-                let value = if second_operand == first_operand {
-                    1
-                } else {
-                    0
-                };
-                self.stack.push(Value::Int(value));
+                self.stack.push((second_operand == first_operand).into());
                 InstructionExecution::NextInstruction
             }
 
             Opcode::TestNotEquals => {
                 let second_operand = checked_stack_pop!()?;
                 let first_operand = checked_stack_pop!()?;
-                let value = if second_operand != first_operand {
-                    1
-                } else {
-                    0
-                };
-                self.stack.push(Value::Int(value));
+                self.stack.push((second_operand != first_operand).into());
                 InstructionExecution::NextInstruction
             }
 
@@ -545,40 +535,40 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     .get(idx as usize)
                     .ok_or(runtime_error!(OperandIndexing))?;
                 let pointer = checked_stack_pop!()?;
-                let value = Value::Int(if pointer.lookup(key, self).is_some() {
-                    1
-                } else {
-                    0
-                });
+                let value = pointer.lookup(key, self).is_some().into();
                 self.stack.push(value);
                 InstructionExecution::NextInstruction
             }
 
-            Opcode::JumpIfFalseOrPop(delta) => match checked_stack_pop!()? {
-                Value::Int(0) => {
+            Opcode::JumpIfFalseOrPop(delta) => {
+                let value = checked_stack_pop!()?;
+
+                if !value.as_bool() {
                     let new_ip = ip + delta as usize;
                     if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
-                    self.stack.push(Value::Int(0));
+                    self.stack.push(value);
                     InstructionExecution::LocalJump(new_ip)
+                } else {
+                    InstructionExecution::NextInstruction
                 }
+            }
 
-                _other => InstructionExecution::NextInstruction,
-            },
+            Opcode::JumpIfTrueOrPop(delta) => {
+                let value = checked_stack_pop!()?;
 
-            Opcode::JumpIfTrueOrPop(delta) => match checked_stack_pop!()? {
-                Value::Int(0) => InstructionExecution::NextInstruction,
-
-                other => {
-                    self.stack.push(other);
+                if value.as_bool() {
+                    self.stack.push(value);
                     let new_ip = ip + delta as usize;
                     if new_ip >= chunk.code.len() {
                         return Err(runtime_error!(JumpBounds));
                     }
                     InstructionExecution::LocalJump(new_ip)
+                } else {
+                    InstructionExecution::NextInstruction
                 }
-            },
+            }
 
             Opcode::JumpRelative(delta) => {
                 let new_ip = ip + delta as usize;
@@ -607,18 +597,24 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
 
             Opcode::LogicalNot => {
                 let value = checked_stack_pop!()?;
-                self.stack.push(match value {
-                    Value::Int(0) => Value::Int(1),
-                    _ => Value::Int(0),
-                });
+                self.stack.push((!value.as_bool()).into());
                 InstructionExecution::NextInstruction
             }
 
             Opcode::Nop => InstructionExecution::NextInstruction,
             Opcode::Assert => {
-                let value = as_int!(checked_stack_pop!()?)?;
-                if value == 0 {
-                    return Err(runtime_error!(AssertionFailure));
+                let value = checked_stack_pop!()?;
+
+                match value {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => {
+                        return Err(runtime_error!(AssertionFailure));
+                    }
+                    other => {
+                        return Err(runtime_error!(TypeError {
+                            message: format!("expected Bool but got {}", other.type_string())
+                        }))
+                    }
                 }
                 InstructionExecution::NextInstruction
             }

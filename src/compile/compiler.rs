@@ -727,6 +727,20 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     fn visit_expr(&mut self, expr: &Expr) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
         match expr {
+            Expr::Bool(b) => {
+                let value = match b.kind {
+                    TokenKind::True => true,
+                    TokenKind::False => false,
+                    _ => unreachable!(),
+                };
+
+                let constant_index = self.get_or_create_constant(value.into());
+                result += (Opcode::LoadConst(constant_index as u16), b.position.0);
+                if !self.needs_value() {
+                    result += (Opcode::Pop(1), b.position.0);
+                }
+            }
+
             Expr::Number(token) => {
                 let n = token.get_number().unwrap();
                 if n >= (i16::MIN as i64) && n <= (i16::MAX as i64) {

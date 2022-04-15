@@ -34,6 +34,7 @@ impl Rewriter<String> for Folder {
 
                 enum FoldResult {
                     Ok(i64),
+                    OkBool(bool),
                     Warning(String),
                     Error(String),
                 }
@@ -59,7 +60,8 @@ impl Rewriter<String> for Folder {
 
                     TokenKind::Minus => FoldResult::Ok(na - nb),
 
-                    TokenKind::CompareEquals => FoldResult::Ok(if na == nb { 1 } else { 0 }),
+                    TokenKind::CompareEquals => FoldResult::OkBool(na==nb),
+                    TokenKind::CompareNotEquals => FoldResult::OkBool(na!=nb),
 
                     TokenKind::Power => match na.checked_pow(nb as u64 as u32) {
                         Some(value) => FoldResult::Ok(value),
@@ -73,6 +75,10 @@ impl Rewriter<String> for Folder {
                     FoldResult::Ok(number) => Expr::Number(Token {
                         position: a.position,
                         kind: TokenKind::Number(number),
+                    }),
+                    FoldResult::OkBool(b) => Expr::Bool(Token {
+                        position: a.position,
+                        kind: if b { TokenKind::True } else { TokenKind::False },
                     }),
                     FoldResult::Warning(w) => {
                         eprintln!("{}", w);

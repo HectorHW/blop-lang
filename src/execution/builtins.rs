@@ -257,7 +257,7 @@ pub fn builtin_factory() -> BuiltinMap {
     #[cfg(test)]
     builtin!("set_stack_limit", Exact(1), |args, vm| {
         vm.override_stack_limit(args[0].unwrap_int().unwrap() as usize);
-        Ok(Value::Int(0))
+        Ok(Default::default())
     });
 
     builtin!("is_vararg", Exact(1), |args, vm| {
@@ -268,7 +268,7 @@ pub fn builtin_factory() -> BuiltinMap {
             .unwrap_or(Arity::Exact(0))
             .is_vararg();
 
-        Ok(Value::Int(if v { 1 } else { 0 }))
+        Ok(v.into())
     });
 
     builtin!("print", AtLeast(0), |args, vm| {
@@ -282,7 +282,7 @@ pub fn builtin_factory() -> BuiltinMap {
 
         println!("{}", s);
 
-        Ok(Value::Int(0))
+        Ok(Default::default())
     });
 
     methods!("Int",

@@ -575,6 +575,10 @@ impl StackObject {
         }
     }
 
+    pub fn as_bool(&self) -> bool {
+        !matches!(self, StackObject::Nothing | StackObject::Bool(false))
+    }
+
     pub fn get_arity(&self, context: &mut VM) -> Option<Arity> {
         match self {
             StackObject::Int(_) => None,

@@ -115,6 +115,7 @@ pub(super) trait Rewriter<E> {
 
     fn visit_expr(&mut self, expr: Expr) -> Result<Expr, E> {
         match expr {
+            Expr::Bool(b) => self.visit_bool_expr(b),
             Expr::Number(n) => self.visit_number_expr(n),
             Expr::Name(n) => self.visit_variable_expr(n),
             Expr::ConstString(s) => self.visit_string_expr(s),
@@ -133,6 +134,10 @@ pub(super) trait Rewriter<E> {
             Expr::PropertyAccess(target, prop) => self.visit_property_access(target, prop),
             Expr::PropertyTest(target, prop) => self.visit_property_check(target, prop),
         }
+    }
+
+    fn visit_bool_expr(&mut self, token: Token) -> Result<Expr, E> {
+        Ok(Expr::Bool(token))
     }
 
     fn visit_number_expr(&mut self, token: Token) -> Result<Expr, E> {

@@ -61,6 +61,9 @@ pub enum TokenKind {
     Name(String),
     ConstString(String),
 
+    True,
+    False,
+
     Assert,
     Var,
     If,
@@ -156,6 +159,8 @@ impl<'input> Lexer<'input> {
             ("struct", Struct),
             ("enum", Enum),
             ("impl", Impl),
+            ("true", True),
+            ("false", False),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

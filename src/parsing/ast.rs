@@ -39,6 +39,7 @@ pub enum Stmt {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Number(Token),
+    Bool(Token),
     Name(Token),
     ConstString(Token),
     Binary(Token, Box<Expr>, Box<Expr>),
