@@ -18,10 +18,10 @@ use std::ptr::NonNull;
 const GC_THR_DEFAULT: usize = 16000;
 
 pub struct GC {
-    objects: IntMap<usize, Option<Pin<Box<OwnedObject>>>>,
+    objects: IntMap<usize, Pin<Box<OwnedObject>>>,
     allocations: usize,
     pub allocations_threshold: usize,
-    is_dropping: bool,
+    is_cleaning: bool,
 }
 
 impl StackObject {
@@ -496,7 +496,7 @@ impl GC {
             objects: Default::default(),
             allocations: 0,
             allocations_threshold: thr,
-            is_dropping: false,
+            is_cleaning: false,
         }
     }
     ///create instance of GC with default config (see GC_THR_DEFAULT)
@@ -522,7 +522,7 @@ impl GC {
 
             let index = GC::get_addressable_index(boxed.as_mut());
 
-            self.objects.insert(index, Some(Pin::new(boxed)));
+            self.objects.insert(index, Pin::new(boxed));
 
             self.allocations += 1;
 
@@ -568,10 +568,10 @@ impl GC {
             chunk.mark(true);
         }
 
-        self.is_dropping = true;
+        self.is_cleaning = true;
 
         //clean refs
-        for obj in &mut self.objects.values_mut().filter_map(|obj| obj.as_mut()) {
+        for obj in &mut self.objects.values_mut() {
             if !obj.is_marked() {
                 #[cfg(feature = "verbose-gc")]
                 println!("long pass: cleared refs in {:p}", obj.as_ref());
@@ -579,14 +579,13 @@ impl GC {
             }
         }
 
-        self.is_dropping = false;
+        self.is_cleaning = false;
 
         //sweep - drop unmarked objects
-        self.objects
-            .retain(|_, obj| obj.as_ref().map(|item| item.is_marked()).unwrap_or(false));
+        self.objects.retain(|_, obj| obj.is_marked());
 
         for item in &mut self.objects.values_mut() {
-            item.as_mut().unwrap().mark_shallow(false);
+            item.as_mut().mark_shallow(false);
         }
 
         self.allocations = 0;
@@ -599,12 +598,12 @@ impl GC {
     /// This function is unsafe because in non-debug environment existence of pointers to named
     /// object is not checked, which may lead to dropping memory that is still referenced somewhere
     pub unsafe fn drop_notify(&mut self, addr: usize) {
-        if self.is_dropping {
+        if self.is_cleaning {
             return; //do not drop objects inside clear
         }
-        let object = self.objects.get_mut(&addr).unwrap();
-        debug_assert!(object.is_none() || object.as_ref().unwrap().get_gc_counter() == 0);
-        let _ = object.take();
+        let object = self.objects.remove(&addr).unwrap();
+        debug_assert!(object.get_gc_counter() == 0);
+        drop(object);
     }
 
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
@@ -623,7 +622,7 @@ impl GC {
 
                     let index = GC::get_addressable_index(boxed.as_mut());
 
-                    self.objects.insert(index, Some(Pin::new(boxed)));
+                    self.objects.insert(index, Pin::new(boxed));
 
                     self.allocations += 1;
 
@@ -654,7 +653,7 @@ impl GC {
             return StackObject::ShortString(ss);
         }
 
-        for item in &mut self.objects.values_mut().filter_map(|obj| obj.as_mut()) {
+        for item in &mut self.objects.values_mut() {
             match &item.item {
                 OwnedObjectItem::ConstantString(obj) if obj.as_str() == s => {
                     #[cfg(feature = "verbose-gc")]
@@ -772,7 +771,7 @@ impl GC {
     }
 
     pub(crate) fn items(&self) -> impl Iterator<Item = &'_ Pin<Box<OwnedObject>>> {
-        self.objects.values().filter_map(|obj| obj.as_ref())
+        self.objects.values()
     }
 
     pub fn get_addressable_index(object: &mut OwnedObject) -> usize {
@@ -790,18 +789,14 @@ impl Drop for GC {
     fn drop(&mut self) {
         #[cfg(feature = "debug-gc")]
         println!("begin drop gc");
-        self.is_dropping = true;
+        self.is_cleaning = true;
         //clean refs
-        for mut obj in self
-            .objects
-            .values_mut()
-            .filter_map(|item| item.as_mut().map(|i| i.as_mut()))
-        {
+        for obj in self.objects.values_mut() {
             #[cfg(feature = "verbose-gc")]
             println!("working on {:p}", obj.as_mut());
             obj.clear_references();
         }
-        self.is_dropping = false;
+        self.is_cleaning = false;
         #[cfg(feature = "debug-gc")]
         println!("end drop gc");
     }
