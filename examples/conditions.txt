@@ -26,4 +26,4 @@ def G(x) =
 
 assert G(1)==1
 assert G(2)==2
-assert G(3)==0
+assert G(3)==Nothing

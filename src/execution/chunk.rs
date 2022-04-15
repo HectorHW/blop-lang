@@ -37,6 +37,7 @@ pub enum Opcode {
     LoadClosureValue(u16),
 
     LoadBlank,
+    LoadNothing,
     CallPartial(u16),
 
     Duplicate,

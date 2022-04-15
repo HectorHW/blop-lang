@@ -464,7 +464,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 let mut right_side = AnnotatedCodeBlob::new();
 
                 if e.is_none() {
-                    right_side.push(Opcode::LoadImmediateInt(0), n.position.0);
+                    right_side.push(Opcode::LoadNothing, n.position.0);
                 } else {
                     self.require_value();
                     let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
@@ -475,7 +475,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 result.append(self.create_named_entity(n, right_side)?);
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0), result.last_index().unwrap());
+                    result.push(Opcode::LoadNothing, result.last_index().unwrap());
                     //TODO dup?
                 }
             }
@@ -505,7 +505,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 result.append(self.create_named_entity(name, right_side)?);
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0), result.last_index().unwrap());
+                    result.push(Opcode::LoadNothing, result.last_index().unwrap());
                 }
             }
 
@@ -522,7 +522,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 result.append(self.create_named_entity(name, struct_load_code)?);
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0), name.position.0);
+                    result.push(Opcode::LoadNothing, name.position.0);
                 }
             }
 
@@ -630,7 +630,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 }
                 //in case we need some result value
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0), target.position.0);
+                    result.push(Opcode::LoadNothing, target.position.0);
                 }
             }
 
@@ -658,7 +658,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     );
 
                     if self.needs_value() {
-                        result.push(Opcode::LoadImmediateInt(0), property.position.0);
+                        result.push(Opcode::LoadNothing, property.position.0);
                     }
                 }
 
@@ -677,7 +677,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 result.append(body);
                 result.push(Opcode::Assert, token.position.0);
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0), token.position.0);
+                    result.push(Opcode::LoadNothing, token.position.0);
                 }
             }
 
@@ -706,13 +706,13 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 result.append(self.create_named_entity(function_name, function)?);
 
                 if self.needs_value() {
-                    result.push(Opcode::LoadImmediateInt(0), function_name.position.0);
+                    result.push(Opcode::LoadNothing, function_name.position.0);
                 }
             }
             Stmt::Pass(token) => {
                 result.push(
                     if self.needs_value() {
-                        Opcode::LoadImmediateInt(0)
+                        Opcode::LoadNothing
                     } else {
                         Opcode::Nop
                     },
@@ -865,10 +865,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                         let mut blob = AnnotatedCodeBlob::new();
                         if self.needs_value() {
                             {
-                                blob += (
-                                    Opcode::LoadImmediateInt(0),
-                                    *condition.indices.get(0).unwrap(),
-                                );
+                                blob += (Opcode::LoadNothing, *condition.indices.get(0).unwrap());
                             }
                         } else {
                             blob += (Opcode::Nop, *condition.indices.get(0).unwrap());
@@ -1118,7 +1115,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             self.declare_local(fictive_variable_name, VariableType::Normal)
                 .unwrap();
             self.define_local(fictive_variable_name);
-            result += (Opcode::LoadImmediateInt(0), block_begin.position.0); // _ variable
+            result += (Opcode::LoadNothing, block_begin.position.0); // _ variable
         }
 
         let predeclared_names = self.annotations.get_block_scope(block_begin).unwrap();

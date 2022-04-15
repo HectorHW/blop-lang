@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 ///
 /// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
@@ -15,6 +15,7 @@ type BuiltinMethod = fn(Value, Vec<Value>, &mut VM) -> Result;
 pub struct BuiltinMap {
     functions: IndexMap<String, (Arity, BuiltinFuction)>,
     methods: IndexMap<String, IndexMap<String, (Arity, BuiltinMethod)>>,
+    builtin_values: HashMap<String, Value>,
 }
 
 pub enum BuiltinError {
@@ -124,6 +125,7 @@ impl BuiltinMap {
         self.functions
             .get_full(name)
             .map(|(idx, _, _)| Value::Builtin(idx))
+            .or_else(|| self.builtin_values.get(name).cloned())
     }
 
     pub fn get_method(&self, class_name: &str, method_name: &str) -> Option<Value> {
@@ -174,6 +176,12 @@ pub fn builtin_factory() -> BuiltinMap {
 
     let mut map: BuiltinMap = BuiltinMap::new();
 
+    macro_rules! value {
+        ($name:expr, $_value:expr) => {
+            map.builtin_values.insert($name.to_string(), $_value);
+        };
+    }
+
     macro_rules! builtin {
         ($name:expr, $arity:expr, $function: expr) => {
             map.add_builtin($name, $arity, $function)
@@ -189,6 +197,10 @@ pub fn builtin_factory() -> BuiltinMap {
             }
         }
     }
+
+    value!("true", true.into());
+    value!("false", false.into());
+    value!("Nothing", Default::default());
 
     builtin!("sum", AtLeast(0), |args, _vm| {
         if let Some((idx, obj)) = args[0]

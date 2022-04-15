@@ -956,6 +956,11 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 InstructionExecution::NextInstruction
             }
 
+            Opcode::LoadNothing => {
+                self.stack.push(StackObject::Nothing);
+                InstructionExecution::NextInstruction
+            }
+
             Opcode::MakeList(size) => {
                 let size = size as usize;
                 self.check_underflow(size + 1)
