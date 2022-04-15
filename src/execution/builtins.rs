@@ -198,8 +198,6 @@ pub fn builtin_factory() -> BuiltinMap {
         }
     }
 
-    value!("true", true.into());
-    value!("false", false.into());
     value!("Nothing", Default::default());
 
     builtin!("sum", AtLeast(0), |args, _vm| {
