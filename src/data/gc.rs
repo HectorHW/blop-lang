@@ -15,12 +15,13 @@ use crate::execution::vm::CallStackValue;
 use std::pin::Pin;
 use std::ptr::NonNull;
 
-const GC_THR_DEFAULT: usize = 16000;
+const GC_THR_DEFAULT: usize = 1000;
 
 pub struct GC {
     objects: IntMap<usize, Pin<Box<OwnedObject>>>,
     allocations: usize,
     pub allocations_threshold: usize,
+    grow_factor: f64,
     is_cleaning: bool,
 }
 
@@ -497,6 +498,7 @@ impl GC {
             allocations: 0,
             allocations_threshold: thr,
             is_cleaning: false,
+            grow_factor: 1.2f64,
         }
     }
     ///create instance of GC with default config (see GC_THR_DEFAULT)
@@ -588,7 +590,10 @@ impl GC {
             item.as_mut().mark_shallow(false);
         }
 
-        self.allocations = 0;
+        let new_thr = (self.objects.len() as f64 * self.grow_factor).ceil() as usize;
+
+        self.allocations_threshold = new_thr;
+
         #[cfg(feature = "debug-gc")]
         println!("end slow_pass");
     }
@@ -604,6 +609,7 @@ impl GC {
         let object = self.objects.remove(&addr).unwrap();
         debug_assert!(object.get_gc_counter() == 0);
         drop(object);
+        self.allocations -= 1;
     }
 
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
