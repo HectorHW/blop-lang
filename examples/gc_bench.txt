@@ -1,0 +1,17 @@
+def make_oprphan()=
+    struct Garbage:
+        field0
+        field1
+        field2
+    var g = Garbage(0,0,0)
+    g._0 = g
+    g
+
+def loop(iterations) =
+    if iterations<=0
+        pass
+    else
+        make_oprphan()
+        loop(iterations-1)
+
+loop(1000000)
