@@ -586,13 +586,15 @@ impl GC {
         //sweep - drop unmarked objects
         self.objects.retain(|_, obj| obj.is_marked());
 
+        self.allocations = self.objects.len();
+
         for item in &mut self.objects.values_mut() {
             item.as_mut().mark_shallow(false);
         }
 
         let new_thr = (self.objects.len() as f64 * self.grow_factor).ceil() as usize;
 
-        self.allocations_threshold = new_thr;
+        self.allocations_threshold = usize::max(new_thr, self.allocations_threshold);
 
         #[cfg(feature = "debug-gc")]
         println!("end slow_pass");
