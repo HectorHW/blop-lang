@@ -43,3 +43,12 @@ assert 1 < 1.5
 #and also converted whe performing operations with floats
 assert 5/2 == 2
 assert 5/2.0 == 2.5
+
+#bool literals
+assert true
+assert not false
+
+#nothing that indicates absence of value
+def do_nothing() =
+    pass
+assert do_nothing() == Nothing
