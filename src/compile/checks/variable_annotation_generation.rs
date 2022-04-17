@@ -39,7 +39,6 @@ impl<'a> AnnotationGenerator<'a> {
 
         annotator.visit_expr(ast)?;
 
-        println!("ANNOTATIONS:\n{:?}", annotator.annotations);
         Ok(())
     }
 
