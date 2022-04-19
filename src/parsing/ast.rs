@@ -55,4 +55,4 @@ pub enum Expr {
     PropertyTest(Box<Expr>, Token),
 }
 
-pub type Program = Expr;
+pub type Program = Vec<Stmt>;

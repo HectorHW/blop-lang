@@ -16,7 +16,7 @@ enum ValueRequirement {
 }
 
 lazy_static! {
-    static ref SCRIPT_TOKEN: Token = Token {
+    pub static ref SCRIPT_TOKEN: Token = Token {
         kind: TokenKind::Name("`script`".to_string()),
         position: Index(0, 0),
     };
@@ -62,7 +62,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
     }
 
-    pub fn compile(
+    pub fn compile_script(
         program: &Program,
         annotations: Annotations,
         gc: &'gc mut GC,
@@ -79,8 +79,32 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
         compiler.new_scope();
 
+        for stmt in program {
+            match stmt {
+                Stmt::VarDeclaration(name, _)
+                | Stmt::FunctionDeclaration { name, .. }
+                | Stmt::StructDeclaration { name, .. }
+                | Stmt::EnumDeclaration { name, .. } => {
+                    compiler.declare_local(name.get_string().unwrap(), VariableType::Global);
+                }
+
+                _ => {}
+            }
+        }
+
+        let (last, other) = program.split_last().unwrap();
+
+        let mut blob = AnnotatedCodeBlob::new();
+
+        for stmt in other {
+            compiler.require_nothing();
+            blob.append(compiler.visit_stmt(stmt)?);
+            compiler.pop_requirement();
+        }
+
         compiler.require_value();
-        let mut blob = compiler.visit_expr(program)?;
+
+        blob.append(compiler.visit_stmt(last)?);
         compiler.pop_requirement();
 
         blob += (Opcode::Return, 0);
@@ -142,7 +166,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     }
 
     /// looks up variable by name, considering only well-defined variables
-    /// (i.e. previously declared with var or def)
+    /// (i.e. previously declared with var, def, struct or enum)
     fn lookup_local(&self, name: &str) -> Option<(VariableType, usize)> {
         for scope in self.names.iter().rev() {
             if let Some((var_type, true, var_idx)) = scope.get(name) {
@@ -181,7 +205,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
 
         let var_index = self.total_variables;
-        self.total_variables += 1;
+        if var_type != VariableType::Global {
+            //globals do not take stack space
+            self.total_variables += 1;
+        }
+
         self.names
             .last_mut()
             .unwrap()
@@ -349,6 +377,10 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     result.push(Opcode::LoadLocal(var_idx as u16), function_name.position.0);
                     //TODO extension
                 }
+                (VariableType::Global, _) => {
+                    let idx = self.get_or_create_name(closed_over_value);
+                    result.push(Opcode::LoadGlobal(idx as u16), function_name.position.0);
+                }
                 (VariableType::Boxed, var_idx) => {
                     result.push(Opcode::LoadLocal(var_idx as u16), function_name.position.0);
                 }
@@ -380,6 +412,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 result.push(Opcode::StoreBox, name.position.0);
             }
+            Some((VariableType::Global, _)) => {
+                let idx = self.get_or_create_name(name.get_string().unwrap());
+                result.append(value_emitting_code);
+                result.push(Opcode::StoreGLobal(idx as u16), name.position.0);
+            }
 
             None => {
                 //variable is not forward-declared => not present on stack yet
@@ -403,6 +440,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             Some((VariableType::Normal, var_idx)) => {
                 result.push(Opcode::LoadLocal(var_idx as u16), line);
                 //TODO extension
+            }
+
+            Some((VariableType::Global, _)) => {
+                let idx = self.get_or_create_name(name.get_string().unwrap());
+                result.push(Opcode::LoadGlobal(idx as u16), line);
             }
 
             Some((VariableType::Boxed, var_idx)) => {
@@ -596,7 +638,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                             result
                                 .push(Opcode::LoadClosureValue(var_idx as u16), target.position.0);
                         }
-                        VariableType::Normal => {
+                        VariableType::Normal | VariableType::Global => {
                             //nothing
                         }
                     }
@@ -615,6 +657,10 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                         VariableType::Normal => {
                             result.push(Opcode::StoreLocal(var_idx as u16), target.position.0);
                             //TODO extension
+                        }
+                        VariableType::Global => {
+                            let idx = self.get_or_create_name(varname);
+                            result.push(Opcode::StoreGLobal(idx as u16), target.position.0);
                         }
                         VariableType::Boxed => {
                             result.push(Opcode::StoreBox, target.position.0);

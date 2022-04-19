@@ -29,8 +29,8 @@ enum AssignmentTarget {
 peg::parser! {
     pub grammar program_parser() for [Token] {
         use TokenKind::*;
-        pub rule program() -> Expr
-            = block_expr()
+        pub rule program() -> Vec<Stmt>
+            = b:block() {b.2}
 
         rule block() -> (Token, Token, Vec<Stmt>) =
             [bb@t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {(bb, be, s)}

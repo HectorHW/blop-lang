@@ -4,7 +4,7 @@ use crate::data::objects::Value;
 use crate::execution::builtins::builtin_factory;
 use crate::execution::chunk::Chunk;
 use crate::execution::vm::VM;
-use crate::parsing::ast::Expr;
+use crate::parsing::ast::{Expr, Stmt};
 use execution::chunk::Opcode;
 use execution::vm::InterpretError;
 use peg::error::ParseError;
@@ -75,7 +75,7 @@ fn main() {
     #[cfg(feature = "print-ast")]
     println!("{:?}", statements);
     let mut gc = unsafe { GC::default_gc() };
-    let entry_point = Compiler::compile(&statements, annotations, &mut gc).unwrap();
+    let entry_point = Compiler::compile_script(&statements, annotations, &mut gc).unwrap();
 
     #[cfg(feature = "print-chunk")]
     {
@@ -159,10 +159,10 @@ pub fn compile_program(program: String, gc: &mut GC) -> Result<CompilationResult
     let file_content = normalize_string(program);
     let tokens = parsing::lexer::tokenize(&file_content)?;
     use parsing::parser::program_parser;
-    let statements: Expr = program_parser::program(&tokens)
+    let statements: Vec<Stmt> = program_parser::program(&tokens)
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
     let (statements, annotations) = compile::checks::check_optimize(statements)?;
-    let chunks = Compiler::compile(&statements, annotations, gc)?;
+    let chunks = Compiler::compile_script(&statements, annotations, gc)?;
     Ok(chunks)
 }
 
