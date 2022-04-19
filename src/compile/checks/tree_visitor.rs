@@ -105,6 +105,8 @@ pub(super) trait Visitor<E> {
     fn visit_expr(&mut self, expr: &Expr) -> Result<(), E> {
         match expr {
             Expr::Number(n) => self.visit_number_expr(n),
+            Expr::FloatNumber(n) => self.visit_float_number_expr(n),
+            Expr::Bool(b) => self.visit_bool_expr(b),
             Expr::Name(n) => self.visit_variable_expr(n),
             Expr::ConstString(s) => self.visit_string_expr(s),
             Expr::Binary(op, a, b) => self.visit_binary_expr(op, a, b),
@@ -125,7 +127,15 @@ pub(super) trait Visitor<E> {
         }
     }
 
+    fn visit_bool_expr(&mut self, token: &Token) -> Result<(), E> {
+        Ok(())
+    }
+
     fn visit_number_expr(&mut self, token: &Token) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_float_number_expr(&mut self, token: &Token) -> Result<(), E> {
         Ok(())
     }
 

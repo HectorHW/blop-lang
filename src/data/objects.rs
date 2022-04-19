@@ -18,11 +18,38 @@ pub const SHORT_STRING_BUF_SIZE: usize = 8;
 
 pub enum StackObject {
     Int(i64),
+    Float(f64),
+    Bool(bool),
+    Nothing,
     Blank,
     Builtin(usize),
     BuiltinMethod { class_idx: u32, method_idx: u32 },
     ShortString(ShortString<SHORT_STRING_BUF_SIZE>),
     HeapObject(PrivatePtr<OwnedObject>),
+}
+
+impl From<i64> for StackObject {
+    fn from(i: i64) -> Self {
+        Self::Int(i)
+    }
+}
+
+impl From<f64> for StackObject {
+    fn from(f: f64) -> Self {
+        Self::Float(f)
+    }
+}
+
+impl From<bool> for StackObject {
+    fn from(b: bool) -> Self {
+        Self::Bool(b)
+    }
+}
+
+impl Default for StackObject {
+    fn default() -> Self {
+        Self::Nothing
+    }
 }
 
 pub struct OwnedObject {
@@ -369,6 +396,15 @@ impl Display for StackObject {
             StackObject::Int(n) => {
                 write!(f, "{}", n)
             }
+            &StackObject::Bool(b) => {
+                write!(f, "{}", if b { "true" } else { "false" })
+            }
+            &StackObject::Float(f_) => {
+                write!(f, "{}", f_)
+            }
+            StackObject::Nothing => {
+                write!(f, "Nothing")
+            }
             StackObject::HeapObject(ptr) => {
                 write!(f, "{}", ptr.unwrap_ref())
             }
@@ -390,6 +426,9 @@ impl Debug for StackObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             StackObject::Int(i) => write!(f, "Int {}", i),
+            &StackObject::Bool(b) => write!(f, "Bool {}", if b { "true" } else { "false" }),
+            &StackObject::Float(v) => write!(f, "Float {}", v),
+            StackObject::Nothing => write!(f, "Nothing"),
             StackObject::HeapObject(ptr) => {
                 write!(f, "{:?}", ptr.unwrap_ref().item)
             }
@@ -417,6 +456,9 @@ impl StackObject {
         use StackObject::*;
         match self {
             Int(..) => true,
+            Bool(..) => true,
+            Float(..) => false, //sorry, no dict[0.1+0.2] for you
+            Nothing => true,
             ShortString(..) => true,
             Builtin(..) | Blank | BuiltinMethod { .. } => false,
             HeapObject(ptr) => ptr.unwrap_ref().can_hash(),
@@ -462,6 +504,13 @@ impl StackObject {
     pub fn unwrap_int(&self) -> Option<i64> {
         match self {
             StackObject::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_float(&self) -> Option<f64> {
+        match self {
+            &StackObject::Float(f) => Some(f),
             _ => None,
         }
     }
@@ -533,9 +582,14 @@ impl StackObject {
         }
     }
 
+    pub fn as_bool(&self) -> bool {
+        !matches!(self, StackObject::Nothing | StackObject::Bool(false))
+    }
+
     pub fn get_arity(&self, context: &mut VM) -> Option<Arity> {
         match self {
             StackObject::Int(_) => None,
+            StackObject::Bool(..) | StackObject::Float(..) | StackObject::Nothing => None,
             StackObject::ShortString(..) => None,
             StackObject::Blank => None,
             &StackObject::Builtin(idx) => context.builtins.get_builtin_arity(idx),
@@ -615,6 +669,9 @@ impl StackObject {
     pub fn type_string(&self) -> &'static str {
         match self {
             StackObject::Int(_) => "Int",
+            StackObject::Bool(..) => "Bool",
+            StackObject::Float(..) => "Float",
+            StackObject::Nothing => "Nothing",
             StackObject::ShortString(..) => "String",
             StackObject::Builtin(_) => "Builtin",
             Self::BuiltinMethod { .. } => "BuiltinMethod",
@@ -636,11 +693,20 @@ impl StackObject {
             _ => None,
         }
     }
+
+    fn cmp_floats(obj1: &StackObject, obj2: &StackObject) -> Option<Ordering> {
+        match (obj1, obj2) {
+            (&StackObject::Float(f1), &StackObject::Float(f2)) => f1.partial_cmp(&f2),
+            _ => None,
+        }
+    }
 }
 
 impl PartialOrd for StackObject {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        StackObject::cmp_any_strings(self, other).or_else(|| StackObject::cmp_ints(self, other))
+        StackObject::cmp_any_strings(self, other)
+            .or_else(|| StackObject::cmp_ints(self, other))
+            .or_else(|| StackObject::cmp_floats(self, other))
     }
 }
 
@@ -657,6 +723,9 @@ impl PartialEq for StackObject {
 
         match (self, other) {
             (StackObject::Int(a), StackObject::Int(b)) => a == b,
+            (StackObject::Float(f1), StackObject::Float(f2)) => f1 == f2,
+            (StackObject::Bool(b1), StackObject::Bool(b2)) => b1 == b2,
+            (StackObject::Nothing, StackObject::Nothing) => true,
             (StackObject::HeapObject(ptr1), StackObject::HeapObject(ptr2)) => {
                 std::ptr::eq(ptr1.unwrap(), ptr2.unwrap()) || ptr1.unwrap_ref() == ptr2.unwrap_ref()
             }
@@ -675,6 +744,8 @@ impl Hash for StackObject {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             StackObject::Int(i) => i.hash(state),
+            StackObject::Bool(b) => b.hash(state),
+            StackObject::Nothing => 0usize.hash(state),
             StackObject::ShortString(s) => s.as_str().hash(state),
             StackObject::HeapObject(ptr) => ptr.unwrap_ref().hash(state),
             other => panic!("cannot hash {:?}", other),

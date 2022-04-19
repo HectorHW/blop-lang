@@ -37,6 +37,9 @@ impl Clone for StackObject {
     fn clone(&self) -> Self {
         match self {
             &StackObject::Int(i) => StackObject::Int(i),
+            &StackObject::Float(f) => StackObject::Float(f),
+            &StackObject::Bool(b) => StackObject::Bool(b),
+            &StackObject::Nothing => StackObject::Nothing,
             &StackObject::ShortString(s) => StackObject::ShortString(s),
             StackObject::HeapObject(ptr) => {
                 ptr.unwrap_ref_mut().inc_gc_counter();
@@ -61,7 +64,10 @@ impl Drop for StackObject {
         #[cfg(feature = "verbose-gc")]
         let type_ = self.type_string();
         match self {
-            StackObject::Int(_) => {}
+            StackObject::Int(_)
+            | StackObject::Bool(..)
+            | StackObject::Float(..)
+            | StackObject::Nothing => {}
             StackObject::ShortString(..) => {}
 
             StackObject::HeapObject(ptr) => {
@@ -617,8 +623,11 @@ impl GC {
     pub fn clone_value(&mut self, obj: &StackObject) -> StackObject {
         //copies underlying object
         match obj {
-            StackObject::Int(i) => StackObject::Int(*i), //no cloning necessary
-            s @ StackObject::ShortString(..) => s.clone(),
+            s @ StackObject::Int(..)
+            | s @ StackObject::Float(..)
+            | s @ StackObject::Bool(..)
+            | s @ StackObject::Nothing
+            | s @ StackObject::ShortString(..) => s.clone(), //no cloning necessary
 
             h @ StackObject::HeapObject(ptr) => {
                 if matches!(ptr.unwrap_ref().item, OwnedObjectItem::ConstantString(..)) {

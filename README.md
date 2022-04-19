@@ -16,7 +16,7 @@ The interpreter supports (somewhat working) REPL mode, but is mainly intended fo
 
 Language provides a few basic building blocks:
 
-* integer numbers like `42`
+* few basic types like integers `42`, floats `0.5`, booleans `true` and `false`, special value `Nothing`
 * `"strings in double quotes"`
 * basic operators like `+` and `==`
 * logic short-circuting operators `and`, `or`
