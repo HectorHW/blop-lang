@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 ///
 /// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
@@ -15,6 +15,7 @@ type BuiltinMethod = fn(Value, Vec<Value>, &mut VM) -> Result;
 pub struct BuiltinMap {
     functions: IndexMap<String, (Arity, BuiltinFuction)>,
     methods: IndexMap<String, IndexMap<String, (Arity, BuiltinMethod)>>,
+    builtin_values: HashMap<String, Value>,
 }
 
 pub enum BuiltinError {
@@ -124,6 +125,7 @@ impl BuiltinMap {
         self.functions
             .get_full(name)
             .map(|(idx, _, _)| Value::Builtin(idx))
+            .or_else(|| self.builtin_values.get(name).cloned())
     }
 
     pub fn get_method(&self, class_name: &str, method_name: &str) -> Option<Value> {
@@ -174,6 +176,12 @@ pub fn builtin_factory() -> BuiltinMap {
 
     let mut map: BuiltinMap = BuiltinMap::new();
 
+    macro_rules! value {
+        ($name:expr, $_value:expr) => {
+            map.builtin_values.insert($name.to_string(), $_value);
+        };
+    }
+
     macro_rules! builtin {
         ($name:expr, $arity:expr, $function: expr) => {
             map.add_builtin($name, $arity, $function)
@@ -189,6 +197,8 @@ pub fn builtin_factory() -> BuiltinMap {
             }
         }
     }
+
+    value!("Nothing", Default::default());
 
     builtin!("sum", AtLeast(0), |args, _vm| {
         if let Some((idx, obj)) = args[0]
@@ -245,7 +255,7 @@ pub fn builtin_factory() -> BuiltinMap {
     #[cfg(test)]
     builtin!("set_stack_limit", Exact(1), |args, vm| {
         vm.override_stack_limit(args[0].unwrap_int().unwrap() as usize);
-        Ok(Value::Int(0))
+        Ok(Default::default())
     });
 
     builtin!("is_vararg", Exact(1), |args, vm| {
@@ -256,7 +266,7 @@ pub fn builtin_factory() -> BuiltinMap {
             .unwrap_or(Arity::Exact(0))
             .is_vararg();
 
-        Ok(Value::Int(if v { 1 } else { 0 }))
+        Ok(v.into())
     });
 
     builtin!("print", AtLeast(0), |args, vm| {
@@ -270,7 +280,7 @@ pub fn builtin_factory() -> BuiltinMap {
 
         println!("{}", s);
 
-        Ok(Value::Int(0))
+        Ok(Default::default())
     });
 
     methods!("Int",
