@@ -147,6 +147,7 @@ struct Lexer<'input> {
     line_start: usize,
     indentation: Vec<usize>,
     keywords: HashMap<String, TokenKind>,
+    simple_tokens: HashMap<char, TokenKind>,
     brackets: Vec<Token>,
 }
 
@@ -176,6 +177,19 @@ impl<'input> Lexer<'input> {
         .map(|(k, v)| (k.to_string(), v))
         .collect::<HashMap<String, TokenKind>>();
 
+        let simple_tokens = vec![
+            ('+', Plus),
+            ('-', Minus),
+            // * is not here because it may also be **
+            ('/', Slash),
+            (',', Comma),
+            ('.', Dot),
+            ('?', QuestionMark),
+            (':', Colon),
+        ]
+        .into_iter()
+        .collect();
+
         Lexer {
             input_string,
             input_iterator: input_string.char_indices().peekable(),
@@ -183,6 +197,7 @@ impl<'input> Lexer<'input> {
             line_start: 0,
             indentation: vec![],
             keywords,
+            simple_tokens,
             brackets: vec![],
         }
     }
@@ -288,15 +303,6 @@ impl<'input> Lexer<'input> {
                     self.read_while(&|c| c != '\n');
                 }
 
-                '+' => {
-                    result.push(token!(Plus));
-                    self.input_iterator.next();
-                }
-                '-' => {
-                    result.push(token!(Minus));
-                    self.input_iterator.next();
-                }
-
                 '*' => {
                     let index = self.compute_index();
                     self.input_iterator.next();
@@ -310,28 +316,9 @@ impl<'input> Lexer<'input> {
                         }
                     }
                 }
-                '/' => {
-                    result.push(token!(Slash));
-                    self.input_iterator.next();
-                }
 
-                ',' => {
-                    result.push(token!(Comma));
-                    self.input_iterator.next();
-                }
-
-                '.' => {
-                    result.push(token!(Dot));
-                    self.input_iterator.next();
-                }
-
-                '?' => {
-                    result.push(token!(QuestionMark));
-                    self.input_iterator.next();
-                }
-
-                ':' => {
-                    result.push(token!(Colon));
+                x if self.simple_tokens.contains_key(&x) => {
+                    result.push(token!(self.simple_tokens.get(&x).cloned().unwrap()));
                     self.input_iterator.next();
                 }
 
