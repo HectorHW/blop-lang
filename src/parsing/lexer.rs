@@ -58,6 +58,7 @@ pub enum TokenKind {
 
     Equals,
     Colon,
+    Semicolon,
 
     Number(i64),
     FloatNumber(NotNan<f64>),
@@ -186,6 +187,7 @@ impl<'input> Lexer<'input> {
             ('.', Dot),
             ('?', QuestionMark),
             (':', Colon),
+            (';', Semicolon),
         ]
         .into_iter()
         .collect();

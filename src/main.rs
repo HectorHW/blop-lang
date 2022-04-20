@@ -56,7 +56,9 @@ fn main() {
 
     use parsing::parser::program_parser;
 
-    let statements = match program_parser::program(&tokens) {
+    let tokens = tokens.iter().collect::<Vec<_>>();
+
+    let statements = match program_parser::program(tokens.as_slice()) {
         Ok(s) => s,
         Err(ParseError { location, expected }) => {
             println!("{:?}", ParseError { location, expected });
@@ -159,7 +161,10 @@ pub fn compile_program(program: String, gc: &mut GC) -> Result<CompilationResult
     let file_content = normalize_string(program);
     let tokens = parsing::lexer::tokenize(&file_content)?;
     use parsing::parser::program_parser;
-    let statements: Vec<Stmt> = program_parser::program(&tokens)
+
+    let tokens = tokens.iter().collect::<Vec<_>>();
+
+    let statements: Vec<Stmt> = program_parser::program(tokens.as_slice())
         .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
     let (statements, annotations) = compile::checks::check_optimize(statements)?;
     let chunks = Compiler::compile_script(&statements, annotations, gc)?;

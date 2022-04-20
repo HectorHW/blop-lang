@@ -10,7 +10,7 @@ macro_rules! t {
 
 macro_rules! bin {
     ($op:expr, $a:expr, $b:expr) => {
-        Expr::Binary($op, Box::new($a), Box::new($b))
+        Expr::Binary($op.clone(), Box::new($a), Box::new($b))
     };
 }
 
@@ -27,14 +27,13 @@ enum AssignmentTarget {
 }
 
 peg::parser! {
-    pub grammar program_parser() for [Token] {
+    pub grammar program_parser<'a>() for [&'a Token] {
         use TokenKind::*;
         pub rule program() -> Vec<Stmt>
             = b:block() {b.2}
 
         rule block() -> (Token, Token, Vec<Stmt>) =
-            [bb@t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {(bb, be, s)}
-
+            [bb@t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {(bb.clone(), be.clone(), s)}
 
         rule stmt() -> Stmt =
 
@@ -170,7 +169,7 @@ peg::parser! {
 
 
         rule assert_stmt() -> Stmt =
-            [a@t!(Assert)] e:expr() {Stmt::Assert(a, e)}
+            [a@t!(Assert)] e:expr() {Stmt::Assert(a.clone(), e)}
 
         rule if_expr() -> Expr =
             if_elif_else()/ if_elif() / if_then()
@@ -205,7 +204,7 @@ peg::parser! {
             }
 
         rule pass_stmt() -> Stmt =
-            [t@t!(Pass)] {Stmt::Pass(t)}
+            [t@t!(Pass)] {Stmt::Pass(t.clone())}
 
         rule expr() -> Expr =
             block_expr() /
@@ -214,14 +213,23 @@ peg::parser! {
 
         rule block_expr() -> Expr =
             b:block() {Expr::Block(b.0, b.1, b.2)}
+            / inline_block()
 
         rule simple_expr() -> Expr =
             arrow() /
             arithmetic()
 
+        rule inline_block() -> Expr =
+            [left@t!(LParen)] s:stmt() [t!(Semicolon)] more:stmt() ++ [t!(Semicolon)]  [right@t!(RParen)] {
+                let mut more = more;
+                let mut v = vec![s];
+                v.append(&mut more);
+                Expr::Block(left.clone(), right.clone(), v)
+            }
+
         rule arrow() -> Expr =
             p:paren_name_list() [t@t!(Arrow)] b:simple_expr() {
-            Expr::AnonFunction(p.0, p.1, t, Box::new(b))
+            Expr::AnonFunction(p.0, p.1, t.clone(), Box::new(b))
         }
 
         rule arithmetic() -> Expr = precedence! {
@@ -233,7 +241,7 @@ peg::parser! {
             --
             [op@t!(Not)] x: @
                 {
-                    Expr::Unary(op, Box::new(x))
+                    Expr::Unary(op.clone(), Box::new(x))
                 }
 
             --
@@ -307,13 +315,13 @@ peg::parser! {
             / call_parens()
 
         rule call_parens() -> CallVariant =
-            [t!(LParen)] args:simple_expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {CallVariant::Normal(args)}
+            [t!(LParen)] args:expr()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {CallVariant::Normal(args)}
         / [t!(LParen)] args:maybe_argument()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] {
             CallVariant::Partial(args)
         }
 
         rule maybe_argument() -> Option<Expr> =
-            e:simple_expr() {Some(e)}
+            e:expr() {Some(e)}
         / [t!(Blank)] {None}
 
         rule call_property_access() -> CallVariant =
@@ -322,17 +330,17 @@ peg::parser! {
             [t!(QuestionMark)] property_name: name() {CallVariant::PropertyTest(property_name)}
 
         rule term() -> Expr
-            = [num@t!(Number(..))] {Expr::Number(num)}
-            / [num @ t!(FloatNumber(..))] {Expr::FloatNumber(num)}
-            / [b@t!(True) | b@t!(False)] {Expr::Bool(b)}
+            = [num@t!(Number(..))] {Expr::Number(num.clone())}
+            / [num @ t!(FloatNumber(..))] {Expr::FloatNumber(num.clone())}
+            / [b@t!(True) | b@t!(False)] {Expr::Bool(b.clone())}
             / t:name()
                 {Expr::Name(t)}
-            / [s@t!(ConstString(..))] {Expr::ConstString(s)}
+            / [s@t!(ConstString(..))] {Expr::ConstString(s.clone())}
             / [t!(LParen)] e:expr() [t!(RParen)] {e}
 
 
 
         rule name() -> Token
-            = [t@Token{kind:TokenKind::Name(..), position:pos}] {t}
+            = [t@Token{kind:TokenKind::Name(..), position:pos}] {t.clone()}
     }
 }
