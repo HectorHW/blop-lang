@@ -117,7 +117,10 @@ fn main() {
 }
 
 fn normalize_string(s: String) -> String {
-    s.lines().collect::<Vec<_>>().join("\n")
+    s.replace('\t', "    ") // 4 spaces
+        .lines()
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn display_error(source: &str, error: InterpretError) -> String {
