@@ -26,8 +26,8 @@ lazy_static! {
 pub struct Compiler<'gc, 'annotations, 'chunk> {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
-    total_variables: usize,
     total_closed_variables: usize,
+    stack_height: usize,
     function_context: FunctionCompilationContext,
     current_chunk: &'chunk mut Chunk,
     annotations: &'annotations Annotations,
@@ -50,8 +50,8 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         Compiler {
             names: vec![],
             value_requirements: vec![],
-            total_variables: 0,
             total_closed_variables: 0,
+            stack_height: 0,
             function_context: FunctionCompilationContext {
                 arity: function_arity,
                 name: function_name,
@@ -128,7 +128,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     }
 
     fn pop_requirement(&mut self) {
-        self.value_requirements.pop();
+        match self.value_requirements.pop().unwrap() {
+            ValueRequirement::Nothing => {}
+            ValueRequirement::Value => self.inc_stack_height(),
+            ValueRequirement::ReturnValue => self.inc_stack_height(),
+        }
     }
 
     fn needs_value(&self) -> bool {
@@ -143,6 +147,22 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             Some(ValueRequirement::ReturnValue) => true,
             _other => false,
         }
+    }
+
+    fn inc_stack_height(&mut self) {
+        self.stack_height += 1;
+    }
+
+    fn dec_stack_height(&mut self) {
+        self.stack_height -= 1;
+    }
+
+    fn sub_stack_height(&mut self, items: usize) {
+        self.stack_height -= items;
+    }
+
+    fn get_stack_height(&mut self) -> usize {
+        self.stack_height
     }
 
     fn get_or_create_name(&mut self, name: &str) -> usize {
@@ -204,10 +224,13 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             return None;
         }
 
-        let var_index = self.total_variables;
+        let var_index;
         if var_type != VariableType::Global {
+            var_index = self.get_stack_height();
             //globals do not take stack space
-            self.total_variables += 1;
+            self.inc_stack_height();
+        } else {
+            var_index = 0;
         }
 
         self.names
@@ -245,7 +268,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         let scope = self.names.pop().unwrap();
         let items_in_scope = scope.len();
         drop(scope);
-        self.total_variables -= items_in_scope;
+        self.sub_stack_height(items_in_scope);
         items_in_scope
     }
 
@@ -397,30 +420,35 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         Ok(result)
     }
 
-    fn create_named_entity(
+    fn create_named_entity<'a>(
         &mut self,
         name: &Token,
-        value_emitting_code: AnnotatedCodeBlob,
+        value_emitting_code: &'a dyn Fn(&mut Compiler) -> Result<AnnotatedCodeBlob, String>,
     ) -> Result<AnnotatedCodeBlob, String> {
         let mut result = AnnotatedCodeBlob::new();
 
         match self.lookup_block(name.get_string().unwrap()) {
             Some((VariableType::Boxed, idx)) => {
                 result.push(Opcode::LoadLocal(idx as u16), name.position.0); //load box
-
-                result.append(value_emitting_code);
+                self.inc_stack_height();
+                result.append(value_emitting_code(self)?);
 
                 result.push(Opcode::StoreBox, name.position.0);
+                self.dec_stack_height(); //consumes two operands
+                self.dec_stack_height();
             }
             Some((VariableType::Global, _)) => {
                 let idx = self.get_or_create_name(name.get_string().unwrap());
-                result.append(value_emitting_code);
+                result.append(value_emitting_code(self)?);
                 result.push(Opcode::StoreGLobal(idx as u16), name.position.0);
+                self.dec_stack_height();
             }
 
             None => {
                 //variable is not forward-declared => not present on stack yet
-                result.append(value_emitting_code);
+                result.append(value_emitting_code(self)?);
+                self.dec_stack_height();
+                //emitter should inc stack but we do not want to allocate our normal variable twice
                 let varname = name.get_string().unwrap();
                 let _ = self
                     .declare_local(varname, VariableType::Normal)
@@ -503,18 +531,21 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         let mut result = AnnotatedCodeBlob::new();
         match stmt {
             Stmt::VarDeclaration(n, e) => {
-                let mut right_side = AnnotatedCodeBlob::new();
+                let right_side = |slf: &mut Compiler| {
+                    let mut right_side = AnnotatedCodeBlob::new();
+                    if e.is_none() {
+                        right_side.push(Opcode::LoadNothing, n.position.0);
+                        slf.inc_stack_height();
+                    } else {
+                        slf.require_value();
+                        let assignment_body = slf.visit_expr(e.as_ref().unwrap())?;
+                        slf.pop_requirement();
+                        right_side.append(assignment_body);
+                    }
+                    Ok(right_side)
+                };
 
-                if e.is_none() {
-                    right_side.push(Opcode::LoadNothing, n.position.0);
-                } else {
-                    self.require_value();
-                    let assignment_body = self.visit_expr(e.as_ref().unwrap())?;
-                    self.pop_requirement();
-                    right_side.append(assignment_body);
-                }
-
-                result.append(self.create_named_entity(n, right_side)?);
+                result.append(self.create_named_entity(n, &right_side)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadNothing, result.last_index().unwrap());
@@ -533,8 +564,12 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 let constant_ref = self.get_or_create_constant(descriptor.clone());
 
-                let mut right_side = AnnotatedCodeBlob::new();
-                right_side += (Opcode::LoadConst(constant_ref as u16), name.position.0);
+                let right_side = |slf: &mut Compiler| {
+                    let mut right_side = AnnotatedCodeBlob::new();
+                    right_side += (Opcode::LoadConst(constant_ref as u16), name.position.0);
+                    slf.inc_stack_height();
+                    Ok(right_side)
+                };
 
                 let self_ref = descriptor.clone();
 
@@ -545,7 +580,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     descriptor.register_variant(self_ref.clone(), variant);
                 }
 
-                result.append(self.create_named_entity(name, right_side)?);
+                result.append(self.create_named_entity(name, &right_side)?);
                 if self.needs_value() {
                     result.push(Opcode::LoadNothing, result.last_index().unwrap());
                 }
@@ -555,13 +590,14 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 let struct_object_pointer = self.make_struct(name, fields)?;
                 let constant_idx = self.get_or_create_constant(struct_object_pointer);
 
-                let struct_load_code = {
+                let struct_load_code = |slf: &mut Compiler| {
                     let mut blob = AnnotatedCodeBlob::new();
                     blob.push(Opcode::LoadConst(constant_idx as u16), name.position.0);
-                    blob
+                    slf.inc_stack_height();
+                    Ok(blob)
                 };
 
-                result.append(self.create_named_entity(name, struct_load_code)?);
+                result.append(self.create_named_entity(name, &struct_load_code)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadNothing, name.position.0);
@@ -633,10 +669,12 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     match var_type {
                         VariableType::Boxed => {
                             result.push(Opcode::LoadLocal(var_idx as u16), target.position.0);
+                            self.inc_stack_height();
                         }
                         VariableType::Closed => {
                             result
                                 .push(Opcode::LoadClosureValue(var_idx as u16), target.position.0);
+                            self.inc_stack_height();
                         }
                         VariableType::Normal | VariableType::Global => {
                             //nothing
@@ -669,6 +707,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                             result.push(Opcode::StoreBox, target.position.0);
                         }
                     }
+                    self.dec_stack_height();
                 } else {
                     //otherwise, just put it in global name
                     let idx = self.get_or_create_name(varname);
@@ -684,6 +723,9 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 Expr::PropertyAccess(target, property) => {
                     self.require_value();
                     let target = self.visit_expr(target)?;
+                    self.pop_requirement();
+
+                    self.require_value();
                     let value = self.visit_expr(value)?;
                     self.pop_requirement();
 
@@ -738,18 +780,23 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
                 let const_idx = self.get_or_create_constant(new_chunk_idx);
 
-                let mut function = AnnotatedCodeBlob::new();
+                let function = |slf: &mut Compiler| {
+                    let mut function = AnnotatedCodeBlob::new();
 
-                function.push(
-                    Opcode::LoadConst(const_idx as u16),
-                    function_name.position.0,
-                ); //code block
+                    function.push(
+                        Opcode::LoadConst(const_idx as u16),
+                        function_name.position.0,
+                    ); //code block
 
-                let closing_code = self.close_function(function_name)?;
+                    slf.inc_stack_height();
 
-                function.append(closing_code);
+                    let closing_code = slf.close_function(function_name)?;
 
-                result.append(self.create_named_entity(function_name, function)?);
+                    function.append(closing_code);
+                    Ok(function)
+                };
+
+                result.append(self.create_named_entity(function_name, &function)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadNothing, function_name.position.0);
@@ -843,7 +890,6 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             Expr::Binary(op, a, b) => {
                 self.require_value();
                 let a = self.visit_expr(a)?;
-                let b = self.visit_expr(b)?;
                 self.pop_requirement();
 
                 if let TokenKind::Or = op.kind {
@@ -858,24 +904,42 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     //eval (A)
                     result.append(a);
                     //jump PAST eval(B)
+
+                    self.dec_stack_height(); // a is popped if b is evaluated
+
+                    self.require_value();
+                    let b = self.visit_expr(b)?;
+                    self.pop_requirement();
+
+                    self.dec_stack_height(); // stack height is increased in outer code
+
                     result.push(
                         Opcode::JumpIfTrueOrPop((b.code.len() + 1) as u16),
                         op.position.0,
                     );
+
                     //eval(B)
                     result.append(b);
                 } else if let TokenKind::And = op.kind {
                     /*
                     evaluation scheme:
                     eval(A)
-                    JumpIfFalse end_and
+                    JumpIfFalseOrPop end_and
                     eval(B)
-                    end_or:
+                    end_and:
                      */
 
                     //eval (A)
                     result.append(a);
-                    //jump PAST eval(B)
+
+                    self.dec_stack_height(); // if b is evaluated then a must be popped
+
+                    self.require_value();
+                    let b = self.visit_expr(b)?;
+                    self.pop_requirement();
+
+                    self.dec_stack_height(); // stack height is increased in outer code
+                                             //jump PAST eval(B)
                     result.push(
                         Opcode::JumpIfFalseOrPop((b.code.len() + 1) as u16),
                         op.position.0,
@@ -884,6 +948,15 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     result.append(b);
                 } else {
                     result.append(a);
+
+                    //note that stack height is increased by lhs
+
+                    self.require_value();
+                    let b = self.visit_expr(b)?;
+                    self.pop_requirement();
+
+                    self.dec_stack_height(); // lhs is removed
+                    self.dec_stack_height(); // stack height is increased in outer code
 
                     result.append(b);
                     result.push(
@@ -924,6 +997,8 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 self.require_value();
                 let condition = self.visit_expr(cond)?;
                 self.pop_requirement();
+
+                self.dec_stack_height(); //condition result will be popped on jump
 
                 let then_body = self.visit_expr(then_body)?;
 
@@ -993,23 +1068,27 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                         ));
                     }
 
+                    self.dec_stack_height(); //no function pointer was loaded
+
                     let mut argument_indices = vec![];
                     //compute all arguments
 
                     for (i, arg) in args.iter().enumerate() {
                         self.require_value();
                         let arg_code = self.visit_expr(arg)?;
-                        result.append(arg_code);
                         self.pop_requirement(); //compile arg load
+                        result.append(arg_code);
                         argument_indices.push((1 + i) as u16);
                     }
 
                     if let Arity::AtLeast(var_arity) = self.function_context.arity {
                         let listed_args: usize = argument_indices.len() - var_arity;
+                        self.sub_stack_height(listed_args);
                         result.push(
                             Opcode::MakeList(listed_args as u16),
                             self.function_context.name.position.0,
                         );
+                        self.inc_stack_height();
                         let remaining_args = var_arity + 1usize;
                         argument_indices.truncate(remaining_args);
                     }
@@ -1017,9 +1096,10 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     //store arguments that are on stack in reverse order
                     for &index in argument_indices.iter().rev() {
                         result.push(Opcode::StoreLocal(index), result.last_index().unwrap());
+                        self.dec_stack_height();
                     }
                     //pop locals
-                    let locals_to_pop = self.total_variables
+                    let locals_to_pop = self.get_stack_height()
                         - 1 //current function
                         - argument_indices.len(); //arguments
                     if locals_to_pop != 0 {
@@ -1045,6 +1125,9 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                         Opcode::Call(args.len() as u16),
                         target_indices_copy.last_index().unwrap(),
                     );
+                    self.sub_stack_height(args.len()); //arguments are removed
+                    self.dec_stack_height(); // function pointer is removed
+                                             //result is (maybe) added in outer code
 
                     if !self.needs_value() {
                         result.push(Opcode::Pop(1), result.last_index().unwrap());
@@ -1063,6 +1146,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 for arg in args {
                     if arg.is_none() {
                         result.push(Opcode::LoadBlank, result.last_index().unwrap());
+                        self.inc_stack_height();
                         continue;
                     }
                     self.require_value();
@@ -1075,6 +1159,8 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     Opcode::CallPartial(args.len() as u16),
                     target_indices_copy.last_index().unwrap(),
                 );
+
+                self.sub_stack_height(args.len());
 
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), result.last_index().unwrap());
@@ -1199,12 +1285,12 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
         let (last_statement, other_statements) = block.split_last().ok_or("got empty block")?;
 
-        self.require_nothing();
         for item in other_statements {
+            self.require_nothing();
             let blob = self.visit_stmt(item)?;
+            self.pop_requirement();
             result.append(blob);
         }
-        self.pop_requirement();
 
         let last_statement = self.visit_stmt(last_statement)?;
         result.append(last_statement);
@@ -1231,5 +1317,100 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod complex_operators_stack_tests {
+    use rstest::*;
+
+    use super::Compiler;
+    use crate::{
+        compile::compiler::SCRIPT_TOKEN,
+        data::gc::GC,
+        execution::{arity::Arity, chunk::Chunk},
+        parsing::{
+            ast::Expr,
+            lexer::{Index, Token, TokenKind},
+        },
+    };
+
+    static ZERO: Token = Token {
+        position: Index(0, 0),
+        kind: TokenKind::Number(0),
+    };
+
+    #[fixture]
+    pub fn gc() -> GC {
+        unsafe { GC::default_gc() }
+    }
+
+    fn compile_ast_with_value(mut gc: GC, ast: Expr) {
+        let mut chunk = Chunk::new(SCRIPT_TOKEN.clone(), Arity::Exact(0));
+        let annotations = Default::default();
+        let mut compiler = Compiler::new(
+            &annotations,
+            &mut gc,
+            SCRIPT_TOKEN.clone(),
+            Arity::Exact(0),
+            &mut chunk,
+        );
+
+        compiler.require_value();
+        let _ = compiler.visit_expr(&ast);
+        compiler.pop_requirement();
+        assert_eq!(compiler.stack_height, 1);
+    }
+
+    #[rstest]
+    fn compiler_should_produce_1_value_in_if(gc: GC) {
+        let ast = Expr::If(
+            Box::new(Expr::Number(ZERO.clone())),
+            Box::new(Expr::Number(ZERO.clone())),
+            Some(Box::new(Expr::Number(ZERO.clone()))),
+        );
+        compile_ast_with_value(gc, ast);
+    }
+
+    #[rstest]
+    fn compiler_should_produce_1_value_in_or(gc: GC) {
+        let ast = Expr::Binary(
+            Token {
+                kind: TokenKind::Or,
+                position: Index(0, 0),
+            },
+            Box::new(Expr::Number(ZERO.clone())),
+            Box::new(Expr::Number(ZERO.clone())),
+        );
+
+        compile_ast_with_value(gc, ast);
+    }
+
+    #[rstest]
+    fn compiler_should_produce_1_value_in_and(gc: GC) {
+        let ast = Expr::Binary(
+            Token {
+                kind: TokenKind::And,
+                position: Index(0, 0),
+            },
+            Box::new(Expr::Number(ZERO.clone())),
+            Box::new(Expr::Number(ZERO.clone())),
+        );
+
+        compile_ast_with_value(gc, ast);
+    }
+
+    #[rstest]
+    fn compiler_should_produce_1_value_in_binary(gc: GC) {
+        let ast = Expr::Binary(
+            Token {
+                kind: TokenKind::Plus,
+                position: Index(0, 0),
+            },
+            Box::new(Expr::Number(ZERO.clone())),
+            Box::new(Expr::Number(ZERO.clone())),
+        );
+
+        compile_ast_with_value(gc, ast);
     }
 }
