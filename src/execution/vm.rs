@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use super::arity::Arity;
 use super::builtins::BuiltinMap;
+use super::module::Module;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
@@ -14,7 +15,7 @@ const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<Stac
 pub struct VM<'gc, 'builtins> {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
-    pub(super) globals: HashMap<String, Value>,
+    pub(super) loaded_modules: HashMap<Module, HashMap<String, Value>>,
     locals_offset: usize,
     stack_max_size: usize,
     pub gc: &'gc mut GC,
@@ -71,7 +72,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
-            globals: HashMap::new(),
+            loaded_modules: Default::default(),
             locals_offset: 0,
             gc,
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
@@ -90,6 +91,10 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         self.call_stack.clear();
         self.stack.clear();
         self.locals_offset = 0;
+    }
+
+    pub fn maybe_create_module(&mut self, module: &Module) {
+        self.loaded_modules.entry(module.clone()).or_default();
     }
 
     pub fn run(&mut self, entry_point: StackObject) -> Result<StackObject> {
@@ -184,7 +189,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     self.gc.mark_and_sweep(
                         self.stack
                             .iter()
-                            .chain(self.globals.iter().map(|(_k, v)| v)),
+                            .chain(self.loaded_modules.values().flat_map(|v| v.values())),
                         &*self.call_stack,
                     );
                 }
@@ -447,7 +452,9 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             Opcode::LoadGlobal(idx) => {
                 let key = checked_get_name!(idx)?;
                 let value = self
-                    .globals
+                    .loaded_modules
+                    .get(&chunk.module)
+                    .unwrap()
                     .get(key)
                     .cloned()
                     .or_else(|| self.builtins.get_builtin(key))
@@ -536,7 +543,10 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let key = checked_get_name!(idx)?;
                 let value = checked_stack_pop!()?;
 
-                self.globals.insert(key.to_string(), value);
+                self.loaded_modules
+                    .get_mut(&chunk.module)
+                    .unwrap()
+                    .insert(key.to_string(), value);
                 InstructionExecution::NextInstruction
             }
 

@@ -4,6 +4,7 @@ use crate::parsing::lexer::{Token, TokenKind};
 use std::fmt::{Display, Formatter};
 
 use super::arity::Arity;
+use super::module::Module;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
@@ -11,6 +12,7 @@ pub struct Chunk {
     pub global_names: Vec<String>,
     pub code: Vec<Opcode>,
     pub name: Token,
+    pub module: Module,
     pub arity: Arity,
     pub opcode_to_line: Vec<usize>,
 }
@@ -86,12 +88,13 @@ impl Display for Opcode {
 }
 
 impl Chunk {
-    pub fn new(name: Token, arity: Arity) -> Chunk {
+    pub fn new(name: Token, module: Module, arity: Arity) -> Chunk {
         Chunk {
             constants: Vec::new(),
             global_names: Vec::new(),
             code: Vec::new(),
             name,
+            module,
             arity,
             opcode_to_line: vec![],
         }

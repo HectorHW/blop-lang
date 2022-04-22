@@ -4,6 +4,7 @@ use crate::data::gc::GC;
 use crate::data::objects::{EnumDescriptor, StackObject, StructDescriptor, Value};
 use crate::execution::arity::Arity;
 use crate::execution::chunk::{Chunk, Opcode};
+use crate::execution::module::Module;
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use regex::Regex;
@@ -62,12 +63,13 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
     }
 
-    pub fn compile_script(
+    pub fn compile_module(
         program: &Program,
         annotations: Annotations,
+        module: Module,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), Arity::Exact(0));
+        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), module, Arity::Exact(0));
 
         let mut compiler = Compiler::new(
             &annotations,
@@ -287,7 +289,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             Arity::Exact(args.len())
         };
 
-        let mut chunk = Chunk::new(name.clone(), arity);
+        let mut chunk = Chunk::new(name.clone(), self.current_chunk.module.clone(), arity);
 
         let mut inner_compiler =
             Compiler::new(self.annotations, self.gc, name.clone(), arity, &mut chunk);
@@ -1328,7 +1330,7 @@ mod complex_operators_stack_tests {
     use crate::{
         compile::compiler::SCRIPT_TOKEN,
         data::gc::GC,
-        execution::{arity::Arity, chunk::Chunk},
+        execution::{arity::Arity, chunk::Chunk, module::Module},
         parsing::{
             ast::Expr,
             lexer::{Index, Token, TokenKind},
@@ -1346,7 +1348,8 @@ mod complex_operators_stack_tests {
     }
 
     fn compile_ast_with_value(mut gc: GC, ast: Expr) {
-        let mut chunk = Chunk::new(SCRIPT_TOKEN.clone(), Arity::Exact(0));
+        let module = Module::from_dot_notation("`TEST`");
+        let mut chunk = Chunk::new(SCRIPT_TOKEN.clone(), module, Arity::Exact(0));
         let annotations = Default::default();
         let mut compiler = Compiler::new(
             &annotations,

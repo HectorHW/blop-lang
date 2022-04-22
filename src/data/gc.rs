@@ -492,6 +492,7 @@ impl OwnedObject {
 /// dangling pointers or access to freed memory. You MUST drop all objects that contain GCrefs
 /// before dropping instance of GC.
 ///
+#[allow(dead_code)]
 impl GC {
     /// creates new instance of GC.
     ///
@@ -651,10 +652,6 @@ impl GC {
             b @ StackObject::BuiltinMethod { .. } => b.clone(),
             StackObject::Blank => StackObject::Blank,
         }
-    }
-
-    pub fn len(&self) -> usize {
-        self.objects.len()
     }
 
     pub fn new_string(&mut self, s: &str) -> StackObject {

@@ -1,6 +1,4 @@
-use super::compile_file;
-use super::run_file;
-use crate::GC;
+use super::execution::module::{compile_file, run_file};
 
 macro_rules! test_file {
     ($name:ident) => {
@@ -36,14 +34,20 @@ macro_rules! test_fail_compile {
     ($name:ident) => {
         #[test]
         fn $name() {
+            use crate::data::gc::GC;
+            use crate::execution::builtins::builtin_factory;
+            use crate::execution::vm::VM;
             let mut path = String::new();
             path.push_str("examples/");
             path.push_str(stringify!($name));
             path.push_str(".txt");
 
             let mut gc = unsafe { GC::default_gc() };
+            let builtins = builtin_factory();
 
-            assert!(compile_file(&path, &mut gc).is_err());
+            let mut vm = VM::new(&mut gc, &builtins);
+
+            compile_file(&path, &mut vm).err().unwrap();
         }
     };
 }

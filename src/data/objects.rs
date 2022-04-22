@@ -241,10 +241,6 @@ impl EnumDescriptor {
         self.methods.get(method_name).cloned()
     }
 
-    pub fn get_variant_descriptor(&self, variant_name: &str) -> Option<Value> {
-        self.variants.get(variant_name).cloned()
-    }
-
     pub fn lookup(&self, field_name: &str) -> Option<Value> {
         self.variants
             .get(field_name)
