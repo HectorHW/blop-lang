@@ -255,23 +255,26 @@ mod chunk_pretty_printer {
             .collect::<Vec<_>>();
 
         for (arrow_start, arrow_end) in arrows {
-            if !check_canvas_range(lines, (arrow_start, arrow_end)) {
+            let offset = get_best_offset(lines, (arrow_start, arrow_end));
+
+            let offset = offset.unwrap_or_else(|| {
                 extend_canvas(lines);
-            }
+                0
+            });
 
             //draw exit
 
             let (mut arrow_start, mut arrow_end) = (arrow_start, arrow_end);
 
-            draw_at_char(&mut lines[arrow_start], 0, b'*');
-            draw_at_char(&mut lines[arrow_end], 0, b'>');
+            draw_at_char(&mut lines[arrow_start], offset, b'*');
+            draw_at_char(&mut lines[arrow_end], offset, b'>');
 
             if arrow_start > arrow_end {
                 std::mem::swap(&mut arrow_start, &mut arrow_end);
             }
 
             for line in &mut lines[arrow_start + 1..arrow_end] {
-                draw_at_char(line, 0, b'|');
+                draw_at_char(line, offset, b'|');
             }
         }
     }
@@ -288,6 +291,21 @@ mod chunk_pretty_printer {
             }
         }
         true
+    }
+
+    fn get_best_offset(lines: &[String], range: (usize, usize)) -> Option<usize> {
+        let mut range = range;
+        if range.0 > range.1 {
+            std::mem::swap(&mut range.0, &mut range.1);
+        }
+
+        if !check_canvas_range(lines, range) {
+            return None;
+        }
+        lines[range.0..=range.1]
+            .iter()
+            .map(|line| line.chars().take_while(|&c| c == ' ').count() - 2)
+            .min()
     }
 
     fn draw_at_char(s: &mut str, idx: usize, c: u8) {

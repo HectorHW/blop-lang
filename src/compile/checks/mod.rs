@@ -19,6 +19,7 @@ pub enum VariableType {
     Normal,
     Boxed,
     Closed,
+    Global,
 }
 
 #[derive(Clone, Debug, Default)]

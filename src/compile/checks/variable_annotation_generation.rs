@@ -1,7 +1,7 @@
 use crate::compile::checks::tree_visitor::Visitor;
 use crate::compile::checks::{Annotations, VariableType};
 use crate::parsing::ast::{Program, Stmt};
-use crate::parsing::lexer::{Index, Token, TokenKind};
+use crate::parsing::lexer::Token;
 use crate::Expr;
 use std::collections::HashMap;
 
@@ -14,6 +14,7 @@ pub struct AnnotationGenerator<'a> {
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum ScopeType {
     Block,
+    TopLevel,
     Function,
 }
 
@@ -27,19 +28,9 @@ impl<'a> AnnotationGenerator<'a> {
             scopes: Default::default(),
         };
 
-        let block_id = match &ast {
-            Program::Block(start, ..) => start,
-            _ => &Token {
-                kind: TokenKind::BeginBlock,
-                position: Index(0, 0),
-            },
-        };
+        annotator.new_scope(ScopeType::TopLevel, &crate::compile::compiler::SCRIPT_TOKEN);
 
-        annotator.new_scope(ScopeType::Block, block_id);
-
-        annotator.visit_expr(ast)?;
-
-        Ok(())
+        ast.iter().try_for_each(|s| annotator.visit_stmt(s))
     }
 
     fn declare_name(&mut self, variable_name: &Token) {
@@ -53,7 +44,11 @@ impl<'a> AnnotationGenerator<'a> {
             .get_or_create_block_scope(&self.scopes.last_mut().unwrap().1)
             .insert(
                 variable_name.get_string().unwrap().to_string(),
-                VariableType::Normal,
+                if self.scopes.last().unwrap().0 == ScopeType::TopLevel {
+                    VariableType::Global
+                } else {
+                    VariableType::Normal
+                },
             );
     }
 
@@ -81,7 +76,7 @@ impl<'a> AnnotationGenerator<'a> {
 
     fn lookup_outer(&self, variable_name: &str) -> bool {
         let mut passed_function_scope = false;
-        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().rev() {
+        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().skip(1).rev() {
             if passed_function_scope {
                 if scope_map.contains_key(variable_name) {
                     return true;

@@ -1,0 +1,14 @@
+assert (
+    (
+    var a = "you can now ";
+    var b = "insert blocks anywhere using (s;s...) syntax";
+    var c = 6;
+    assert 5==5;
+    print(a+b);
+    c + 2
+    )
+) == 8
+
+#this is extra useful for anonymous functions 
+# but this way language may turn into lisp at some point XD
+assert (() => ((var s = 1; s+s)))() == 2

@@ -12,7 +12,8 @@ pub struct NameRedefinitionChecker {
 impl NameRedefinitionChecker {
     pub fn check(ast: &Program) -> Result<(), String> {
         let mut checker = NameRedefinitionChecker { scope: vec![] };
-        checker.visit_expr(ast)
+        checker.new_scope();
+        ast.iter().try_for_each(|s| checker.visit_stmt(s))
     }
 
     fn new_scope(&mut self) {
