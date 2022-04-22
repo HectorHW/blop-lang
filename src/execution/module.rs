@@ -17,20 +17,25 @@ pub const FILE_EXTENSION: &str = ".txt";
 pub struct Module(Vec<String>);
 
 impl TryFrom<&Path> for Module {
-    type Error = ();
+    type Error = Box<dyn Error>;
 
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
         value
             .components()
-            .map(|c| match c {
-                Component::Normal(s) => Path::new(s)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(ToOwned::to_owned)
-                    .ok_or(()),
-                _ => Err(()),
+            .flat_map(|c| match c {
+                Component::CurDir => None,
+                Component::Normal(s) => Some(
+                    Path::new(s)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(ToOwned::to_owned)
+                        .ok_or_else(|| "failed to build module path".to_string().into()),
+                ),
+                other => Some(Err(
+                    format!("failed to build module path on {other:?}").into()
+                )),
             })
-            .collect::<Result<Vec<String>, ()>>()
+            .collect::<Result<Vec<String>, Box<dyn Error>>>()
             .map(Self)
     }
 }
