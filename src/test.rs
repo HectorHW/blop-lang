@@ -95,3 +95,5 @@ test_file! {builtins}
 test_file! {varargs}
 
 test_file! {enums}
+
+test_file! {inline_blocks}

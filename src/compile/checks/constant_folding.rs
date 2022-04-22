@@ -8,7 +8,8 @@ pub(super) struct Folder {}
 impl Folder {
     pub fn fold_constants(program: Program) -> Result<Program, String> {
         let mut f = Folder {};
-        f.visit_expr(program)
+
+        program.into_iter().map(|s| f.visit_stmt(s)).collect()
     }
 }
 

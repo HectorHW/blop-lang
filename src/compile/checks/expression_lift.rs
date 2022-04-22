@@ -1,6 +1,6 @@
 use crate::compile::checks::tree_rewriter::Rewriter;
 use crate::parsing::ast::{Program, Stmt};
-use crate::parsing::lexer::{Token, TokenKind};
+use crate::parsing::lexer::Token;
 use crate::Expr;
 
 pub struct ExpressionLifter {}
@@ -8,7 +8,7 @@ pub struct ExpressionLifter {}
 impl ExpressionLifter {
     pub fn optimize(ast: Program) -> Result<Program, String> {
         let mut lifter = ExpressionLifter {};
-        lifter.visit_expr(ast)
+        ast.into_iter().map(|s| lifter.visit_stmt(s)).collect()
     }
 }
 
@@ -43,54 +43,10 @@ impl Rewriter<String> for ExpressionLifter {
     fn visit_single_statement_expr(&mut self, stmt: Box<Stmt>) -> Result<Expr, String> {
         Ok(match *stmt {
             //singleStatement is artificial node representing block with single statement
-            Stmt::VarDeclaration(_name, maybe_body) => {
-                /*
-                thing like
-
-                if ...
-                    var a = 2
-                ...
-
-                variable is not used anywhere else, can be substituted with expr
-                */
-                maybe_body.unwrap_or(Expr::Number(Token {
-                    position: _name.position,
-                    kind: TokenKind::Number(0),
-                }))
-            }
-
-            a @ Stmt::Assignment(..) => Expr::SingleStatement(Box::new(a)),
-
+            // do not alter declarations as they may lead to global assignments
             Stmt::Expression(e) => self.visit_expr(e)?,
 
-            a @ Stmt::Assert(..) => Expr::SingleStatement(Box::new(a)),
-
-            Stmt::FunctionDeclaration { name, .. } => {
-                /*
-                thing like
-                if ...
-                    def ... =
-                        ...
-                ...
-
-                as def value is not used, it can be exluded from resulting program
-                */
-                Expr::Number(Token {
-                    position: name.position,
-                    kind: TokenKind::Number(0),
-                })
-                //Expr::SingleStatement(a)
-            }
-
-            s @ Stmt::StructDeclaration { .. } => Expr::SingleStatement(Box::new(s)),
-
-            e @ Stmt::EnumDeclaration { .. } => Expr::SingleStatement(Box::new(e)),
-
-            p @ Stmt::Pass(..) => Expr::SingleStatement(Box::new(p)),
-
-            a @ Stmt::PropertyAssignment(..) => Expr::SingleStatement(Box::new(a)),
-
-            im @ Stmt::ImplBlock { .. } => Expr::SingleStatement(Box::new(im)),
+            other => Expr::SingleStatement(Box::new(other)),
         })
     }
 }

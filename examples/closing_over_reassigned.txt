@@ -1,12 +1,15 @@
-def f =
-    a
-var a = 2
+def main =
+    def f =
+        a
+    var a = 2
 
-var value = f()
-assert value == 2
-print(value)
+    var value = f()
+    assert value == 2
+    print(value)
 
-a = 3
-value = f()
-assert value == 3
-print(value)
+    a = 3
+    value = f()
+    assert value == 3
+    print(value)
+
+main()

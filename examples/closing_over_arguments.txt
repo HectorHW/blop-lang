@@ -1,9 +1,13 @@
-def add(n) =
-    def add(x) =
-        x+n
-    add
+#explicitly define test code inside function to force stack allocation
+def main =
+    def add(n) =
+        def add(x) =
+            x+n
+        add
 
-var add2 = add(2)
+    var add2 = add(2)
 
-assert add2(3)==5
-print(add2(3))
+    assert add2(3)==5
+    print(add2(3))
+
+main()
