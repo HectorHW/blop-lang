@@ -27,30 +27,35 @@ Language provides a few basic building blocks:
 The language uses Python-like indentation-based syntax.
 
 To define a function, type:
-```
+
+```text
 def function(arg1, arg2, ..., argN) =
     some_expression
 ```
+
 If function does not accept any arguments, this can be shortened down to:
-```
+
+```text
 def function =
     some_expression
 ```
-Anonymous functions can be written as `(arg1, ..., argN) => some_expr`
 
+Anonymous functions can be written as `(arg1, ..., argN) => some_expr`
 
 Functions are first-class meaning that you can freely pass them around, return from other functions and so on. Functions also offer mechanism of closures.
 
 Functions also support partial calls written as `f(_, _, arg2, _)` which returns special function-like partial object that now accepts arguments where blanks `_` are placed.
 
 You can define vararg functions using `*args` syntax:
-```
+
+```text
 def function_accepting_args(*args) = 
     print(args)
 ```
 
 Later, this function may be called like any other function if provided enough arguments (at least 0 in our case):
-```
+
+```text
 function_accepting_args(1, 2, 3)
 # prints "Vector [Int 1, Int 2, Int 3]"
 ```
@@ -58,38 +63,47 @@ function_accepting_args(1, 2, 3)
 The language currently does not provide common loop constructs but offers tail call optimization.
 
 To define complex structures you may use `struct` keyword:
-```
+
+```text
 struct Pair:
     element1
     element2
 ```
-To create instance just call struct descriptor like any other callable: 
-```
+
+To create instance just call struct descriptor like any other callable:
+
+```text
 var instance = Pair(1, 2)
 ```
+
 To later access struct's attributes, use standard dot syntax:
-```
+
+```text
 instance.element1 # to access field
 instance.element2 = 2 # to set field
 instance?element1 # to check if field exists
 ```
+
 Struct elements are fixed in position and count, and because of that you may also use special syntax to access fields by index:
-```
+
+```text
 instance._0 # to access field by index
 instance._1 = 2 # to set field
 ```
 
 To define methods, use impl blocks like so:
-```
+
+```text
 impl Pair:
     fn first(self) = self._0
     fn second(self) = self._1
 ```
+
 (Note `self` parameter: declared methods are required to have at least one argument to store reference to bound object).
 
 Use `enum` keyword to define enums:
 
-```
+```text
 enum Option:
     Some:
         value
@@ -98,11 +112,10 @@ enum Option:
 
 Each enum variant is a struct under the hood, so `.` and `?` are supported. You can add methods using `impl Option`, these methods will be available to all variants.
 
-
 For additional features refer to files in [examples directory](examples).
 
 The language is still in early development stage. Features that are currently planned:
+
 * Pattern matching
 * Optional typechecking
 * Standard library
-* Modules
