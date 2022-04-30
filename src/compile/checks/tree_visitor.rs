@@ -31,6 +31,11 @@ pub(super) trait Visitor<E> {
                 name,
                 implementations,
             } => self.visit_impl_block(name, implementations),
+            Stmt::Import {
+                module,
+                name,
+                rename,
+            } => self.visit_import_stmt(module, name, rename.as_ref()),
         }
     }
 
@@ -99,6 +104,15 @@ pub(super) trait Visitor<E> {
             .iter()
             .try_for_each(|f| self.visit_stmt(f))?;
 
+        Ok(())
+    }
+
+    fn visit_import_stmt(
+        &mut self,
+        module: &[Token],
+        name: &Token,
+        rename: Option<&Token>,
+    ) -> Result<(), E> {
         Ok(())
     }
 

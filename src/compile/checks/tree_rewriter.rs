@@ -33,6 +33,11 @@ pub(super) trait Rewriter<E> {
                 name,
                 implementations,
             } => self.visit_impl_block(name, implementations),
+            Stmt::Import {
+                module,
+                name,
+                rename,
+            } => self.visit_import_stmt(module, name, rename),
         }
     }
 
@@ -110,6 +115,19 @@ pub(super) trait Rewriter<E> {
         Ok(Stmt::ImplBlock {
             name,
             implementations: functions,
+        })
+    }
+
+    fn visit_import_stmt(
+        &mut self,
+        module: Vec<Token>,
+        name: Token,
+        rename: Option<Token>,
+    ) -> Result<Stmt, E> {
+        Ok(Stmt::Import {
+            module,
+            name,
+            rename,
         })
     }
 

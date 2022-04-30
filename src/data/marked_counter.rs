@@ -9,6 +9,7 @@ const MAX_COUNTER: usize = usize::MAX - FLAG_MASK;
 pub const UNMARKED_ONE: MarkedCounter = unsafe { MarkedCounter::new_unchecked(1, false) };
 
 impl MarkedCounter {
+    #[cfg(test)]
     pub fn new(counter: usize, flag: bool) -> MarkedCounter {
         #[cfg(debug_assertions)]
         if counter & FLAG_MASK > 0 {

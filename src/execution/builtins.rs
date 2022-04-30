@@ -283,6 +283,16 @@ pub fn builtin_factory() -> BuiltinMap {
         Ok(Default::default())
     });
 
+    builtin!("ptr_eq", Exact(2), |mut args, _vm| {
+        let arg2 = args.pop().unwrap();
+        let arg1 = args.pop().unwrap();
+        match (arg1.as_heap_object(), arg2.as_heap_object()) {
+            (Some(p1), Some(p2)) => Ok(std::ptr::eq(p1, p2).into()),
+
+            _ => Ok(false.into()),
+        }
+    });
+
     methods!("Int",
         "abs" => Exact(0) => |obj, _args, _context| {
             Ok(Value::Int(obj.unwrap_int().unwrap().abs()))
