@@ -1,11 +1,8 @@
-use std::{collections::HashMap, fmt::Display, path::PathBuf};
+use std::{collections::HashMap, fmt::Display};
 
 ///
 /// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
-use crate::{
-    data::objects::{StackObject, VVec, Value},
-    execution::module::{self, Module},
-};
+use crate::data::objects::{StackObject, VVec, Value};
 use indexmap::IndexMap;
 
 use super::{arity::Arity, vm::VM};
@@ -23,7 +20,6 @@ pub struct BuiltinMap {
 
 pub enum BuiltinError {
     ArityMismatch { provided: usize, expected: Arity },
-    Import(String),
     Other(String),
 }
 
@@ -35,7 +31,6 @@ impl Display for BuiltinError {
             match self {
                 BuiltinError::ArityMismatch { provided, expected } =>
                     format!("expected {} args but got {}", expected, provided),
-                BuiltinError::Import(e) => format!("error while importing: {}", e),
                 BuiltinError::Other(e) => e.clone(),
             }
         )
