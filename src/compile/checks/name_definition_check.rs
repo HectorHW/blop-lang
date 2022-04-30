@@ -201,6 +201,24 @@ impl Visitor<String> for NameRedefinitionChecker {
         Ok(())
     }
 
+    fn visit_import_stmt(
+        &mut self,
+        _module: &[Token],
+        name: &Token,
+        rename: Option<&Token>,
+    ) -> Result<(), String> {
+        let import_name = rename.unwrap_or(name);
+
+        self.declare_name(import_name).map_err(|e| {
+            format!(
+                "name {} [{}] is redefined in block, previous definition at [{}]",
+                import_name.get_string().unwrap(),
+                import_name.position,
+                e.position
+            )
+        })
+    }
+
     fn visit_method(
         &mut self,
         name: &Token,

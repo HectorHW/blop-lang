@@ -1,0 +1,14 @@
+enum Option:
+    Some:
+        value
+    None
+
+
+impl Option:
+    def is_some(self) = self?value
+    def is_none(self) = not self.is_some()
+    def map(self, op) = 
+        if self.is_none()
+            self
+        else
+            Option.Some(op(self.value))

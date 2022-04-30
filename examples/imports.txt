@@ -1,0 +1,14 @@
+import std.loops.for
+
+accumulator = 0
+
+def body(i) =
+    accumulator = accumulator + i
+
+for(1, 10+1, body) 
+
+assert accumulator == 55
+
+#imported module should be loaded only once
+import std.loops.for as for2
+assert ptr_eq(for, for2)

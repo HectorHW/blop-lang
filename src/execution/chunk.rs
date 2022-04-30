@@ -4,13 +4,16 @@ use crate::parsing::lexer::{Token, TokenKind};
 use std::fmt::{Display, Formatter};
 
 use super::arity::Arity;
+use super::module::Module;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
     pub constants: Vec<Value>,
     pub global_names: Vec<String>,
+    pub import_names: Vec<(Module, String)>,
     pub code: Vec<Opcode>,
     pub name: Token,
+    pub module: Module,
     pub arity: Arity,
     pub opcode_to_line: Vec<usize>,
 }
@@ -73,6 +76,8 @@ pub enum Opcode {
     MakeList(u16),
     Return,
 
+    Import(u16),
+
     Nop,
     Assert, //SwapStack(u8, u8),
             //ExtendArg1(u16),
@@ -86,12 +91,14 @@ impl Display for Opcode {
 }
 
 impl Chunk {
-    pub fn new(name: Token, arity: Arity) -> Chunk {
+    pub fn new(name: Token, module: Module, arity: Arity) -> Chunk {
         Chunk {
             constants: Vec::new(),
             global_names: Vec::new(),
             code: Vec::new(),
+            import_names: Default::default(),
             name,
+            module,
             arity,
             opcode_to_line: vec![],
         }

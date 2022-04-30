@@ -1,16 +1,17 @@
-use crate::compile::compiler::Compiler;
 use crate::data::gc::GC;
-use crate::data::objects::Value;
+
 use crate::execution::builtins::builtin_factory;
 use crate::execution::chunk::Chunk;
+use crate::execution::module::{compile_file, compile_program, Module};
 use crate::execution::vm::VM;
-use crate::parsing::ast::{Expr, Stmt};
+use crate::parsing::ast::Expr;
 use execution::chunk::Opcode;
 use execution::vm::InterpretError;
-use peg::error::ParseError;
+
 use std::env;
 use std::fmt::Write;
 use std::io::{stdin, BufRead};
+use std::path::Path;
 #[cfg(feature = "bench")]
 use std::time::Instant;
 
@@ -34,71 +35,13 @@ fn main() {
         return;
     }
     let filename = args.get(1).unwrap();
-    let file_content = std::fs::read_to_string(filename).expect("failed to read file");
 
-    //normalize string - make all lines joined with \n (incase running on windows)
-    let file_content = file_content.lines().collect::<Vec<_>>().join("\n");
-    let tokens = match parsing::lexer::tokenize(&file_content) {
-        Ok(v) => v,
-        Err(e) => {
-            println!("{}", e);
-            return;
-        }
-    };
-
-    #[cfg(feature = "print-tokens")]
-    {
-        for token in &tokens {
-            print!("{}", token.kind);
-        }
-        println!();
-    }
-
-    use parsing::parser::program_parser;
-
-    let tokens = tokens.iter().collect::<Vec<_>>();
-
-    let statements = match program_parser::program(tokens.as_slice()) {
-        Ok(s) => s,
-        Err(ParseError { location, expected }) => {
-            println!("{:?}", ParseError { location, expected });
-            println!("{:?}", tokens[location]);
-            return;
-        }
-    };
-
-    #[cfg(feature = "print-ast")]
-    println!("{:?}", statements);
-
-    let (statements, annotations) = compile::checks::check_optimize(statements).unwrap();
-
-    //let (variable_types, closed_names) = compile::syntax_level_check::check(&statements).unwrap();
-
-    #[cfg(feature = "print-ast")]
-    println!("{:?}", statements);
     let mut gc = unsafe { GC::default_gc() };
-    let entry_point = Compiler::compile_script(&statements, annotations, &mut gc).unwrap();
-
-    #[cfg(feature = "print-chunk")]
-    {
-        use crate::data::objects::OwnedObjectItem;
-        for chunk in gc
-            .items()
-            .filter(|p| matches!(p.item, OwnedObjectItem::Function(..)))
-        {
-            println!("{:?}", chunk);
-            match &chunk.item {
-                OwnedObjectItem::Function(chunk) => {
-                    println!("{}", chunk)
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-
     let builtins = builtin_factory();
 
     let mut vm = VM::new(&mut gc, &builtins);
+
+    let (source, pointer) = compile_file(Path::new(filename), &mut vm).unwrap();
 
     println!("running");
 
@@ -106,21 +49,14 @@ fn main() {
     let start_time = Instant::now();
 
     let _ = vm
-        .run(entry_point)
-        .map_err(|error| eprintln!("\n{}", display_error(file_content.as_str(), error)))
+        .run(pointer)
+        .map_err(|error| eprintln!("\n{}", display_error(source.as_str(), error)))
         .unwrap();
     #[cfg(feature = "bench")]
     {
         let end_time = Instant::now();
         println!("{:?}", end_time - start_time);
     }
-}
-
-fn normalize_string(s: String) -> String {
-    s.replace('\t', "    ") // 4 spaces
-        .lines()
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn display_error(source: &str, error: InterpretError) -> String {
@@ -145,42 +81,6 @@ fn display_error(source: &str, error: InterpretError) -> String {
     result
 }
 
-pub fn run_file(filename: &str) -> Result<(), String> {
-    let mut gc = unsafe { GC::default_gc() };
-
-    let entry_point = compile_file(filename, &mut gc)?;
-    let builtins = builtin_factory();
-
-    let mut vm = VM::new(&mut gc, &builtins);
-    vm.run(entry_point).map_err(|error| {
-        display_error(std::fs::read_to_string(filename).unwrap().as_str(), error)
-    })?;
-    Ok(())
-}
-
-type CompilationResult = Value;
-
-pub fn compile_program(program: String, gc: &mut GC) -> Result<CompilationResult, String> {
-    let file_content = normalize_string(program);
-    let tokens = parsing::lexer::tokenize(&file_content)?;
-    use parsing::parser::program_parser;
-
-    let tokens = tokens.iter().collect::<Vec<_>>();
-
-    let statements: Vec<Stmt> = program_parser::program(tokens.as_slice())
-        .map_err(|e| format!("{:?}\n{:?}", e, tokens[e.location]))?;
-    let (statements, annotations) = compile::checks::check_optimize(statements)?;
-    let chunks = Compiler::compile_script(&statements, annotations, gc)?;
-    Ok(chunks)
-}
-
-pub fn compile_file(filename: &str, gc: &mut GC) -> Result<CompilationResult, String> {
-    let file_content = std::fs::read_to_string(filename)
-        .map_err(|_e| format!("failed to read file {}", filename))?;
-
-    compile_program(file_content, gc)
-}
-
 pub fn run_repl() {
     let stdin = stdin();
     let mut stdin = stdin.lock();
@@ -190,7 +90,9 @@ pub fn run_repl() {
     let mut gc = unsafe { GC::default_gc() };
     let builtins = builtin_factory();
     //VM is guranteed to work separately from compiler, so two borrows actually do not happen
-    let mut vm = VM::new(unsafe { (&mut gc as *mut GC).as_mut().unwrap() }, &builtins);
+    let mut vm = VM::new(&mut gc, &builtins);
+
+    let module = Module::from_dot_notation("`REPL`");
 
     loop {
         buffer.clear();
@@ -203,12 +105,16 @@ pub fn run_repl() {
             x if x.is_empty() => {
                 println!("```\n{}\n```", input);
 
-                match compile_program(input, &mut gc).and_then(|entry_point| {
-                    #[cfg(debug_assertions)]
-                    println!("{}", entry_point.unwrap_function().unwrap());
-                    println!("running...");
-                    vm.run(entry_point).map_err(|e| format!("{:?}", e))
-                }) {
+                let ptr = match compile_program(input.clone(), &module, &mut vm) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        println!("error!\n{e}");
+                        input = String::new();
+                        continue;
+                    }
+                };
+
+                match vm.run(ptr).map_err(|e| crate::display_error(&input, e)) {
                     Ok(value) => {
                         println!("Ok. result: {}", value);
                     }
@@ -217,6 +123,7 @@ pub fn run_repl() {
                         println!("{}", e);
                     }
                 }
+
                 input = String::new();
             }
 

@@ -4,6 +4,7 @@ use crate::data::gc::GC;
 use crate::data::objects::{EnumDescriptor, StackObject, StructDescriptor, Value};
 use crate::execution::arity::Arity;
 use crate::execution::chunk::{Chunk, Opcode};
+use crate::execution::module::Module;
 use crate::parsing::ast::{Expr, Program, Stmt};
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use regex::Regex;
@@ -62,12 +63,13 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
     }
 
-    pub fn compile_script(
+    pub fn compile_module(
         program: &Program,
         annotations: Annotations,
+        module: Module,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
-        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), Arity::Exact(0));
+        let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), module, Arity::Exact(0));
 
         let mut compiler = Compiler::new(
             &annotations,
@@ -85,6 +87,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 | Stmt::FunctionDeclaration { name, .. }
                 | Stmt::StructDeclaration { name, .. }
                 | Stmt::EnumDeclaration { name, .. } => {
+                    compiler.declare_local(name.get_string().unwrap(), VariableType::Global);
+                }
+
+                Stmt::Import { name, rename, .. } => {
+                    let name = rename.as_ref().unwrap_or(name);
                     compiler.declare_local(name.get_string().unwrap(), VariableType::Global);
                 }
 
@@ -183,6 +190,16 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
         self.current_chunk.constants.push(constant);
         self.current_chunk.constants.len() - 1
+    }
+
+    fn get_or_create_import_name(&mut self, import_name: (Module, String)) -> usize {
+        for (i, item) in self.current_chunk.import_names.iter().enumerate() {
+            if item == &import_name {
+                return i;
+            }
+        }
+        self.current_chunk.import_names.push(import_name);
+        self.current_chunk.import_names.len() - 1
     }
 
     /// looks up variable by name, considering only well-defined variables
@@ -287,7 +304,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             Arity::Exact(args.len())
         };
 
-        let mut chunk = Chunk::new(name.clone(), arity);
+        let mut chunk = Chunk::new(name.clone(), self.current_chunk.module.clone(), arity);
 
         let mut inner_compiler =
             Compiler::new(self.annotations, self.gc, name.clone(), arity, &mut chunk);
@@ -812,6 +829,36 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     token.position.0,
                 );
             }
+
+            Stmt::Import {
+                module,
+                name,
+                rename,
+            } => {
+                let path = module
+                    .iter()
+                    .map(|t| t.get_string().unwrap().to_string())
+                    .collect::<Vec<_>>();
+                let module = Module::new(path);
+
+                let idx = self
+                    .get_or_create_import_name((module, name.get_string().unwrap().to_string()));
+                let import = |slf: &mut Compiler| {
+                    let mut importname = AnnotatedCodeBlob::new();
+
+                    importname.push(Opcode::Import(idx as u16), name.position.0); //code block
+
+                    slf.inc_stack_height();
+
+                    Ok(importname)
+                };
+
+                result.append(self.create_named_entity(rename.as_ref().unwrap_or(name), &import)?);
+
+                if self.needs_value() {
+                    result.push(Opcode::LoadNothing, name.position.0);
+                }
+            }
         }
 
         Ok(result)
@@ -1328,7 +1375,7 @@ mod complex_operators_stack_tests {
     use crate::{
         compile::compiler::SCRIPT_TOKEN,
         data::gc::GC,
-        execution::{arity::Arity, chunk::Chunk},
+        execution::{arity::Arity, chunk::Chunk, module::Module},
         parsing::{
             ast::Expr,
             lexer::{Index, Token, TokenKind},
@@ -1346,7 +1393,8 @@ mod complex_operators_stack_tests {
     }
 
     fn compile_ast_with_value(mut gc: GC, ast: Expr) {
-        let mut chunk = Chunk::new(SCRIPT_TOKEN.clone(), Arity::Exact(0));
+        let module = Module::from_dot_notation("`TEST`");
+        let mut chunk = Chunk::new(SCRIPT_TOKEN.clone(), module, Arity::Exact(0));
         let annotations = Default::default();
         let mut compiler = Compiler::new(
             &annotations,

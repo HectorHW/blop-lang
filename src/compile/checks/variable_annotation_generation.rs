@@ -193,6 +193,11 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
                     self.declare_name(name);
                 }
 
+                Stmt::Import { name, rename, .. } => {
+                    let import_name = rename.as_ref().unwrap_or(name);
+                    self.declare_name(import_name);
+                }
+
                 _ => {}
             }
         }
@@ -231,6 +236,16 @@ impl<'a> Visitor<String> for AnnotationGenerator<'a> {
             self.visit_stmt(f)?;
         }
 
+        Ok(())
+    }
+
+    fn visit_import_stmt(
+        &mut self,
+        _module: &[Token],
+        name: &Token,
+        rename: Option<&Token>,
+    ) -> Result<(), String> {
+        self.define_name(rename.unwrap_or(name));
         Ok(())
     }
 }

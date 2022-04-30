@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use super::arity::Arity;
 use super::builtins::BuiltinMap;
+use super::module::Module;
 
 const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<StackObject>();
 //4MB
@@ -14,7 +15,7 @@ const DEFAULT_MAX_STACK_SIZE: usize = 4 * 1024 * 1024 / std::mem::size_of::<Stac
 pub struct VM<'gc, 'builtins> {
     pub(super) stack: Vec<Value>,
     pub(super) call_stack: Vec<CallStackValue>,
-    pub(super) globals: HashMap<String, Value>,
+    pub(super) loaded_modules: HashMap<Module, HashMap<String, Value>>,
     locals_offset: usize,
     stack_max_size: usize,
     pub gc: &'gc mut GC,
@@ -53,6 +54,7 @@ pub enum InterpretErrorKind {
     NativeError { message: String },
     AttributeError { object: Value, missed_field: String },
     IndexAttributeError { object: Value, missed_idx: usize },
+    ImportError { message: String },
 }
 
 enum InstructionExecution {
@@ -71,7 +73,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         VM {
             stack: Vec::new(),
             call_stack: Vec::new(),
-            globals: HashMap::new(),
+            loaded_modules: Default::default(),
             locals_offset: 0,
             gc,
             stack_max_size: DEFAULT_MAX_STACK_SIZE,
@@ -90,6 +92,20 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         self.call_stack.clear();
         self.stack.clear();
         self.locals_offset = 0;
+    }
+
+    fn save_stacks(&self) -> (usize, usize, usize) {
+        (self.call_stack.len(), self.stack.len(), self.locals_offset)
+    }
+
+    fn load_stacks(&mut self, state: (usize, usize, usize)) {
+        self.call_stack.truncate(state.0);
+        self.stack.truncate(state.1);
+        self.locals_offset = state.2;
+    }
+
+    pub fn maybe_create_module(&mut self, module: &Module) {
+        self.loaded_modules.entry(module.clone()).or_default();
     }
 
     pub fn run(&mut self, entry_point: StackObject) -> Result<StackObject> {
@@ -184,7 +200,7 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     self.gc.mark_and_sweep(
                         self.stack
                             .iter()
-                            .chain(self.globals.iter().map(|(_k, v)| v)),
+                            .chain(self.loaded_modules.values().flat_map(|v| v.values())),
                         &*self.call_stack,
                     );
                 }
@@ -447,7 +463,9 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
             Opcode::LoadGlobal(idx) => {
                 let key = checked_get_name!(idx)?;
                 let value = self
-                    .globals
+                    .loaded_modules
+                    .get(&chunk.module)
+                    .unwrap()
                     .get(key)
                     .cloned()
                     .or_else(|| self.builtins.get_builtin(key))
@@ -456,6 +474,50 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     }))?;
 
                 self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Import(idx) => {
+                let import = chunk
+                    .import_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+
+                let module = &import.0;
+                let name = &import.1;
+
+                if !self.loaded_modules.contains_key(module) {
+                    use crate::execution::module::{self};
+                    use std::path::PathBuf;
+                    let path: PathBuf = (&import.0).into();
+
+                    let state = self.save_stacks();
+
+                    //we want not to crash even if importing goes south
+                    self.locals_offset = self.stack.len();
+
+                    let load_result = module::compile_file(path.as_path(), self)
+                        .and_then(|(src, ptr)| module::exec_with_error_printing(self, ptr, &src))
+                        .map_err(|e| e.to_string())
+                        .map_err(|e| {
+                            runtime_error!(InterpretErrorKind::ImportError { message: e })
+                        });
+                    self.load_stacks(state);
+                    let _ = load_result?;
+                }
+
+                let value = self
+                    .loaded_modules
+                    .get(module)
+                    .unwrap()
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        runtime_error!(InterpretErrorKind::NameError { name: name.clone() })
+                    })?;
+
+                self.stack.push(value);
+
                 InstructionExecution::NextInstruction
             }
 
@@ -536,7 +598,10 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 let key = checked_get_name!(idx)?;
                 let value = checked_stack_pop!()?;
 
-                self.globals.insert(key.to_string(), value);
+                self.loaded_modules
+                    .get_mut(&chunk.module)
+                    .unwrap()
+                    .insert(key.to_string(), value);
                 InstructionExecution::NextInstruction
             }
 

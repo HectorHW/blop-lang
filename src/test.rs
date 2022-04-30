@@ -1,6 +1,5 @@
-use super::compile_file;
-use super::run_file;
-use crate::GC;
+use super::execution::module::{compile_file, run_file};
+use std::path::Path;
 
 macro_rules! test_file {
     ($name:ident) => {
@@ -12,7 +11,7 @@ macro_rules! test_file {
             path.push_str(".txt");
             println!("{}", path);
 
-            run_file(&path).unwrap();
+            run_file(Path::new(&path)).unwrap();
         }
     };
 }
@@ -27,7 +26,7 @@ macro_rules! test_fail_file {
             path.push_str(".txt");
             println!("{}", path);
 
-            run_file(&path).unwrap_err();
+            run_file(Path::new(&path)).unwrap_err();
         }
     };
 }
@@ -36,14 +35,20 @@ macro_rules! test_fail_compile {
     ($name:ident) => {
         #[test]
         fn $name() {
+            use crate::data::gc::GC;
+            use crate::execution::builtins::builtin_factory;
+            use crate::execution::vm::VM;
             let mut path = String::new();
             path.push_str("examples/");
             path.push_str(stringify!($name));
             path.push_str(".txt");
 
             let mut gc = unsafe { GC::default_gc() };
+            let builtins = builtin_factory();
 
-            assert!(compile_file(&path, &mut gc).is_err());
+            let mut vm = VM::new(&mut gc, &builtins);
+
+            compile_file(Path::new(&path), &mut vm).err().unwrap();
         }
     };
 }
@@ -97,3 +102,5 @@ test_file! {varargs}
 test_file! {enums}
 
 test_file! {inline_blocks}
+
+test_file! {imports}
