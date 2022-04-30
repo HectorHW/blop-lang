@@ -288,36 +288,6 @@ pub fn builtin_factory() -> BuiltinMap {
         Ok(Default::default())
     });
 
-    builtin!("import", Exact(2), |mut args, vm| {
-        let item = args.pop().unwrap();
-        let item = item.unwrap_any_str().ok_or_else(|| {
-            BuiltinError::Other("expected item name as string in import".to_string())
-        })?;
-        let module = args.pop().unwrap();
-        let module = module.unwrap_any_str().ok_or_else(|| {
-            BuiltinError::Other("expected module name as string in import".to_string())
-        })?;
-
-        let module = Module::from_dot_notation(module);
-        let path: PathBuf = (&module).into();
-
-        if !vm.loaded_modules.contains_key(&module) {
-            let _ = module::compile_file(path.as_path(), vm)
-                .and_then(|(src, ptr)| module::exec_with_error_printing(vm, ptr, &src))
-                .map_err(|e| e.to_string())
-                .map_err(BuiltinError::Import)?;
-        }
-
-        vm.loaded_modules
-            .get(&module)
-            .unwrap()
-            .get(item)
-            .cloned()
-            .ok_or_else(|| {
-                BuiltinError::Import(format!("could not find `{}` in `{:?}`", item, module))
-            })
-    });
-
     builtin!("ptr_eq", Exact(2), |mut args, _vm| {
         let arg2 = args.pop().unwrap();
         let arg1 = args.pop().unwrap();
