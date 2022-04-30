@@ -1,4 +1,5 @@
 use super::execution::module::{compile_file, run_file};
+use std::path::Path;
 
 macro_rules! test_file {
     ($name:ident) => {
@@ -10,7 +11,7 @@ macro_rules! test_file {
             path.push_str(".txt");
             println!("{}", path);
 
-            run_file(&path).unwrap();
+            run_file(Path::new(&path)).unwrap();
         }
     };
 }
@@ -25,7 +26,7 @@ macro_rules! test_fail_file {
             path.push_str(".txt");
             println!("{}", path);
 
-            run_file(&path).unwrap_err();
+            run_file(Path::new(&path)).unwrap_err();
         }
     };
 }
@@ -47,7 +48,7 @@ macro_rules! test_fail_compile {
 
             let mut vm = VM::new(&mut gc, &builtins);
 
-            compile_file(&path, &mut vm).err().unwrap();
+            compile_file(Path::new(&path), &mut vm).err().unwrap();
         }
     };
 }
@@ -101,3 +102,5 @@ test_file! {varargs}
 test_file! {enums}
 
 test_file! {inline_blocks}
+
+test_file! {imports}

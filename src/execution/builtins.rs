@@ -1,8 +1,11 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, path::PathBuf};
 
 ///
 /// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
-use crate::data::objects::{StackObject, VVec, Value};
+use crate::{
+    data::objects::{StackObject, VVec, Value},
+    execution::module::{self, Module},
+};
 use indexmap::IndexMap;
 
 use super::{arity::Arity, vm::VM};
@@ -20,6 +23,7 @@ pub struct BuiltinMap {
 
 pub enum BuiltinError {
     ArityMismatch { provided: usize, expected: Arity },
+    Import(String),
     Other(String),
 }
 
@@ -31,6 +35,7 @@ impl Display for BuiltinError {
             match self {
                 BuiltinError::ArityMismatch { provided, expected } =>
                     format!("expected {} args but got {}", expected, provided),
+                BuiltinError::Import(e) => format!("error while importing: {}", e),
                 BuiltinError::Other(e) => e.clone(),
             }
         )
@@ -281,6 +286,46 @@ pub fn builtin_factory() -> BuiltinMap {
         println!("{}", s);
 
         Ok(Default::default())
+    });
+
+    builtin!("import", Exact(2), |mut args, vm| {
+        let item = args.pop().unwrap();
+        let item = item.unwrap_any_str().ok_or_else(|| {
+            BuiltinError::Other("expected item name as string in import".to_string())
+        })?;
+        let module = args.pop().unwrap();
+        let module = module.unwrap_any_str().ok_or_else(|| {
+            BuiltinError::Other("expected module name as string in import".to_string())
+        })?;
+
+        let module = Module::from_dot_notation(module);
+        let path: PathBuf = (&module).into();
+
+        if !vm.loaded_modules.contains_key(&module) {
+            let _ = module::compile_file(path.as_path(), vm)
+                .and_then(|(src, ptr)| module::exec_with_error_printing(vm, ptr, &src))
+                .map_err(|e| e.to_string())
+                .map_err(BuiltinError::Import)?;
+        }
+
+        vm.loaded_modules
+            .get(&module)
+            .unwrap()
+            .get(item)
+            .cloned()
+            .ok_or_else(|| {
+                BuiltinError::Import(format!("could not find `{}` in `{:?}`", item, module))
+            })
+    });
+
+    builtin!("ptr_eq", Exact(2), |mut args, _vm| {
+        let arg2 = args.pop().unwrap();
+        let arg1 = args.pop().unwrap();
+        match (arg1.as_heap_object(), arg2.as_heap_object()) {
+            (Some(p1), Some(p2)) => Ok(std::ptr::eq(p1, p2).into()),
+
+            _ => Ok(false.into()),
+        }
     });
 
     methods!("Int",

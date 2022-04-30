@@ -1,0 +1,16 @@
+def for(start, stop, op) =
+    if start == stop
+        pass
+    else
+        op(start)
+        for(start+1, stop, op)
+
+def while(condition, op) =
+    if condition()
+        op()
+        while(condition, op)
+
+def do_while(condition, op) =
+    op()
+    if condition()
+        do_while(condition, op)

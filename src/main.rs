@@ -11,6 +11,7 @@ use execution::vm::InterpretError;
 use std::env;
 use std::fmt::Write;
 use std::io::{stdin, BufRead};
+use std::path::Path;
 #[cfg(feature = "bench")]
 use std::time::Instant;
 
@@ -40,7 +41,7 @@ fn main() {
 
     let mut vm = VM::new(&mut gc, &builtins);
 
-    let (source, pointer) = compile_file(filename, &mut vm).unwrap();
+    let (source, pointer) = compile_file(Path::new(filename), &mut vm).unwrap();
 
     println!("running");
 
@@ -104,22 +105,7 @@ pub fn run_repl() {
             x if x.is_empty() => {
                 println!("```\n{}\n```", input);
 
-                /*let ptr = match load_from_buf(&mut vm, input, &module) {
-                    ModuleLoadResult::ModuleExists => unreachable!(),
-                    ModuleLoadResult::ModuleNotFound => unreachable!(),
-                    ModuleLoadResult::ModuleLoaded(_, ptr) => ptr,
-                    ModuleLoadResult::ModuleExecuted(_) => unreachable!(),
-                    ModuleLoadResult::ModuleReadError(_) => unreachable!(),
-                    ModuleLoadResult::ModulePipelineError(e) => {
-                        println!("error!");
-                        println!("{}", e);
-                        input = String::new();
-                        continue;
-                    }
-                    ModuleLoadResult::ExecutionError(_) => unreachable!(),
-                };*/
-
-                let ptr = match compile_program(input, &module, &mut vm) {
+                let ptr = match compile_program(input.clone(), &module, &mut vm) {
                     Ok(p) => p,
                     Err(e) => {
                         println!("error!\n{e}");
@@ -128,7 +114,7 @@ pub fn run_repl() {
                     }
                 };
 
-                match vm.run(ptr).map_err(|e| format!("{:?}", e)) {
+                match vm.run(ptr).map_err(|e| crate::display_error(&input, e)) {
                     Ok(value) => {
                         println!("Ok. result: {}", value);
                     }

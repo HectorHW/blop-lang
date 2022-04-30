@@ -11,7 +11,7 @@ use crate::{
 
 use super::vm::VM;
 
-pub const FILE_EXTENSION: &str = ".txt";
+pub const FILE_EXTENSION: &str = "txt";
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Module(Vec<String>);
@@ -42,8 +42,12 @@ impl TryFrom<&Path> for Module {
 
 impl From<&Module> for PathBuf {
     fn from(m: &Module) -> Self {
-        let buf: PathBuf = m.0.iter().collect();
-        buf.with_extension(FILE_EXTENSION)
+        let (head, tail) = m.0.split_last().unwrap();
+
+        let mut buf: PathBuf = tail.iter().collect();
+        buf.push(head);
+        buf.set_extension(FILE_EXTENSION);
+        buf
     }
 }
 
@@ -116,23 +120,23 @@ pub fn compile_program(
     Ok(pointer)
 }
 
-pub fn compile_file(filename: &str, vm: &mut VM) -> Result<(String, Value), Box<dyn Error>> {
-    let program = match std::fs::read_to_string(filename) {
+pub fn compile_file(file_path: &Path, vm: &mut VM) -> Result<(String, Value), Box<dyn Error>> {
+    let program = match std::fs::read_to_string(file_path) {
         Ok(content) => content,
         Err(e) => {
-            return Err(format!("{e}").into());
+            return Err(format!("{e} ({})", file_path.display()).into());
         }
     };
 
-    let module = Module::try_from(Path::new(filename))
-        .map_err(|_| format!("failed to build module from path {filename}"))?;
+    let module = Module::try_from(file_path)
+        .map_err(|_| format!("failed to build module from path {file_path:?}"))?;
 
     let pointer = compile_program(program.clone(), &module, vm)?;
     Ok((program, pointer))
 }
 
 #[allow(dead_code)]
-pub fn run_file(filename: &str) -> Result<(), Box<dyn Error>> {
+pub fn run_file(filename: &Path) -> Result<(), Box<dyn Error>> {
     let mut gc = unsafe { GC::default_gc() };
     let builtins = super::builtins::builtin_factory();
 
