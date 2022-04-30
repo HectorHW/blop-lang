@@ -54,6 +54,7 @@ pub enum InterpretErrorKind {
     NativeError { message: String },
     AttributeError { object: Value, missed_field: String },
     IndexAttributeError { object: Value, missed_idx: usize },
+    ImportError { message: String },
 }
 
 enum InstructionExecution {
@@ -91,6 +92,16 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
         self.call_stack.clear();
         self.stack.clear();
         self.locals_offset = 0;
+    }
+
+    fn save_stacks(&self) -> (usize, usize, usize) {
+        (self.call_stack.len(), self.stack.len(), self.locals_offset)
+    }
+
+    fn load_stacks(&mut self, state: (usize, usize, usize)) {
+        self.call_stack.truncate(state.0);
+        self.stack.truncate(state.1);
+        self.locals_offset = state.2;
     }
 
     pub fn maybe_create_module(&mut self, module: &Module) {
@@ -463,6 +474,50 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                     }))?;
 
                 self.stack.push(value);
+                InstructionExecution::NextInstruction
+            }
+
+            Opcode::Import(idx) => {
+                let import = chunk
+                    .import_names
+                    .get(idx as usize)
+                    .ok_or(runtime_error!(OperandIndexing))?;
+
+                let module = &import.0;
+                let name = &import.1;
+
+                if !self.loaded_modules.contains_key(module) {
+                    use crate::execution::module::{self};
+                    use std::path::PathBuf;
+                    let path: PathBuf = (&import.0).into();
+
+                    let state = self.save_stacks();
+
+                    //we want not to crash even if importing goes south
+                    self.locals_offset = self.stack.len();
+
+                    let load_result = module::compile_file(path.as_path(), self)
+                        .and_then(|(src, ptr)| module::exec_with_error_printing(self, ptr, &src))
+                        .map_err(|e| e.to_string())
+                        .map_err(|e| {
+                            runtime_error!(InterpretErrorKind::ImportError { message: e })
+                        });
+                    self.load_stacks(state);
+                    let _ = load_result?;
+                }
+
+                let value = self
+                    .loaded_modules
+                    .get(module)
+                    .unwrap()
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        runtime_error!(InterpretErrorKind::NameError { name: name.clone() })
+                    })?;
+
+                self.stack.push(value);
+
                 InstructionExecution::NextInstruction
             }
 

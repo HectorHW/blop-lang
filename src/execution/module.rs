@@ -52,6 +52,10 @@ impl From<&Module> for PathBuf {
 }
 
 impl Module {
+    pub fn new(items: Vec<String>) -> Self {
+        Self(items)
+    }
+
     pub fn from_dot_notation(module_name: &str) -> Self {
         Self(module_name.split('.').map(ToOwned::to_owned).collect())
     }

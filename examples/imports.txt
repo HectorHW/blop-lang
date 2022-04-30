@@ -1,4 +1,4 @@
-for = import("std.loops", "for")
+import std.loops.for
 
 accumulator = 0
 
@@ -10,5 +10,5 @@ for(1, 10+1, body)
 assert accumulator == 55
 
 #imported module should be loaded only once
-for2 = import("std.loops", "for")
+import std.loops.for as for2
 assert ptr_eq(for, for2)

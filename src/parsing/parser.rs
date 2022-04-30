@@ -42,6 +42,7 @@ peg::parser! {
             / struct_decl_stmt()
             / enum_decl_stmt()
             / implementation_stmt()
+            / import_stmt()
             / assignment_stmt()
             / assert_stmt()
             / pass_stmt()
@@ -142,6 +143,31 @@ peg::parser! {
                 n
             }
             / [t!(Equals)] {(Vec::new(), None)}
+
+        rule import_stmt() -> Stmt =
+            [t!(Import)] trg:import_target() rename:import_rename()? {
+                Stmt::Import{
+                    module: trg.0,
+                    name: trg.1,
+                    rename
+                }
+            }
+
+        rule import_target() -> (Vec<Token>, Token) =
+            item0: name() [t!(Dot)] more_items:name() ++ [t!(Dot)]
+             {
+                let mut more_items = more_items;
+                 //modname:name() ++ [t!(Dot)] [t!(Dot)] item_name:name()
+                let mut items = vec![item0];
+                items.append(&mut more_items);
+
+                let import_name = items.pop().unwrap();
+                (items, import_name)
+            }
+
+
+        rule import_rename() -> Token =
+            [t!(As)] n:name() {n}
 
         rule assignment_stmt() -> Stmt =
             target:assignment_target() [t!(Equals)] e:expr() {

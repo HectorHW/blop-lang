@@ -10,6 +10,7 @@ use super::module::Module;
 pub struct Chunk {
     pub constants: Vec<Value>,
     pub global_names: Vec<String>,
+    pub import_names: Vec<(Module, String)>,
     pub code: Vec<Opcode>,
     pub name: Token,
     pub module: Module,
@@ -75,6 +76,8 @@ pub enum Opcode {
     MakeList(u16),
     Return,
 
+    Import(u16),
+
     Nop,
     Assert, //SwapStack(u8, u8),
             //ExtendArg1(u16),
@@ -93,6 +96,7 @@ impl Chunk {
             constants: Vec::new(),
             global_names: Vec::new(),
             code: Vec::new(),
+            import_names: Default::default(),
             name,
             module,
             arity,

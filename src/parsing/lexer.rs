@@ -78,6 +78,8 @@ pub enum TokenKind {
     Struct,
     Enum,
     Impl,
+    Import,
+    As,
 }
 
 impl Display for TokenKind {
@@ -173,6 +175,8 @@ impl<'input> Lexer<'input> {
             ("impl", Impl),
             ("true", True),
             ("false", False),
+            ("import", Import),
+            ("as", As),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

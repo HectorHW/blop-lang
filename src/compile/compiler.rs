@@ -90,6 +90,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     compiler.declare_local(name.get_string().unwrap(), VariableType::Global);
                 }
 
+                Stmt::Import { name, rename, .. } => {
+                    let name = rename.as_ref().unwrap_or(name);
+                    compiler.declare_local(name.get_string().unwrap(), VariableType::Global);
+                }
+
                 _ => {}
             }
         }
@@ -185,6 +190,16 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
         self.current_chunk.constants.push(constant);
         self.current_chunk.constants.len() - 1
+    }
+
+    fn get_or_create_import_name(&mut self, import_name: (Module, String)) -> usize {
+        for (i, item) in self.current_chunk.import_names.iter().enumerate() {
+            if item == &import_name {
+                return i;
+            }
+        }
+        self.current_chunk.import_names.push(import_name);
+        self.current_chunk.import_names.len() - 1
     }
 
     /// looks up variable by name, considering only well-defined variables
@@ -813,6 +828,36 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     },
                     token.position.0,
                 );
+            }
+
+            Stmt::Import {
+                module,
+                name,
+                rename,
+            } => {
+                let path = module
+                    .iter()
+                    .map(|t| t.get_string().unwrap().to_string())
+                    .collect::<Vec<_>>();
+                let module = Module::new(path);
+
+                let idx = self
+                    .get_or_create_import_name((module, name.get_string().unwrap().to_string()));
+                let import = |slf: &mut Compiler| {
+                    let mut importname = AnnotatedCodeBlob::new();
+
+                    importname.push(Opcode::Import(idx as u16), name.position.0); //code block
+
+                    slf.inc_stack_height();
+
+                    Ok(importname)
+                };
+
+                result.append(self.create_named_entity(rename.as_ref().unwrap_or(name), &import)?);
+
+                if self.needs_value() {
+                    result.push(Opcode::LoadNothing, name.position.0);
+                }
             }
         }
 

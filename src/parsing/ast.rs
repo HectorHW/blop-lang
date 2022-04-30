@@ -34,6 +34,12 @@ pub enum Stmt {
         name: Token,
         implementations: Vec<Stmt>,
     },
+
+    Import {
+        module: Vec<Token>,
+        name: Token,
+        rename: Option<Token>,
+    },
 }
 
 #[derive(Clone, Debug)]
