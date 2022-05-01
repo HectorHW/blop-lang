@@ -28,4 +28,4 @@ var some_number: Int = 2
 #some_number = true
 #will fail
 #var some_fn: Fn(Int, Int)=>Int = 1
-var some_fn: Fn(Int, Int)=>Int = (a:Int, b:Int) => a+b
+var some_fn: Fn(Int, Int)=>Int = (a, b) => a+b

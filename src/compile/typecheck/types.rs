@@ -191,6 +191,32 @@ impl Type {
             _ => None,
         }
     }
+
+    fn check_fn_less(first: &Type, second: &Type) -> bool {
+        match (first, second) {
+            (Type::Callable(c1), Type::Callable(c2)) => {
+                if c1.arguments.len() != c2.arguments.len()
+                    || c1.vararg.is_some() != c2.vararg.is_some()
+                {
+                    return false;
+                }
+                c1.arguments
+                    .iter()
+                    .zip(c2.arguments.iter())
+                    .all(|(a1, a2)| PartialOrd::le(a1, a2))
+                    && c1
+                        .vararg
+                        .as_ref()
+                        .into_iter()
+                        .zip(c2.vararg.as_ref().into_iter())
+                        .map(|(v1, v2)| PartialOrd::le(v1, v2))
+                        .last()
+                        .unwrap_or(true)
+                    && PartialOrd::le(&c1.return_type, &c2.return_type)
+            }
+            _ => false,
+        }
+    }
 }
 
 impl Default for Type {
@@ -198,7 +224,7 @@ impl Default for Type {
         Type::Unspecified
     }
 }
-
+///partialcmp that is only used through le and threated like type match
 impl PartialOrd for Type {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if self == other {
@@ -212,6 +238,15 @@ impl PartialOrd for Type {
             return Some(Ordering::Equal);
         }
 
-        None
+        match (self, other) {
+            (Type::Callable(_), Type::Callable(_)) => {
+                if Self::check_fn_less(self, other) || Self::check_fn_less(other, self) {
+                    Some(Ordering::Equal)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 }
