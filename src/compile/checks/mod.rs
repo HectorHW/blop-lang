@@ -1,9 +1,9 @@
 mod constant_folding;
 mod expression_lift;
 mod name_definition_check;
-mod tree_rewriter;
-mod tree_visitor;
-mod variable_annotation_generation;
+pub mod tree_rewriter;
+pub mod tree_visitor;
+pub mod variable_annotation_generation;
 
 use crate::compile::checks::constant_folding::Folder;
 use crate::compile::checks::expression_lift::ExpressionLifter;

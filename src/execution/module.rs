@@ -99,6 +99,9 @@ pub fn compile_program(
     #[cfg(feature = "print-annotations")]
     println!("ANNOTATIONS:\n{annotations:?}");
 
+    #[cfg(feature = "typecheck")]
+    crate::compile::typecheck::typecheck(&statements, &annotations).unwrap();
+
     let pointer = Compiler::compile_module(&statements, annotations, module.clone(), vm.gc)?;
 
     vm.maybe_create_module(module);

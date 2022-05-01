@@ -9,8 +9,8 @@ pub struct NameRedefinitionChecker {
     scope: Vec<HashMap<String, Token>>,
 }
 
-impl NameRedefinitionChecker {
-    pub fn check(ast: &Program) -> Result<(), String> {
+impl<'ast> NameRedefinitionChecker {
+    pub fn check(ast: &'ast Program) -> Result<(), String> {
         let mut checker = NameRedefinitionChecker { scope: vec![] };
         checker.new_scope();
         ast.iter().try_for_each(|s| checker.visit_stmt(s))
@@ -38,8 +38,8 @@ impl NameRedefinitionChecker {
     }
 }
 
-impl Visitor<String> for NameRedefinitionChecker {
-    fn visit_var_stmt(&mut self, name: &Token, rhs: Option<&Expr>) -> Result<(), String> {
+impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
+    fn visit_var_stmt(&mut self, name: &'ast Token, rhs: Option<&'ast Expr>) -> Result<(), String> {
         if let Some(rhs) = rhs {
             self.visit_expr(rhs)?
         };

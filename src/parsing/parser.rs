@@ -35,7 +35,7 @@ peg::parser! {
         rule block() -> (Token, Token, Vec<Stmt>) =
             [bb@t!(BeginBlock)] [t!(LineEnd)]? s:stmt() ** [t!(LineEnd)] [t!(LineEnd)]? [be@t!(EndBlock)] {(bb.clone(), be.clone(), s)}
 
-        rule stmt() -> Stmt =
+        pub rule stmt() -> Stmt =
 
              var_decl_stmt()
             / function_decl_stmt()
@@ -232,7 +232,7 @@ peg::parser! {
         rule pass_stmt() -> Stmt =
             [t@t!(Pass)] {Stmt::Pass(t.clone())}
 
-        rule expr() -> Expr =
+        pub rule expr() -> Expr =
             block_expr() /
             if_expr() /
             simple_expr()

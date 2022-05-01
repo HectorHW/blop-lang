@@ -3,9 +3,12 @@ use crate::parsing::lexer::Token;
 use crate::Expr;
 
 #[allow(unused)]
-pub(super) trait Visitor<E> {
-    fn visit_stmt(&mut self, stmt: &Stmt) -> Result<(), E> {
-        match stmt {
+pub(crate) trait Visitor<'ast, T, E>
+where
+    T: Default,
+{
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) -> Result<T, E> {
+        let obj = match stmt {
             Stmt::VarDeclaration(a, b) => self.visit_var_stmt(a, b.as_ref()),
             Stmt::Assignment(target, value) => self.visit_assignment_stmt(target, value),
             Stmt::Expression(e) => self.visit_expr_stmt(e),
@@ -36,88 +39,106 @@ pub(super) trait Visitor<E> {
                 name,
                 rename,
             } => self.visit_import_stmt(module, name, rename.as_ref()),
-        }
+        }?;
+
+        self.after_stmt(stmt, obj)
     }
 
-    fn visit_var_stmt(&mut self, _variable_name: &Token, rhs: Option<&Expr>) -> Result<(), E> {
+    fn after_stmt(&mut self, stmt: &'ast Stmt, value: T) -> Result<T, E> {
+        Ok(value)
+    }
+
+    fn visit_var_stmt(
+        &mut self,
+        _variable_name: &'ast Token,
+        rhs: Option<&'ast Expr>,
+    ) -> Result<T, E> {
         if rhs.is_some() {
             self.visit_expr(rhs.unwrap())?;
         }
-        Ok(())
+        Ok(Default::default())
     }
 
-    fn visit_assignment_stmt(&mut self, _target: &Token, value: &Expr) -> Result<(), E> {
+    fn visit_assignment_stmt(&mut self, _target: &'ast Token, value: &'ast Expr) -> Result<T, E> {
         self.visit_expr(value)
     }
 
-    fn visit_expr_stmt(&mut self, expr: &Expr) -> Result<(), E> {
+    fn visit_expr_stmt(&mut self, expr: &'ast Expr) -> Result<T, E> {
         self.visit_expr(expr)
     }
 
-    fn visit_assert_statement(&mut self, _keyword: &Token, expr: &Expr) -> Result<(), E> {
+    fn visit_assert_statement(&mut self, _keyword: &'ast Token, expr: &'ast Expr) -> Result<T, E> {
         self.visit_expr(expr)
     }
 
-    fn visit_pass_stmt(&mut self, _keyword: &Token) -> Result<(), E> {
-        Ok(())
+    fn visit_pass_stmt(&mut self, _keyword: &'ast Token) -> Result<T, E> {
+        Ok(Default::default())
     }
 
     fn visit_function_declaration_statement(
         &mut self,
-        name: &Token,
-        args: &[Token],
-        vararg: Option<&Token>,
-        body: &Expr,
-    ) -> Result<(), E> {
+        name: &'ast Token,
+        args: &'ast [Token],
+        vararg: Option<&'ast Token>,
+        body: &'ast Expr,
+    ) -> Result<T, E> {
         self.visit_expr(body)
     }
 
     fn visit_method(
         &mut self,
-        name: &Token,
-        args: &[Token],
-        vararg: Option<&Token>,
-        body: &Expr,
-    ) -> Result<(), E> {
+        name: &'ast Token,
+        args: &'ast [Token],
+        vararg: Option<&'ast Token>,
+        body: &'ast Expr,
+    ) -> Result<T, E> {
         self.visit_function_declaration_statement(name, args, vararg, body)
     }
 
     fn visit_struct_declaration_statement(
         &mut self,
-        name: &Token,
+        name: &'ast Token,
         fields: &[Token],
-    ) -> Result<(), E> {
-        Ok(())
+    ) -> Result<T, E> {
+        Ok(Default::default())
     }
 
-    fn visit_enum_declaration(&mut self, name: &Token, variants: &[EnumVariant]) -> Result<(), E> {
-        Ok(())
+    fn visit_enum_declaration(
+        &mut self,
+        name: &'ast Token,
+        variants: &'ast [EnumVariant],
+    ) -> Result<T, E> {
+        Ok(Default::default())
     }
 
-    fn visit_property_assignment(&mut self, target: &Expr, value: &Expr) -> Result<(), E> {
+    fn visit_property_assignment(&mut self, target: &'ast Expr, value: &'ast Expr) -> Result<T, E> {
         self.visit_expr(target)?;
         self.visit_expr(value)
     }
 
-    fn visit_impl_block(&mut self, name: &Token, implementations: &[Stmt]) -> Result<(), E> {
+    fn visit_impl_block(
+        &mut self,
+        name: &'ast Token,
+        implementations: &'ast [Stmt],
+    ) -> Result<T, E> {
         implementations
             .iter()
-            .try_for_each(|f| self.visit_stmt(f))?;
+            .try_for_each(|f| self.visit_stmt(f).map(|_| ()))?;
 
-        Ok(())
+        Ok(Default::default())
     }
 
     fn visit_import_stmt(
         &mut self,
-        module: &[Token],
-        name: &Token,
-        rename: Option<&Token>,
-    ) -> Result<(), E> {
-        Ok(())
+        module: &'ast [Token],
+        name: &'ast Token,
+        rename: Option<&'ast Token>,
+    ) -> Result<T, E> {
+        Ok(Default::default())
     }
 
-    fn visit_expr(&mut self, expr: &Expr) -> Result<(), E> {
-        match expr {
+    fn visit_expr(&mut self, expr: &'ast Expr) -> Result<T, E> {
+        let value = match expr {
             Expr::Number(n) => self.visit_number_expr(n),
             Expr::FloatNumber(n) => self.visit_float_number_expr(n),
             Expr::Bool(b) => self.visit_bool_expr(b),
@@ -138,105 +159,119 @@ pub(super) trait Visitor<E> {
             }
             Expr::PropertyAccess(target, prop) => self.visit_property_access(target.as_ref(), prop),
             Expr::PropertyTest(target, prop) => self.visit_property_check(target.as_ref(), prop),
-        }
+        }?;
+        self.after_expr(expr, value)
     }
 
-    fn visit_bool_expr(&mut self, token: &Token) -> Result<(), E> {
-        Ok(())
+    fn after_expr(&mut self, expr: &'ast Expr, value: T) -> Result<T, E> {
+        Ok(value)
     }
 
-    fn visit_number_expr(&mut self, token: &Token) -> Result<(), E> {
-        Ok(())
+    fn visit_bool_expr(&mut self, token: &'ast Token) -> Result<T, E> {
+        Ok(Default::default())
     }
 
-    fn visit_float_number_expr(&mut self, token: &Token) -> Result<(), E> {
-        Ok(())
+    fn visit_number_expr(&mut self, token: &'ast Token) -> Result<T, E> {
+        Ok(Default::default())
     }
 
-    fn visit_variable_expr(&mut self, variable_name: &Token) -> Result<(), E> {
-        Ok(())
+    fn visit_float_number_expr(&mut self, token: &'ast Token) -> Result<T, E> {
+        Ok(Default::default())
     }
 
-    fn visit_string_expr(&mut self, string_literal: &Token) -> Result<(), E> {
-        Ok(())
+    fn visit_variable_expr(&mut self, variable_name: &'ast Token) -> Result<T, E> {
+        Ok(Default::default())
     }
 
-    fn visit_binary_expr(&mut self, op: &Token, left: &Expr, right: &Expr) -> Result<(), E> {
+    fn visit_string_expr(&mut self, string_literal: &'ast Token) -> Result<T, E> {
+        Ok(Default::default())
+    }
+
+    fn visit_binary_expr(
+        &mut self,
+        op: &'ast Token,
+        left: &'ast Expr,
+        right: &'ast Expr,
+    ) -> Result<T, E> {
         self.visit_expr(left)?;
         self.visit_expr(right)
     }
 
-    fn visit_unary_expr(&mut self, op: &Token, arg: &Expr) -> Result<(), E> {
+    fn visit_unary_expr(&mut self, op: &'ast Token, arg: &'ast Expr) -> Result<T, E> {
         self.visit_expr(arg)
     }
 
     fn visit_cond_expr(
         &mut self,
-        condition: &Expr,
-        then_branch: &Expr,
-        else_branch: Option<&Expr>,
-    ) -> Result<(), E> {
+        condition: &'ast Expr,
+        then_branch: &'ast Expr,
+        else_branch: Option<&'ast Expr>,
+    ) -> Result<T, E> {
         self.visit_expr(condition)?;
         self.visit_expr(then_branch)?;
         if else_branch.is_some() {
             self.visit_expr(else_branch.unwrap())?;
         }
-        Ok(())
+        Ok(Default::default())
     }
 
     fn visit_block(
         &mut self,
-        start_token: &Token,
-        end_token: &Token,
-        containing_statements: &[Stmt],
-    ) -> Result<(), E> {
+        start_token: &'ast Token,
+        end_token: &'ast Token,
+        containing_statements: &'ast [Stmt],
+    ) -> Result<T, E> {
         let mut res = vec![];
         for stmt in containing_statements {
             res.push(self.visit_stmt(stmt)?);
         }
-        Ok(())
+        Ok(Default::default())
     }
 
-    fn visit_single_statement_expr(&mut self, stmt: &Stmt) -> Result<(), E> {
+    fn visit_single_statement_expr(&mut self, stmt: &'ast Stmt) -> Result<T, E> {
         self.visit_stmt(stmt)
     }
 
-    fn visit_call_expr(&mut self, target: &Expr, args: &[Expr]) -> Result<(), E> {
+    fn visit_call_expr(&mut self, target: &'ast Expr, args: &'ast [Expr]) -> Result<T, E> {
         self.visit_expr(target)?;
         for arg in args {
             self.visit_expr(arg)?;
         }
-        Ok(())
+        Ok(Default::default())
     }
 
-    fn visit_partial_call_expr(&mut self, target: &Expr, args: &[Option<Expr>]) -> Result<(), E> {
+    fn visit_partial_call_expr(
+        &mut self,
+        target: &'ast Expr,
+        args: &'ast [Option<Expr>],
+    ) -> Result<T, E> {
         self.visit_expr(target)?;
         for arg in args {
             if arg.is_some() {
                 self.visit_expr(arg.as_ref().unwrap())?;
             }
         }
-        Ok(())
+        Ok(Default::default())
     }
 
     fn visit_anon_function_expr(
         &mut self,
-        args: &[Token],
-        vararg: Option<&Token>,
-        arrow: &Token,
-        body: &Expr,
-    ) -> Result<(), E> {
+        args: &'ast [Token],
+        vararg: Option<&'ast Token>,
+        arrow: &'ast Token,
+        body: &'ast Expr,
+    ) -> Result<T, E> {
         self.visit_expr(body)?;
-        Ok(())
+        Ok(Default::default())
     }
 
-    fn visit_property_access(&mut self, target: &Expr, property: &Token) -> Result<(), E> {
+    fn visit_property_access(&mut self, target: &'ast Expr, property: &'ast Token) -> Result<T, E> {
         self.visit_expr(target)?;
-        Ok(())
+        Ok(Default::default())
     }
 
-    fn visit_property_check(&mut self, target: &Expr, property: &Token) -> Result<(), E> {
+    fn visit_property_check(&mut self, target: &'ast Expr, property: &'ast Token) -> Result<T, E> {
         self.visit_expr(target)?;
-        Ok(())
+        Ok(Default::default())
     }
 }

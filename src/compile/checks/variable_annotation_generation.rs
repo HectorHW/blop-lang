@@ -130,7 +130,7 @@ impl<'a> AnnotationGenerator<'a> {
     }
 }
 
-impl<'a> Visitor<String> for AnnotationGenerator<'a> {
+impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
     fn visit_var_stmt(&mut self, name: &Token, rhs: Option<&Expr>) -> Result<(), String> {
         if let Some(value) = rhs {
             self.visit_expr(value)?;
