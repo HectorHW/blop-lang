@@ -152,6 +152,8 @@ impl<'a, 'ast> Checker<'a, 'ast> {
                 "Int" => Ok(Type::Int),
                 "Bool" => Ok(Type::Bool),
                 "Nothing" => Ok(Type::Nothing),
+                "Float" => Ok(Type::Float),
+                "Any" => Ok(Type::Unspecified),
                 _ => Err(SomewhereTypeError::UnknownType {
                     value: type_name.clone(),
                 }
@@ -610,7 +612,7 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
     fn visit_property_check(
         &mut self,
         target: &'ast Expr,
-        property: &'ast Token,
+        _property: &'ast Token,
     ) -> Result<Type, TypeError> {
         self.visit_expr(target)?;
         Ok(Type::Bool)
