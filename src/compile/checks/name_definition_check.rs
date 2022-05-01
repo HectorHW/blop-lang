@@ -66,7 +66,7 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
         args: &[TypedName],
         vararg: Option<&TypedName>,
         body: &Expr,
-        returns: Option<&TypeMention>,
+        _returns: Option<&TypeMention>,
     ) -> Result<(), String> {
         self.declare_name(name).map_err(|e| {
             format!(

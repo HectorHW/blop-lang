@@ -167,16 +167,47 @@ impl<'a> AnnotationGenerator<'a> {
     fn pop_scope(&mut self) {
         self.scopes.pop();
     }
+
+    fn lookup_type(&mut self, name: &TypedName) {
+        name.type_name.as_ref().map(|t| self.lookup_local(&t.0));
+    }
 }
 
 impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
     fn visit_var_stmt(&mut self, name: &TypedName, rhs: Option<&Expr>) -> Result<(), String> {
+        self.lookup_type(name);
         if let Some(value) = rhs {
             self.visit_expr(value)?;
         }
 
         self.define_name(&name.name);
 
+        Ok(())
+    }
+
+    fn visit_struct_declaration_statement(
+        &mut self,
+        name: &'ast Token,
+        fields: &[TypedName],
+    ) -> Result<(), String> {
+        for field in fields {
+            self.lookup_type(field);
+        }
+        self.define_name(name);
+        Ok(())
+    }
+
+    fn visit_enum_declaration(
+        &mut self,
+        name: &'ast Token,
+        variants: &'ast [crate::parsing::ast::EnumVariant],
+    ) -> Result<(), String> {
+        for variant in variants {
+            for field in &variant.fields {
+                self.lookup_type(field);
+            }
+        }
+        self.define_name(name);
         Ok(())
     }
 
@@ -191,8 +222,12 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         self.new_scope(ScopeType::Function, name);
         self.annotations.get_or_create_closure_scope(name);
         for arg_name in args.iter().chain(vararg.into_iter()) {
+            self.lookup_type(arg_name);
             self.declare_name(&arg_name.name);
             self.define_name(&arg_name.name);
+        }
+        if let Some(t) = returns {
+            self.lookup_name(&t.0)
         }
         self.define_name(name);
         self.visit_expr(body)?;
@@ -270,6 +305,7 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         self.new_scope(ScopeType::Function, arrow);
         self.annotations.get_or_create_closure_scope(arrow);
         for arg_name in args.iter().chain(vararg.into_iter()) {
+            self.lookup_type(arg_name);
             self.declare_name(&arg_name.name);
             self.define_name(&arg_name.name);
         }

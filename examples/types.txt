@@ -22,3 +22,7 @@ struct TextIndex:
 var instance = TextIndex(1, "abcd")
 assert instance.index == 1
 
+var some_number: Int = 2
+
+#this will fail
+#some_number = true

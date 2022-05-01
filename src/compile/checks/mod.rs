@@ -63,6 +63,10 @@ impl Annotations {
     pub fn get_closure_scope(&self, closure_id: &Token) -> Option<&IndexSet<Token>> {
         self.closed_names_table.get(closure_id)
     }
+
+    pub fn get_definiton(&self, name: &Token) -> Option<&Token> {
+        self.variable_bindings.get(name)
+    }
 }
 
 pub fn check_optimize(tree: Program) -> Result<(Program, Annotations), String> {

@@ -147,6 +147,14 @@ impl Type {
         }
     }
 
+    pub fn build_function(args: Vec<Type>, vararg: Option<Type>, ret: Type) -> Type {
+        Self::Callable(Callable {
+            arguments: args,
+            vararg: vararg.map(Box::new),
+            return_type: Box::new(ret),
+        })
+    }
+
     pub fn is_unspecified(&self) -> bool {
         matches!(self, Type::Unspecified)
     }

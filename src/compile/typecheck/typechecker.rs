@@ -11,6 +11,7 @@ use std::hash::Hash;
 pub enum SomewhereTypeError {
     TypeMismatch { expected: Type, got: Type },
     UnspecifiedBinary { left: Type, op: Token, right: Type },
+    UnknownType { value: TypeMention },
 
     ArityMismatch { expected: Arity, got: usize },
 
@@ -54,6 +55,7 @@ pub enum TypeError {
 pub enum Typable<'a> {
     Expr(&'a Expr),
     Stmt(&'a Stmt),
+    Definition(&'a Token),
 }
 
 impl<'a> From<&'a Expr> for Typable<'a> {
@@ -65,6 +67,12 @@ impl<'a> From<&'a Expr> for Typable<'a> {
 impl<'a> From<&'a Stmt> for Typable<'a> {
     fn from(s: &'a Stmt) -> Self {
         Typable::Stmt(s)
+    }
+}
+
+impl<'a> From<&'a Token> for Typable<'a> {
+    fn from(t: &'a Token) -> Self {
+        Typable::Definition(t)
     }
 }
 
@@ -87,6 +95,10 @@ impl<'a> Typemap<'a> {
     pub(super) fn add_stmt(&mut self, stmt: &'a Stmt, stmt_type: Type) {
         self.0.insert(Typable::Stmt(stmt), stmt_type);
     }
+
+    pub(super) fn add_definition(&mut self, name: &'a Token, def_type: Type) {
+        self.0.insert(name.into(), def_type);
+    }
 }
 
 pub struct Checker<'an, 'ast> {
@@ -101,6 +113,8 @@ impl<'a, 'ast> Checker<'a, 'ast> {
         annotations: &'a Annotations,
     ) -> Result<Typemap<'ast>, TypeError> {
         let mut checker = Checker::new(annotations);
+
+        checker.perform_block_predef(program)?;
 
         for stmt in program {
             checker.visit_stmt(stmt)?;
@@ -127,6 +141,84 @@ impl<'a, 'ast> Checker<'a, 'ast> {
             })
         }
     }
+
+    fn lookup_type(&self, type_name: &TypeMention) -> Result<Type, TypeError> {
+        let def_place = self.annotations.get_definiton(&type_name.0);
+
+        let def_place = if let Some(def_place) = def_place {
+            def_place
+        } else {
+            return match type_name.0.get_string().unwrap() {
+                "Int" => Ok(Type::Int),
+                "Bool" => Ok(Type::Bool),
+                "Nothing" => Ok(Type::Nothing),
+                _ => Err(SomewhereTypeError::UnknownType {
+                    value: type_name.clone(),
+                }
+                .at(type_name.0.position))?,
+            };
+        };
+
+        Ok(self.type_map.type_of(def_place.into()))
+    }
+
+    fn lookup_type_of(&self, name: &TypedName) -> Result<Type, TypeError> {
+        name.type_name
+            .as_ref()
+            .map(|t| self.lookup_type(t))
+            .unwrap_or(Ok(Type::Unspecified))
+    }
+
+    fn perform_block_predef(&mut self, statements: &'ast [Stmt]) -> Result<(), TypeError> {
+        for stmt in statements {
+            match stmt {
+                Stmt::VarDeclaration(v, _) => {
+                    let var_type = if let Some(type_name) = &v.type_name {
+                        self.lookup_type(type_name)?
+                    } else {
+                        Type::Unspecified
+                    };
+
+                    self.type_map.add_definition(&v.name, var_type);
+                }
+                Stmt::FunctionDeclaration {
+                    name,
+                    args,
+                    vararg,
+                    body: _,
+                    returns,
+                } => {
+                    let arg_type = args
+                        .iter()
+                        .map(|arg| self.lookup_type_of(arg))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let vararg = vararg
+                        .as_ref()
+                        .map(|v| self.lookup_type_of(v))
+                        .transpose()?;
+
+                    let return_type = returns
+                        .as_ref()
+                        .map(|ret| self.lookup_type(ret))
+                        .transpose()?
+                        .unwrap_or(Type::Unspecified);
+
+                    let function_signature = Type::build_function(arg_type, vararg, return_type);
+                    self.type_map.add_definition(name, function_signature);
+                }
+                Stmt::StructDeclaration { name, fields } => {}
+                Stmt::EnumDeclaration { name, variants } => {}
+                Stmt::ImplBlock { .. } => {
+                    //TODO impl binding
+                }
+                Stmt::Import { .. } => {
+                    //nothing for now
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
@@ -148,10 +240,18 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
 
     fn visit_assignment_stmt(
         &mut self,
-        _target: &'ast Token,
+        target: &'ast Token,
         value: &'ast Expr,
     ) -> Result<Type, TypeError> {
-        self.visit_expr(value)?;
+        let value = self.visit_expr(value)?;
+        let definition_type = self
+            .annotations
+            .get_definiton(target)
+            .map(|def| self.type_map.type_of(def.into()))
+            .unwrap_or(Type::Unspecified);
+
+        Self::check_expectation(&value, &definition_type)?;
+
         Ok(Type::Nothing)
     }
 
@@ -170,7 +270,7 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
     }
 
     fn visit_pass_stmt(&mut self, _keyword: &'ast Token) -> Result<Type, TypeError> {
-        Ok(Default::default())
+        Ok(Type::Nothing)
     }
 
     fn visit_function_declaration_statement(
@@ -360,6 +460,8 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         _end_token: &Token,
         containing_statements: &'ast [Stmt],
     ) -> Result<Type, TypeError> {
+        self.perform_block_predef(containing_statements)?;
+
         let (last, rest) = containing_statements.split_last().unwrap();
 
         for stmt in rest {

@@ -643,7 +643,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                             args,
                             vararg,
                             body,
-                            returns,
+                            returns: _,
                         } => {
                             let base_function =
                                 self.compile_function(name, args, vararg.as_ref(), body)?;
@@ -798,7 +798,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 args,
                 vararg,
                 body,
-                returns,
+                returns: _,
             } => {
                 let new_chunk_idx =
                     self.compile_function(function_name, args, vararg.as_ref(), body)?;
