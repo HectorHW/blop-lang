@@ -26,5 +26,6 @@ var some_number: Int = 2
 
 #this will fail
 #some_number = true
-
-var some_fn: Fn(Int, Int)=>Int = 1
+#will fail
+#var some_fn: Fn(Int, Int)=>Int = 1
+var some_fn: Fn(Int, Int)=>Int = (a:Int, b:Int) => a+b

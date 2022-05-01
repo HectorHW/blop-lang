@@ -83,10 +83,6 @@ impl<'a> From<&'a Token> for Typable<'a> {
 pub struct Typemap<'a>(HashMap<Typable<'a>, Type>);
 
 impl<'a> Typemap<'a> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
     pub fn type_of(&self, obj: Typable) -> Type {
         self.0.get(&obj).cloned().unwrap_or_default()
     }
@@ -227,11 +223,12 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
 
     fn visit_var_stmt(
         &mut self,
-        _variable_name: &'ast TypedName,
+        variable_name: &'ast TypedName,
         rhs: Option<&'ast Expr>,
     ) -> Result<Type, TypeError> {
         if rhs.is_some() {
-            self.visit_expr(rhs.unwrap())?;
+            let t = self.visit_expr(rhs.unwrap())?;
+            Self::check_expectation(&t, &self.lookup_type_of(variable_name)?)?;
         }
         Ok(Type::Nothing)
     }
