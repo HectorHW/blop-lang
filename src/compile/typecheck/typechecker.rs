@@ -105,7 +105,6 @@ impl<'a> Typemap<'a> {
 
 pub struct Checker<'an, 'ast> {
     annotations: &'an Annotations,
-    scopes: Vec<HashMap<String, Type>>,
     type_map: Typemap<'ast>,
 }
 
@@ -128,7 +127,6 @@ impl<'a, 'ast> Checker<'a, 'ast> {
     pub fn new(annotations: &'a Annotations) -> Checker<'a, 'ast> {
         Self {
             annotations,
-            scopes: Default::default(),
             type_map: Default::default(),
         }
     }
@@ -289,7 +287,7 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
 
     fn visit_function_declaration_statement(
         &mut self,
-        name: &'ast Token,
+        _name: &'ast Token,
         args: &'ast [TypedName],
         vararg: Option<&'ast TypedName>,
         body: &'ast Expr,
@@ -459,7 +457,13 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
     }
 
     fn visit_unary_expr(&mut self, op: &'ast Token, arg: &'ast Expr) -> Result<Type, TypeError> {
-        self.visit_expr(arg)
+        let t = self.visit_expr(arg)?;
+
+        match (&op.kind, t) {
+            (TokenKind::Not, _) => Ok(Type::Bool),
+            (_, Type::Unspecified) => Ok(Type::Unspecified),
+            _ => unimplemented!(),
+        }
     }
 
     fn visit_cond_expr(
@@ -583,7 +587,7 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         &mut self,
         args: &'ast [TypedName],
         vararg: Option<&'ast TypedName>,
-        arrow: &'ast Token,
+        _arrow: &'ast Token,
         body: &'ast Expr,
     ) -> Result<Type, TypeError> {
         for arg in args.iter().chain(vararg.into_iter()) {
@@ -691,7 +695,7 @@ mod tests {
 
         let (program, annotations) = crate::compile::checks::check_optimize(program).unwrap();
 
-        let types = Checker::typecheck(&program, &annotations).unwrap();
+        let _ = Checker::typecheck(&program, &annotations).unwrap();
     }
 
     fn error_program(content: &str) {
@@ -708,7 +712,7 @@ mod tests {
 
         let (program, annotations) = crate::compile::checks::check_optimize(program).unwrap();
 
-        let types = Checker::typecheck(&program, &annotations).unwrap_err();
+        let _ = Checker::typecheck(&program, &annotations).unwrap_err();
     }
 
     #[test]
@@ -870,5 +874,14 @@ def a:Int = # return type is checked
 ((x:Int) => x+1)(true) #args are checked
 ",
         )
+    }
+
+    #[test]
+    fn unary_operator() {
+        type_program(
+            r"
+assert not 0  # assert requires bool
+            ",
+        );
     }
 }
