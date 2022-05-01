@@ -1,9 +1,10 @@
 use indexmap::IndexMap;
 use std::collections::HashSet;
 use std::hash::Hash;
-use std::{cmp::Ordering, collections::HashMap, rc::Rc};
+use std::{cmp::Ordering, collections::HashMap};
 
 use crate::execution::arity::Arity;
+use crate::parsing::lexer::Token;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
@@ -70,7 +71,7 @@ impl Hash for StructDescriptorType {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StructInstanceType {
-    descriptor: Rc<StructDescriptorType>,
+    descriptor: Token,
 }
 
 #[derive(Clone, Debug, Eq)]

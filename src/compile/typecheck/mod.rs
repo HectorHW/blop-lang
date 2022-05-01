@@ -2,6 +2,7 @@ use crate::parsing::ast::Program;
 
 use super::checks::Annotations;
 
+mod type_builder;
 pub mod typechecker;
 pub mod types;
 

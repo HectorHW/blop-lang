@@ -168,14 +168,38 @@ impl<'a> AnnotationGenerator<'a> {
         self.scopes.pop();
     }
 
-    fn lookup_type(&mut self, name: &TypedName) {
-        name.type_name.as_ref().map(|t| self.lookup_local(&t.0));
+    fn lookup_type_of(&mut self, name: &TypedName) {
+        if let Some(t) = name.type_name.as_ref() {
+            self.lookup_type(t)
+        }
+    }
+
+    fn lookup_type(&mut self, type_def: &TypeMention) {
+        match type_def {
+            TypeMention::Simple(t) => {
+                self.lookup_local(t);
+            }
+            TypeMention::Function {
+                kw: _,
+                args,
+                vararg,
+                return_type,
+            } => {
+                for t in args
+                    .iter()
+                    .chain(vararg.as_ref().map(|v| v.as_ref()).into_iter())
+                    .chain(std::iter::once(return_type.as_ref()))
+                {
+                    self.lookup_type(t);
+                }
+            }
+        }
     }
 }
 
 impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
     fn visit_var_stmt(&mut self, name: &TypedName, rhs: Option<&Expr>) -> Result<(), String> {
-        self.lookup_type(name);
+        self.lookup_type_of(name);
         if let Some(value) = rhs {
             self.visit_expr(value)?;
         }
@@ -191,7 +215,7 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         fields: &[TypedName],
     ) -> Result<(), String> {
         for field in fields {
-            self.lookup_type(field);
+            self.lookup_type_of(field);
         }
         self.define_name(name);
         Ok(())
@@ -204,7 +228,7 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
     ) -> Result<(), String> {
         for variant in variants {
             for field in &variant.fields {
-                self.lookup_type(field);
+                self.lookup_type_of(field);
             }
         }
         self.define_name(name);
@@ -222,12 +246,12 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         self.new_scope(ScopeType::Function, name);
         self.annotations.get_or_create_closure_scope(name);
         for arg_name in args.iter().chain(vararg.into_iter()) {
-            self.lookup_type(arg_name);
+            self.lookup_type_of(arg_name);
             self.declare_name(&arg_name.name);
             self.define_name(&arg_name.name);
         }
         if let Some(t) = returns {
-            self.lookup_name(&t.0)
+            self.lookup_type(t);
         }
         self.define_name(name);
         self.visit_expr(body)?;
@@ -307,7 +331,7 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         self.new_scope(ScopeType::Function, arrow);
         self.annotations.get_or_create_closure_scope(arrow);
         for arg_name in args.iter().chain(vararg.into_iter()) {
-            self.lookup_type(arg_name);
+            self.lookup_type_of(arg_name);
             self.declare_name(&arg_name.name);
             self.define_name(&arg_name.name);
         }

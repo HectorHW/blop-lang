@@ -1,3 +1,4 @@
+use super::type_builder::TypeBuilder;
 use super::types::Type;
 use crate::compile::checks::tree_visitor::Visitor;
 use crate::compile::checks::Annotations;
@@ -143,25 +144,8 @@ impl<'a, 'ast> Checker<'a, 'ast> {
     }
 
     fn lookup_type(&self, type_name: &TypeMention) -> Result<Type, TypeError> {
-        let def_place = self.annotations.get_definiton(&type_name.0);
-
-        let def_place = if let Some(def_place) = def_place {
-            def_place
-        } else {
-            return match type_name.0.get_string().unwrap() {
-                "Int" => Ok(Type::Int),
-                "Bool" => Ok(Type::Bool),
-                "Nothing" => Ok(Type::Nothing),
-                "Float" => Ok(Type::Float),
-                "Any" => Ok(Type::Unspecified),
-                _ => Err(SomewhereTypeError::UnknownType {
-                    value: type_name.clone(),
-                }
-                .at(type_name.0.position))?,
-            };
-        };
-
-        Ok(self.type_map.type_of(def_place.into()))
+        TypeBuilder::build_type(self.annotations, &self.type_map, type_name)
+            .map_err(|e| e.at(type_name.get_pos()).into())
     }
 
     fn lookup_type_of(&self, name: &TypedName) -> Result<Type, TypeError> {
@@ -885,5 +869,34 @@ def a:Int = # return type is checked
 assert not 0  # assert requires bool
             ",
         );
+    }
+
+    #[test]
+    fn function_type() {
+        type_program(
+            r"
+def F(op: Fn()=>Int):Int =
+    op()
+
+F(() => 2)
+    ",
+        );
+
+        error_program(
+            r"
+def F(op: Fn()=>Int):Int =
+    op()
+
+F(1)
+",
+        );
+        error_program(
+            r"
+def F(op: Fn()=>Int):Int =
+    op()
+
+F((x) => x+1)
+",
+        )
     }
 }

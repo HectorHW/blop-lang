@@ -371,8 +371,22 @@ peg::parser! {
         rule name() -> Token
             = [t@Token{kind:TokenKind::Name(..), position:pos}] {t.clone()}
 
+        rule type_signature() -> TypeMention =
+
+            [d@t!(Name(..)) if d.get_string().unwrap()=="Fn"] [t!(LParen)] args: type_signature()**[t!(Comma)] [t!(Comma)]? [t!(RParen)] [t!(Arrow)] ret:type_signature() {
+                TypeMention::Function{
+                    kw: d.clone(),
+                    args,
+                    vararg: None,
+                    return_type: Box::new(ret)
+                }
+            } /
+            n:name() {TypeMention::Simple(n)}
+
+
         pub rule type_annotation() -> TypeMention =
-            [t!(Colon)] n:name() {TypeMention(n)}
+            [t!(Colon)] t:type_signature() {t}
+
 
         rule typed_name() -> TypedName =
             n:name() type_:type_annotation()? {

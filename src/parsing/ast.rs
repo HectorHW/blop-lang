@@ -16,7 +16,15 @@ pub struct TypedName {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct TypeMention(pub Token);
+pub enum TypeMention {
+    Simple(Token),
+    Function {
+        kw: Token,
+        args: Vec<TypeMention>,
+        vararg: Option<Box<TypeMention>>,
+        return_type: Box<TypeMention>,
+    },
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stmt {
@@ -74,6 +82,15 @@ pub enum Expr {
     PropertyTest(Box<Expr>, Token),
 }
 
+impl TypeMention {
+    pub fn get_pos(&self) -> Index {
+        match self {
+            TypeMention::Simple(s) => s.position,
+            TypeMention::Function { kw, .. } => kw.position,
+        }
+    }
+}
+
 impl Expr {
     pub fn get_pos(&self) -> Index {
         match self {
@@ -107,17 +124,10 @@ impl Stmt {
             Stmt::Assert(kw, _) => kw.position,
             Stmt::Pass(p) => p.position,
             Stmt::FunctionDeclaration { name, .. } => name.position,
-            Stmt::StructDeclaration { name, fields } => name.position,
-            Stmt::EnumDeclaration { name, variants } => name.position,
-            Stmt::ImplBlock {
-                name,
-                implementations,
-            } => name.position,
-            Stmt::Import {
-                module,
-                name,
-                rename,
-            } => name.position,
+            Stmt::StructDeclaration { name, .. } => name.position,
+            Stmt::EnumDeclaration { name, .. } => name.position,
+            Stmt::ImplBlock { name, .. } => name.position,
+            Stmt::Import { name, .. } => name.position,
         }
     }
 }

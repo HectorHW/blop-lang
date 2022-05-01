@@ -74,7 +74,7 @@ pub fn compile_program(
     module: &Module,
     vm: &mut VM,
 ) -> Result<Value, Box<dyn Error>> {
-    let file_content = normalize_string(&program);
+    let file_content = normalize_string(program);
     let tokens = parsing::lexer::tokenize(&file_content)?;
 
     #[cfg(feature = "print-tokens")]
