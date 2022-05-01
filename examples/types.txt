@@ -5,8 +5,11 @@ print(a)
 
 assert a==2
 
+var some_global = 0
+
 #and also function arguments
 def F(a: Int, b: Int): Int =
+    some_global = 1
     a+b
 
 assert F(1,2)==3

@@ -77,19 +77,23 @@ impl<'a> AnnotationGenerator<'a> {
         false
     }
 
-    fn lookup_outer(&self, variable: &Token) -> bool {
+    fn lookup_outer(&self, variable: &Token) -> Option<VariableType> {
         let mut passed_function_scope = false;
         let variable_name = variable.get_string().unwrap();
-        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().skip(1).rev() {
+        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().rev() {
             if passed_function_scope {
                 if scope_map.contains_key(variable_name) {
-                    return true;
+                    if *scope_type == ScopeType::TopLevel {
+                        return Some(VariableType::Global);
+                    } else {
+                        return Some(VariableType::Closed);
+                    }
                 }
             } else if *scope_type == ScopeType::Function {
                 passed_function_scope = true;
             }
         }
-        false
+        None
     }
 
     fn lookup_name(&mut self, variable: &Token) {
@@ -97,13 +101,26 @@ impl<'a> AnnotationGenerator<'a> {
             return;
         }
 
-        if !self.lookup_outer(variable) {
+        let outer_type = self.lookup_outer(variable);
+
+        if outer_type.is_none() {
+            //global undeclared
             return;
         }
+
+        let outer_type = outer_type.unwrap();
 
         let variable_name = variable.get_string().unwrap();
 
         let definition = self.find_closed(variable).clone();
+
+        self.annotations
+            .variable_bindings
+            .insert(variable.clone(), definition.clone());
+
+        if outer_type == VariableType::Global {
+            return;
+        }
 
         let mut passed_function_scope = false;
         for (scope_type, scope_identifier, scope_map) in self.scopes.iter().rev() {
@@ -117,11 +134,6 @@ impl<'a> AnnotationGenerator<'a> {
                     self.annotations
                         .get_or_create_block_scope(scope_identifier)
                         .insert(variable_name.to_string(), VariableType::Boxed);
-
-                    self.annotations
-                        .variable_bindings
-                        .insert(variable.clone(), definition);
-
                     return;
                 }
                 if *scope_type == ScopeType::Function {
@@ -136,7 +148,7 @@ impl<'a> AnnotationGenerator<'a> {
     fn find_closed(&self, variable: &Token) -> &Token {
         let mut passed_function_scope = false;
         let variable_name = variable.get_string().unwrap();
-        for (scope_type, scope_identifier, scope_map) in self.scopes.iter().rev() {
+        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().rev() {
             if !passed_function_scope && *scope_type == ScopeType::Function {
                 passed_function_scope = true;
             } else if scope_map.contains_key(variable_name) {
