@@ -23,6 +23,13 @@ impl Arity {
     pub fn is_vararg(&self) -> bool {
         matches!(self, Arity::AtLeast(..))
     }
+
+    pub fn get_number(&self) -> usize {
+        match *self {
+            Arity::Exact(n) => n,
+            Arity::AtLeast(n) => n,
+        }
+    }
 }
 
 impl From<Arity> for usize {

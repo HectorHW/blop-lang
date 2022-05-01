@@ -233,6 +233,8 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         self.visit_expr(body)?;
         self.pop_scope();
 
+        self.define_name(name);
+
         Ok(())
     }
 

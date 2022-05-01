@@ -105,7 +105,7 @@ pub fn run_repl() {
             x if x.is_empty() => {
                 println!("```\n{}\n```", input);
 
-                let ptr = match compile_program(input.clone(), &module, &mut vm) {
+                let ptr = match compile_program(&input, &module, &mut vm) {
                     Ok(p) => p,
                     Err(e) => {
                         println!("error!\n{e}");

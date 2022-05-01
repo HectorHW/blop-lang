@@ -15,7 +15,9 @@ pub enum SomewhereTypeError {
 
     ArityMismatch { expected: Arity, got: usize },
 
-    AttributeGetError { target_type: Type, field: String },
+    OperationUnsupported { target: Type, message: String },
+
+    AttributeError { target_type: Type, field: String },
 }
 
 #[derive(Debug)]
@@ -188,22 +190,15 @@ impl<'a, 'ast> Checker<'a, 'ast> {
                     body: _,
                     returns,
                 } => {
-                    let arg_type = args
-                        .iter()
-                        .map(|arg| self.lookup_type_of(arg))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let vararg = vararg
-                        .as_ref()
-                        .map(|v| self.lookup_type_of(v))
-                        .transpose()?;
-
-                    let return_type = returns
-                        .as_ref()
-                        .map(|ret| self.lookup_type(ret))
-                        .transpose()?
-                        .unwrap_or(Type::Unspecified);
-
-                    let function_signature = Type::build_function(arg_type, vararg, return_type);
+                    let function_signature = self.build_function_type(
+                        args,
+                        vararg.as_ref(),
+                        returns
+                            .as_ref()
+                            .map(|ret| self.lookup_type(ret))
+                            .transpose()?
+                            .unwrap_or(Type::Unspecified),
+                    )?;
                     self.type_map.add_definition(name, function_signature);
                 }
                 Stmt::StructDeclaration { name, fields } => {}
@@ -218,6 +213,25 @@ impl<'a, 'ast> Checker<'a, 'ast> {
             }
         }
         Ok(())
+    }
+
+    fn build_function_type(
+        &self,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
+        returns: Type,
+    ) -> Result<Type, TypeError> {
+        let arg_type = args
+            .iter()
+            .map(|arg| self.lookup_type_of(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let vararg = vararg
+            .as_ref()
+            .map(|v| self.lookup_type_of(v))
+            .transpose()?;
+
+        Ok(Type::build_function(arg_type, vararg, returns))
     }
 }
 
@@ -281,7 +295,18 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         body: &'ast Expr,
         returns: Option<&'ast TypeMention>,
     ) -> Result<Type, TypeError> {
-        self.visit_expr(body)?;
+        for arg in args.iter().chain(vararg.into_iter()) {
+            self.type_map
+                .add_definition(&arg.name, self.lookup_type_of(arg)?);
+        }
+        let provided_return = self.visit_expr(body)?;
+        Self::check_expectation(
+            &provided_return,
+            &returns
+                .map(|t| self.lookup_type(t))
+                .transpose()?
+                .unwrap_or_default(),
+        )?;
         Ok(Type::Nothing)
     }
 
@@ -361,10 +386,14 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
     }
 
     fn visit_variable_expr(&mut self, variable_name: &'ast Token) -> Result<Type, TypeError> {
-        Ok(Default::default())
+        Ok(self
+            .annotations
+            .get_definiton(variable_name)
+            .map(|d| self.type_map.type_of(d.into()))
+            .unwrap_or_default())
     }
 
-    fn visit_string_expr(&mut self, string_literal: &'ast Token) -> Result<Type, TypeError> {
+    fn visit_string_expr(&mut self, _string_literal: &'ast Token) -> Result<Type, TypeError> {
         Ok(Type::String)
     }
 
@@ -480,11 +509,60 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         target: &'ast Expr,
         args: &'ast [Expr],
     ) -> Result<Type, TypeError> {
-        self.visit_expr(target)?;
-        for arg in args {
-            self.visit_expr(arg)?;
-        }
-        Ok(Default::default())
+        let target_t = self.visit_expr(target)?;
+
+        let args = args
+            .iter()
+            .map(|arg| self.visit_expr(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let (req_args, ret): (Vec<Type>, Type) = match () {
+            _ if target_t.is_unspecified() => return Ok(Default::default()),
+            _ if target_t.get_arity().is_none() => {
+                return Err(SomewhereTypeError::OperationUnsupported {
+                    target: target_t.clone(),
+                    message: "cannot call".to_string(),
+                }
+                .at(target.get_pos())
+                .into())
+            }
+            _ => {
+                let arity = target_t.get_arity().unwrap();
+                if !arity.accepts(args.len()) {
+                    return Err(SomewhereTypeError::ArityMismatch {
+                        expected: arity,
+                        got: args.len(),
+                    }
+                    .at(target.get_pos())
+                    .into());
+                } else {
+                    match target_t {
+                        Type::StructDescriptor(_) => return Ok(Default::default()),
+                        Type::Callable(c) => {
+                            if c.vararg.is_some() {
+                                let pad = args.len() - c.arguments.len();
+                                (
+                                    c.arguments
+                                        .into_iter()
+                                        .chain(std::iter::repeat(*c.vararg.unwrap()).take(pad))
+                                        .collect::<Vec<_>>(),
+                                    *c.return_type,
+                                )
+                            } else {
+                                (c.arguments, *c.return_type)
+                            }
+                        }
+                        Type::Union(_) => return Ok(Default::default()),
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        };
+
+        req_args
+            .iter()
+            .zip(args.iter())
+            .try_for_each(|(expected, provided)| Self::check_expectation(provided, expected))?;
+        Ok(ret)
     }
 
     fn visit_partial_call_expr(
@@ -508,8 +586,12 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         arrow: &'ast Token,
         body: &'ast Expr,
     ) -> Result<Type, TypeError> {
-        self.visit_expr(body)?;
-        Ok(Default::default())
+        for arg in args.iter().chain(vararg.into_iter()) {
+            self.type_map
+                .add_definition(&arg.name, self.lookup_type_of(arg)?);
+        }
+        let ret = self.visit_expr(body)?;
+        self.build_function_type(args, vararg, ret)
     }
 
     fn visit_property_access(
@@ -595,6 +677,40 @@ mod tests {
         Checker::typecheck(&vec![program], &EMPTY_ANNOTATIONS).unwrap_err();
     }
 
+    fn type_program(content: &str) {
+        use crate::parsing::lexer::tokenize;
+        use crate::parsing::parser::program_parser;
+
+        let content = crate::execution::module::normalize_string(content);
+
+        let tokens = tokenize(&content).unwrap();
+
+        let program = program_parser::program(tokens.iter().collect::<Vec<_>>().as_slice())
+            .map_err(|e| println!("{:?}\n{:?}", e, tokens[e.location]))
+            .unwrap();
+
+        let (program, annotations) = crate::compile::checks::check_optimize(program).unwrap();
+
+        let types = Checker::typecheck(&program, &annotations).unwrap();
+    }
+
+    fn error_program(content: &str) {
+        use crate::parsing::lexer::tokenize;
+        use crate::parsing::parser::program_parser;
+
+        let content = crate::execution::module::normalize_string(content);
+
+        let tokens = tokenize(&content).unwrap();
+
+        let program = program_parser::program(tokens.iter().collect::<Vec<_>>().as_slice())
+            .map_err(|e| println!("{:?}\n{:?}", e, tokens[e.location]))
+            .unwrap();
+
+        let (program, annotations) = crate::compile::checks::check_optimize(program).unwrap();
+
+        let types = Checker::typecheck(&program, &annotations).unwrap_err();
+    }
+
     #[test]
     fn number_should_have_type_int() {
         type_expected_expr("1", Type::Int)
@@ -649,5 +765,110 @@ mod tests {
             "if 1==2 2 else true",
             Type::build_union(Type::Int, Type::Bool),
         );
+    }
+
+    #[test]
+    fn variable_assignment() {
+        type_program(
+            "
+        var a: Int = 2
+        a = 3
+        ",
+        );
+        type_program(
+            "
+        var a = 2
+        a = 3
+        ",
+        );
+        error_program(
+            //it catches errors
+            "
+        var a: Int = 2
+        a = true
+        ",
+        );
+        type_program(
+            //it does not limits user too much
+            "
+        var a = 2
+        a = true
+        ",
+        );
+    }
+
+    #[test]
+    fn def_calling() {
+        type_program(
+            "
+                def a =
+                    0
+                a() + 1
+                ",
+        );
+
+        type_program(
+            r"
+        def a(x: Int):Int =
+            x
+
+        a(1) + 1
+        ",
+        );
+
+        error_program(
+            r"
+def a(x: Int): Int =
+    x
+a(true)  # arguments are matched
+",
+        );
+
+        error_program(
+            r#"
+def a(x: Int): Int =
+    x
+a(1) + "abcd"  # return value is matched   
+"#,
+        );
+        error_program(
+            r"
+def a(x, y) =
+    x+y
+a(1)  #arity is checked    
+",
+        );
+
+        error_program(
+            r"
+def a:Int = # return type is checked
+    false
+",
+        );
+    }
+
+    #[test]
+    fn anon_functions() {
+        type_program(
+            r"
+((x) => x+1)(1)
+",
+        );
+        error_program(
+            r"
+((x) => x+1)()  #arity is checked
+",
+        );
+        error_program(
+            r"
+
+((x:Int) => x+1)(2) + true # return type is checked
+",
+        );
+        error_program(
+            r"
+((x:Int) => x+1)(true) #args are checked
+",
+        )
     }
 }

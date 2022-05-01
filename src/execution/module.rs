@@ -61,19 +61,20 @@ impl Module {
     }
 }
 
-fn normalize_string(s: String) -> String {
+pub fn normalize_string(s: &str) -> String {
     s.replace('\t', "    ") // 4 spaces
         .lines()
+        .map(str::trim_end)
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 pub fn compile_program(
-    program: String,
+    program: &str,
     module: &Module,
     vm: &mut VM,
 ) -> Result<Value, Box<dyn Error>> {
-    let file_content = normalize_string(program);
+    let file_content = normalize_string(&program);
     let tokens = parsing::lexer::tokenize(&file_content)?;
 
     #[cfg(feature = "print-tokens")]
@@ -139,7 +140,7 @@ pub fn compile_file(file_path: &Path, vm: &mut VM) -> Result<(String, Value), Bo
     let module = Module::try_from(file_path)
         .map_err(|_| format!("failed to build module from path {file_path:?}"))?;
 
-    let pointer = compile_program(program.clone(), &module, vm)?;
+    let pointer = compile_program(&program, &module, vm)?;
     Ok((program, pointer))
 }
 

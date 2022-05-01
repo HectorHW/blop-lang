@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::{cmp::Ordering, collections::HashMap, rc::Rc};
 
+use crate::execution::arity::Arity;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
     Int,
@@ -93,9 +95,9 @@ impl Hash for EnumType {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Callable {
-    arguments: Vec<Type>,
-    vararg: Option<Box<Type>>,
-    return_type: Box<Type>,
+    pub arguments: Vec<Type>,
+    pub vararg: Option<Box<Type>>,
+    pub return_type: Box<Type>,
 }
 
 impl Type {
@@ -161,6 +163,32 @@ impl Type {
 
     pub fn is_union(&self) -> bool {
         matches!(self, Type::Union(..))
+    }
+
+    pub fn get_arity(&self) -> Option<Arity> {
+        match self {
+            Type::StructDescriptor(s) => Some(Arity::Exact(s.fields.len())),
+            Type::Callable(c) => Some(match &c.vararg {
+                Some(_) => Arity::AtLeast(c.arguments.len()),
+                None => Arity::Exact(c.arguments.len()),
+            }),
+            Type::Union(items) => {
+                let arities = items
+                    .iter()
+                    .map(|i| i.get_arity())
+                    .collect::<Option<Vec<_>>>()?;
+
+                let (head, tail) = arities.split_first().unwrap();
+
+                let sample = *head;
+                if tail.iter().all(|a| a == &sample) {
+                    Some(sample)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 }
 
