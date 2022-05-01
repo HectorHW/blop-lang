@@ -26,7 +26,10 @@ pub enum VariableType {
 pub struct Annotations {
     /// variables declared inside blocks with corresponding type (boxed or normal)
     block_symbol_table: HashMap<Token, IndexMap<String, VariableType>>,
-    closed_names_table: HashMap<Token, IndexSet<String>>,
+    closed_names_table: HashMap<Token, IndexSet<Token>>,
+
+    ///mapping of variable mention to place where it was declared
+    variable_bindings: HashMap<Token, Token>,
 }
 
 impl Annotations {
@@ -49,7 +52,7 @@ impl Annotations {
         self.block_symbol_table.get(block_id)
     }
 
-    pub fn get_or_create_closure_scope(&mut self, closure_id: &Token) -> &mut IndexSet<String> {
+    pub fn get_or_create_closure_scope(&mut self, closure_id: &Token) -> &mut IndexSet<Token> {
         if !self.closed_names_table.contains_key(closure_id) {
             self.closed_names_table
                 .insert(closure_id.clone(), Default::default());
@@ -57,7 +60,7 @@ impl Annotations {
         self.closed_names_table.get_mut(closure_id).unwrap()
     }
 
-    pub fn get_closure_scope(&self, closure_id: &Token) -> Option<&IndexSet<String>> {
+    pub fn get_closure_scope(&self, closure_id: &Token) -> Option<&IndexSet<Token>> {
         self.closed_names_table.get(closure_id)
     }
 }

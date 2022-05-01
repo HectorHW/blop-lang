@@ -1,5 +1,5 @@
 use crate::compile::checks::tree_visitor::Visitor;
-use crate::parsing::ast::{EnumVariant, Program, Stmt};
+use crate::parsing::ast::{EnumVariant, Program, Stmt, TypeMention, TypedName};
 use crate::parsing::lexer::Token;
 use crate::Expr;
 use std::collections::HashMap;
@@ -39,16 +39,20 @@ impl<'ast> NameRedefinitionChecker {
 }
 
 impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
-    fn visit_var_stmt(&mut self, name: &'ast Token, rhs: Option<&'ast Expr>) -> Result<(), String> {
+    fn visit_var_stmt(
+        &mut self,
+        name: &'ast TypedName,
+        rhs: Option<&'ast Expr>,
+    ) -> Result<(), String> {
         if let Some(rhs) = rhs {
             self.visit_expr(rhs)?
         };
 
-        self.declare_name(name).map_err(|e| {
+        self.declare_name(&name.name).map_err(|e| {
             format!(
                 "name {} [{}] is redefined in block, previous definition at [{}]",
-                name.get_string().unwrap(),
-                name.position,
+                name.name.get_string().unwrap(),
+                name.name.position,
                 e.position
             )
         })?;
@@ -59,9 +63,10 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
     fn visit_function_declaration_statement(
         &mut self,
         name: &Token,
-        args: &[Token],
-        vararg: Option<&Token>,
+        args: &[TypedName],
+        vararg: Option<&TypedName>,
         body: &Expr,
+        returns: Option<&TypeMention>,
     ) -> Result<(), String> {
         self.declare_name(name).map_err(|e| {
             format!(
@@ -74,10 +79,10 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
 
         self.new_scope();
         for arg_name in args.iter().chain(vararg.into_iter()) {
-            self.declare_name(arg_name).map_err(|_e| {
+            self.declare_name(&arg_name.name).map_err(|_e| {
                 format!(
                     "argument {} repeats in function {} at [{}]",
-                    arg_name.get_string().unwrap(),
+                    arg_name.name.get_string().unwrap(),
                     name.get_string().unwrap(),
                     name.position
                 )
@@ -104,18 +109,18 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
 
     fn visit_anon_function_expr(
         &mut self,
-        args: &[Token],
-        vararg: Option<&Token>,
+        args: &[TypedName],
+        vararg: Option<&TypedName>,
         arrow: &Token,
         body: &Expr,
     ) -> Result<(), String> {
         self.new_scope();
 
         for arg_name in args.iter().chain(vararg.into_iter()) {
-            self.declare_name(arg_name).map_err(|_e| {
+            self.declare_name(&arg_name.name).map_err(|_e| {
                 format!(
                     "argument {} repeats in anonymous function at [{}]",
-                    arg_name.get_string().unwrap(),
+                    arg_name.name.get_string().unwrap(),
                     arrow.position
                 )
             })?;
@@ -128,7 +133,7 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
     fn visit_struct_declaration_statement(
         &mut self,
         name: &Token,
-        fields: &[Token],
+        fields: &[TypedName],
     ) -> Result<(), String> {
         self.declare_name(name).map_err(|e| {
             format!(
@@ -142,11 +147,11 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
         self.new_scope();
 
         for field in fields {
-            self.declare_name(field).map_err(|e| {
+            self.declare_name(&field.name).map_err(|e| {
                 format!(
                     "field {} [{}] is redefined in struct/enum, previous definition at [{}]",
-                    field.get_string().unwrap(),
-                    field.position,
+                    field.name.get_string().unwrap(),
+                    field.name.position,
                     e.position
                 )
             })?;
@@ -190,8 +195,9 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
                     args,
                     vararg,
                     body,
+                    returns,
                 } => {
-                    self.visit_method(name, args, vararg.as_ref(), body)?;
+                    self.visit_method(name, args, vararg.as_ref(), body, returns.as_ref())?;
                 }
                 _ => unreachable!(),
             }
@@ -222,9 +228,10 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
     fn visit_method(
         &mut self,
         name: &Token,
-        args: &[Token],
-        vararg: Option<&Token>,
+        args: &[TypedName],
+        vararg: Option<&TypedName>,
         body: &Expr,
+        returns: Option<&TypeMention>,
     ) -> Result<(), String> {
         if args.is_empty() {
             return Err(format!(
@@ -234,6 +241,6 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
             ));
         }
 
-        self.visit_function_declaration_statement(name, args, vararg, body)
+        self.visit_function_declaration_statement(name, args, vararg, body, returns)
     }
 }

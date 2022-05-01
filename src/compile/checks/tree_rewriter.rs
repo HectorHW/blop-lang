@@ -1,6 +1,6 @@
 #![allow(clippy::boxed_local)]
 
-use crate::parsing::ast::{EnumVariant, Stmt};
+use crate::parsing::ast::{EnumVariant, Stmt, TypeMention, TypedName};
 use crate::parsing::lexer::Token;
 use crate::Expr;
 
@@ -17,7 +17,8 @@ pub(super) trait Rewriter<E> {
                 args,
                 vararg,
                 body,
-            } => self.visit_function_declaration_statement(name, args, vararg, body),
+                returns,
+            } => self.visit_function_declaration_statement(name, args, vararg, body, returns),
 
             Stmt::StructDeclaration { name, fields } => {
                 self.visit_struct_declaration_statement(name, fields)
@@ -41,7 +42,7 @@ pub(super) trait Rewriter<E> {
         }
     }
 
-    fn visit_var_stmt(&mut self, name: Token, rhs: Option<Expr>) -> Result<Stmt, E> {
+    fn visit_var_stmt(&mut self, name: TypedName, rhs: Option<Expr>) -> Result<Stmt, E> {
         Ok(Stmt::VarDeclaration(
             name,
             if rhs.is_some() {
@@ -71,22 +72,24 @@ pub(super) trait Rewriter<E> {
     fn visit_function_declaration_statement(
         &mut self,
         name: Token,
-        args: Vec<Token>,
-        vararg: Option<Token>,
+        args: Vec<TypedName>,
+        vararg: Option<TypedName>,
         body: Expr,
+        returns: Option<TypeMention>,
     ) -> Result<Stmt, E> {
         Ok(Stmt::FunctionDeclaration {
             name,
             args,
             vararg,
             body: self.visit_expr(body)?,
+            returns,
         })
     }
 
     fn visit_struct_declaration_statement(
         &mut self,
         name: Token,
-        fields: Vec<Token>,
+        fields: Vec<TypedName>,
     ) -> Result<Stmt, E> {
         Ok(Stmt::StructDeclaration { name, fields })
     }
@@ -263,8 +266,8 @@ pub(super) trait Rewriter<E> {
 
     fn visit_anon_function_expr(
         &mut self,
-        args: Vec<Token>,
-        vararg: Option<Token>,
+        args: Vec<TypedName>,
+        vararg: Option<TypedName>,
         arrow: Token,
         body: Box<Expr>,
     ) -> Result<Expr, E> {

@@ -31,7 +31,7 @@ assert G(3)==Nothing
 var res = if 5==4 3 elif 5==5 2 else 1
 
 assert res == 2
-assert if true true
+assert if true true else false
 
 #dangling else test
 

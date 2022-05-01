@@ -169,10 +169,10 @@ impl PartialOrd for Type {
         }
 
         if self.is_unspecified() {
-            return Some(Ordering::Greater);
+            return Some(Ordering::Equal);
         }
         if other.is_unspecified() {
-            return Some(Ordering::Less);
+            return Some(Ordering::Equal);
         }
 
         None

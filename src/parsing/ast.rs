@@ -6,12 +6,21 @@ use super::lexer::Index;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnumVariant {
     pub name: Token,
-    pub fields: Vec<Token>,
+    pub fields: Vec<TypedName>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TypedName {
+    pub name: Token,
+    pub type_name: Option<TypeMention>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TypeMention(pub Token);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stmt {
-    VarDeclaration(Token, Option<Expr>),
+    VarDeclaration(TypedName, Option<Expr>),
     Assignment(Token, Expr),
     PropertyAssignment(Expr, Expr),
     Expression(Expr),
@@ -19,13 +28,14 @@ pub enum Stmt {
     Pass(Token),
     FunctionDeclaration {
         name: Token,
-        args: Vec<Token>,
-        vararg: Option<Token>,
+        args: Vec<TypedName>,
+        vararg: Option<TypedName>,
         body: Expr,
+        returns: Option<TypeMention>,
     },
     StructDeclaration {
         name: Token,
-        fields: Vec<Token>,
+        fields: Vec<TypedName>,
     },
 
     EnumDeclaration {
@@ -59,7 +69,7 @@ pub enum Expr {
     SingleStatement(Box<Stmt>),
     Call(Box<Expr>, Vec<Expr>),
     PartialCall(Box<Expr>, Vec<Option<Expr>>),
-    AnonFunction(Vec<Token>, Option<Token>, Token, Box<Expr>),
+    AnonFunction(Vec<TypedName>, Option<TypedName>, Token, Box<Expr>),
     PropertyAccess(Box<Expr>, Token),
     PropertyTest(Box<Expr>, Token),
 }
@@ -90,18 +100,13 @@ impl Expr {
 impl Stmt {
     pub fn get_pos(&self) -> Index {
         match self {
-            Stmt::VarDeclaration(n, _) => n.position,
+            Stmt::VarDeclaration(n, _) => n.name.position,
             Stmt::Assignment(n, _) => n.position,
             Stmt::PropertyAssignment(pr, _) => pr.get_pos(),
             Stmt::Expression(e) => e.get_pos(),
             Stmt::Assert(kw, _) => kw.position,
             Stmt::Pass(p) => p.position,
-            Stmt::FunctionDeclaration {
-                name,
-                args,
-                vararg,
-                body,
-            } => name.position,
+            Stmt::FunctionDeclaration { name, .. } => name.position,
             Stmt::StructDeclaration { name, fields } => name.position,
             Stmt::EnumDeclaration { name, variants } => name.position,
             Stmt::ImplBlock {
@@ -158,7 +163,7 @@ impl Hash for Stmt {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
         match self {
-            Stmt::VarDeclaration(v, _) => v.hash(state),
+            Stmt::VarDeclaration(v, _) => v.name.hash(state),
             Stmt::Assignment(trg, _) => trg.hash(state),
             Stmt::PropertyAssignment(trg, ..) => trg.hash(state),
             Stmt::Expression(e) => e.hash(state),

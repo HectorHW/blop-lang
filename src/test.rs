@@ -104,3 +104,5 @@ test_file! {enums}
 test_file! {inline_blocks}
 
 test_file! {imports}
+
+test_file! {types}

@@ -1,4 +1,4 @@
-use crate::parsing::ast::{EnumVariant, Stmt};
+use crate::parsing::ast::{EnumVariant, Stmt, TypeMention, TypedName};
 use crate::parsing::lexer::Token;
 use crate::Expr;
 
@@ -19,7 +19,14 @@ where
                 args,
                 vararg,
                 body,
-            } => self.visit_function_declaration_statement(name, args, vararg.as_ref(), body),
+                returns,
+            } => self.visit_function_declaration_statement(
+                name,
+                args,
+                vararg.as_ref(),
+                body,
+                returns.as_ref(),
+            ),
             Stmt::StructDeclaration { name, fields } => {
                 self.visit_struct_declaration_statement(name, fields)
             }
@@ -50,7 +57,7 @@ where
 
     fn visit_var_stmt(
         &mut self,
-        _variable_name: &'ast Token,
+        _variable_name: &'ast TypedName,
         rhs: Option<&'ast Expr>,
     ) -> Result<T, E> {
         if rhs.is_some() {
@@ -78,9 +85,10 @@ where
     fn visit_function_declaration_statement(
         &mut self,
         name: &'ast Token,
-        args: &'ast [Token],
-        vararg: Option<&'ast Token>,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
         body: &'ast Expr,
+        returns: Option<&'ast TypeMention>,
     ) -> Result<T, E> {
         self.visit_expr(body)
     }
@@ -88,17 +96,18 @@ where
     fn visit_method(
         &mut self,
         name: &'ast Token,
-        args: &'ast [Token],
-        vararg: Option<&'ast Token>,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
         body: &'ast Expr,
+        returns: Option<&'ast TypeMention>,
     ) -> Result<T, E> {
-        self.visit_function_declaration_statement(name, args, vararg, body)
+        self.visit_function_declaration_statement(name, args, vararg, body, returns)
     }
 
     fn visit_struct_declaration_statement(
         &mut self,
         name: &'ast Token,
-        fields: &[Token],
+        fields: &[TypedName],
     ) -> Result<T, E> {
         Ok(Default::default())
     }
@@ -256,8 +265,8 @@ where
 
     fn visit_anon_function_expr(
         &mut self,
-        args: &'ast [Token],
-        vararg: Option<&'ast Token>,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
         arrow: &'ast Token,
         body: &'ast Expr,
     ) -> Result<T, E> {

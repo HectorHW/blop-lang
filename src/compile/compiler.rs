@@ -5,7 +5,7 @@ use crate::data::objects::{EnumDescriptor, StackObject, StructDescriptor, Value}
 use crate::execution::arity::Arity;
 use crate::execution::chunk::{Chunk, Opcode};
 use crate::execution::module::Module;
-use crate::parsing::ast::{Expr, Program, Stmt};
+use crate::parsing::ast::{Expr, Program, Stmt, TypedName};
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use regex::Regex;
 use std::collections::HashMap;
@@ -83,8 +83,11 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
         for stmt in program {
             match stmt {
-                Stmt::VarDeclaration(name, _)
-                | Stmt::FunctionDeclaration { name, .. }
+                Stmt::VarDeclaration(name, _) => {
+                    compiler.declare_local(name.name.get_string().unwrap(), VariableType::Global);
+                }
+
+                Stmt::FunctionDeclaration { name, .. }
                 | Stmt::StructDeclaration { name, .. }
                 | Stmt::EnumDeclaration { name, .. } => {
                     compiler.declare_local(name.get_string().unwrap(), VariableType::Global);
@@ -292,8 +295,8 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
     fn compile_function(
         &mut self,
         name: &Token,
-        args: &[Token],
-        vararg: Option<&Token>,
+        args: &[TypedName],
+        vararg: Option<&TypedName>,
         body: &Expr,
     ) -> Result<StackObject, String> {
         //save current compiler
@@ -316,7 +319,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         let closures = inner_compiler.annotations.get_closure_scope(name).unwrap();
 
         for closed_variable in closures {
-            inner_compiler.define_closed_variable(closed_variable);
+            inner_compiler.define_closed_variable(closed_variable.get_string().unwrap());
         } //define closed values
 
         inner_compiler.new_scope();
@@ -329,15 +332,16 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
         inner_compiler.new_scope();
         for arg_name in args.iter().chain(vararg.into_iter()) {
-            match inner_compiler.declare_local(arg_name.get_string().unwrap(), VariableType::Normal)
+            match inner_compiler
+                .declare_local(arg_name.name.get_string().unwrap(), VariableType::Normal)
             {
                 Some(_) => {
-                    inner_compiler.define_local(arg_name.get_string().unwrap());
+                    inner_compiler.define_local(arg_name.name.get_string().unwrap());
                 }
                 None => {
                     return Err(format!(
                         "argument {} repeats in function {}",
-                        arg_name.get_string().unwrap(),
+                        arg_name.name.get_string().unwrap(),
                         name.get_string().unwrap()
                     ));
                 }
@@ -356,18 +360,18 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 .annotations
                 .get_block_scope(name)
                 .unwrap()
-                .get(arg.get_string().unwrap())
+                .get(arg.name.get_string().unwrap())
                 .unwrap()
             {
                 let (_, real_idx) = inner_compiler
-                    .lookup_local(arg.get_string().unwrap())
+                    .lookup_local(arg.name.get_string().unwrap())
                     .unwrap();
                 current_chunk += (Opcode::NewBox, name.position.0);
                 current_chunk += (Opcode::Duplicate, name.position.0);
                 current_chunk += (Opcode::LoadLocal(real_idx as u16), name.position.0);
                 current_chunk += (Opcode::StoreBox, name.position.0);
-                inner_compiler.declare_local(arg.get_string().unwrap(), VariableType::Boxed);
-                inner_compiler.define_local(arg.get_string().unwrap());
+                inner_compiler.declare_local(arg.name.get_string().unwrap(), VariableType::Boxed);
+                inner_compiler.define_local(arg.name.get_string().unwrap());
                 closed_arguments += 1;
             }
         }
@@ -410,7 +414,9 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             .unwrap();
 
         for closed_over_value in map_iter {
-            let name = self.lookup_uninit_local(closed_over_value).unwrap();
+            let name = self
+                .lookup_uninit_local(closed_over_value.get_string().unwrap())
+                .unwrap();
 
             match name {
                 (VariableType::Normal, var_idx) => {
@@ -418,7 +424,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     //TODO extension
                 }
                 (VariableType::Global, _) => {
-                    let idx = self.get_or_create_name(closed_over_value);
+                    let idx = self.get_or_create_name(closed_over_value.get_string().unwrap());
                     result.push(Opcode::LoadGlobal(idx as u16), function_name.position.0);
                 }
                 (VariableType::Boxed, var_idx) => {
@@ -530,12 +536,12 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         }
     }
 
-    fn make_struct(&mut self, name: &Token, fields: &[Token]) -> Result<StackObject, String> {
+    fn make_struct(&mut self, name: &Token, fields: &[TypedName]) -> Result<StackObject, String> {
         let struct_descriptor = StructDescriptor {
             name: name.get_string().unwrap().to_string(),
             fields: fields
                 .iter()
-                .map(|f| f.get_string().unwrap().to_string())
+                .map(|f| f.name.get_string().unwrap().to_string())
                 .collect(),
             methods: HashMap::new(),
             enum_ref: None,
@@ -551,7 +557,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 let right_side = |slf: &mut Compiler| {
                     let mut right_side = AnnotatedCodeBlob::new();
                     if e.is_none() {
-                        right_side.push(Opcode::LoadNothing, n.position.0);
+                        right_side.push(Opcode::LoadNothing, n.name.position.0);
                         slf.inc_stack_height();
                     } else {
                         slf.require_value();
@@ -562,7 +568,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                     Ok(right_side)
                 };
 
-                result.append(self.create_named_entity(n, &right_side)?);
+                result.append(self.create_named_entity(&n.name, &right_side)?);
 
                 if self.needs_value() {
                     result.push(Opcode::LoadNothing, result.last_index().unwrap());
@@ -637,6 +643,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                             args,
                             vararg,
                             body,
+                            returns,
                         } => {
                             let base_function =
                                 self.compile_function(name, args, vararg.as_ref(), body)?;
@@ -791,6 +798,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
                 args,
                 vararg,
                 body,
+                returns,
             } => {
                 let new_chunk_idx =
                     self.compile_function(function_name, args, vararg.as_ref(), body)?;

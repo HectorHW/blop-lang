@@ -1,0 +1,21 @@
+#you can add type annotations to variables
+var a: Int = 2
+
+print(a)
+
+assert a==2
+
+#and also function arguments
+def F(a: Int, b: Int): Int =
+    a+b
+
+assert F(1,2)==3
+
+#and also struct/enum variant fields
+struct TextIndex:
+    index: Int
+    text: String
+
+var instance = TextIndex(1, "abcd")
+assert instance.index == 1
+

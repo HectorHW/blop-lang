@@ -2,7 +2,7 @@ use super::types::Type;
 use crate::compile::checks::tree_visitor::Visitor;
 use crate::compile::checks::Annotations;
 use crate::execution::arity::Arity;
-use crate::parsing::ast::{Expr, Program, Stmt};
+use crate::parsing::ast::{Expr, Program, Stmt, TypeMention, TypedName};
 use crate::parsing::lexer::{Index, Token, TokenKind};
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -116,59 +116,156 @@ impl<'a, 'ast> Checker<'a, 'ast> {
             type_map: Default::default(),
         }
     }
+
+    fn check_expectation(provided: &Type, expected: &Type) -> Result<(), SomewhereTypeError> {
+        if PartialOrd::le(provided, expected) {
+            Ok(())
+        } else {
+            Err(SomewhereTypeError::TypeMismatch {
+                expected: expected.clone(),
+                got: provided.clone(),
+            })
+        }
+    }
 }
 
 impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
-    fn after_expr(&mut self, expr: &'ast Expr, value: Type) -> Result<Type, TypeError> {
-        self.type_map.add_expr(expr, value.clone());
-        Ok(value)
-    }
-
     fn after_stmt(&mut self, stmt: &'ast Stmt, value: Type) -> Result<Type, TypeError> {
         self.type_map.add_stmt(stmt, value.clone());
         Ok(value)
     }
 
-    fn visit_float_number_expr(&mut self, _token: &Token) -> Result<Type, TypeError> {
-        Ok(Type::Float)
+    fn visit_var_stmt(
+        &mut self,
+        _variable_name: &'ast TypedName,
+        rhs: Option<&'ast Expr>,
+    ) -> Result<Type, TypeError> {
+        if rhs.is_some() {
+            self.visit_expr(rhs.unwrap())?;
+        }
+        Ok(Type::Nothing)
     }
 
-    fn visit_number_expr(&mut self, _token: &Token) -> Result<Type, TypeError> {
-        Ok(Type::Int)
+    fn visit_assignment_stmt(
+        &mut self,
+        _target: &'ast Token,
+        value: &'ast Expr,
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(value)?;
+        Ok(Type::Nothing)
+    }
+
+    fn visit_expr_stmt(&mut self, expr: &'ast Expr) -> Result<Type, TypeError> {
+        self.visit_expr(expr)
+    }
+
+    fn visit_assert_statement(
+        &mut self,
+        keyword: &'ast Token,
+        expr: &'ast Expr,
+    ) -> Result<Type, TypeError> {
+        let inner = self.visit_expr(expr)?;
+        Self::check_expectation(&inner, &Type::Bool).map_err(|e| e.at(keyword.position))?;
+        Ok(Type::Nothing)
+    }
+
+    fn visit_pass_stmt(&mut self, _keyword: &'ast Token) -> Result<Type, TypeError> {
+        Ok(Default::default())
+    }
+
+    fn visit_function_declaration_statement(
+        &mut self,
+        name: &'ast Token,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
+        body: &'ast Expr,
+        returns: Option<&'ast TypeMention>,
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(body)?;
+        Ok(Type::Nothing)
+    }
+
+    fn visit_method(
+        &mut self,
+        name: &'ast Token,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
+        body: &'ast Expr,
+        returns: Option<&'ast TypeMention>,
+    ) -> Result<Type, TypeError> {
+        self.visit_function_declaration_statement(name, args, vararg, body, returns)
+    }
+
+    fn visit_struct_declaration_statement(
+        &mut self,
+        name: &'ast Token,
+        fields: &[TypedName],
+    ) -> Result<Type, TypeError> {
+        Ok(Type::Nothing)
+    }
+
+    fn visit_enum_declaration(
+        &mut self,
+        name: &'ast Token,
+        variants: &'ast [crate::parsing::ast::EnumVariant],
+    ) -> Result<Type, TypeError> {
+        Ok(Type::Nothing)
+    }
+
+    fn visit_property_assignment(
+        &mut self,
+        target: &'ast Expr,
+        value: &'ast Expr,
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(target)?;
+        self.visit_expr(value)?;
+        Ok(Type::Nothing)
+    }
+
+    fn visit_impl_block(
+        &mut self,
+        name: &'ast Token,
+        implementations: &'ast [Stmt],
+    ) -> Result<Type, TypeError> {
+        implementations
+            .iter()
+            .try_for_each(|f| self.visit_stmt(f).map(|_| ()))?;
+
+        Ok(Type::Nothing)
+    }
+
+    fn visit_import_stmt(
+        &mut self,
+        module: &'ast [Token],
+        name: &'ast Token,
+        rename: Option<&'ast Token>,
+    ) -> Result<Type, TypeError> {
+        Ok(Type::Nothing)
+    }
+
+    fn after_expr(&mut self, expr: &'ast Expr, value: Type) -> Result<Type, TypeError> {
+        self.type_map.add_expr(expr, value.clone());
+        Ok(value)
     }
 
     fn visit_bool_expr(&mut self, _token: &Token) -> Result<Type, TypeError> {
         Ok(Type::Bool)
     }
 
-    fn visit_string_expr(&mut self, string_literal: &'ast Token) -> Result<Type, TypeError> {
-        Ok(Type::String)
+    fn visit_number_expr(&mut self, _token: &Token) -> Result<Type, TypeError> {
+        Ok(Type::Int)
     }
 
-    fn visit_cond_expr(
-        &mut self,
-        condition: &'ast Expr,
-        then_branch: &'ast Expr,
-        else_branch: Option<&'ast Expr>,
-    ) -> Result<Type, TypeError> {
-        let condition_t = self.visit_expr(condition)?;
-        if !&Type::Bool.le(&condition_t) {
-            return Err(SomewhereTypeError::TypeMismatch {
-                expected: Type::Bool,
-                got: condition_t,
-            }
-            .at(condition.get_pos())
-            .into());
-        }
+    fn visit_float_number_expr(&mut self, _token: &Token) -> Result<Type, TypeError> {
+        Ok(Type::Float)
+    }
 
-        let left = self.visit_expr(then_branch)?;
-        let right = if let Some(else_branch) = else_branch {
-            self.visit_expr(else_branch)?
-        } else {
-            Type::Nothing
-        };
+    fn visit_variable_expr(&mut self, variable_name: &'ast Token) -> Result<Type, TypeError> {
+        Ok(Default::default())
+    }
 
-        Ok(Type::build_union(left, right))
+    fn visit_string_expr(&mut self, string_literal: &'ast Token) -> Result<Type, TypeError> {
+        Ok(Type::String)
     }
 
     fn visit_binary_expr(
@@ -232,6 +329,31 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         }
     }
 
+    fn visit_unary_expr(&mut self, op: &'ast Token, arg: &'ast Expr) -> Result<Type, TypeError> {
+        self.visit_expr(arg)
+    }
+
+    fn visit_cond_expr(
+        &mut self,
+        condition: &'ast Expr,
+        then_branch: &'ast Expr,
+        else_branch: Option<&'ast Expr>,
+    ) -> Result<Type, TypeError> {
+        let condition_t = self.visit_expr(condition)?;
+
+        Self::check_expectation(&condition_t, &Type::Bool)
+            .map_err(|e| e.at(condition.get_pos()))?;
+
+        let left = self.visit_expr(then_branch)?;
+        let right = if let Some(else_branch) = else_branch {
+            self.visit_expr(else_branch)?
+        } else {
+            Type::Nothing
+        };
+
+        Ok(Type::build_union(left, right))
+    }
+
     fn visit_block(
         &mut self,
         _start_token: &Token,
@@ -247,8 +369,63 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         self.visit_stmt(last)
     }
 
-    fn visit_expr_stmt(&mut self, expr: &'ast Expr) -> Result<Type, TypeError> {
-        self.visit_expr(expr)
+    fn visit_single_statement_expr(&mut self, stmt: &'ast Stmt) -> Result<Type, TypeError> {
+        self.visit_stmt(stmt)
+    }
+
+    fn visit_call_expr(
+        &mut self,
+        target: &'ast Expr,
+        args: &'ast [Expr],
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(target)?;
+        for arg in args {
+            self.visit_expr(arg)?;
+        }
+        Ok(Default::default())
+    }
+
+    fn visit_partial_call_expr(
+        &mut self,
+        target: &'ast Expr,
+        args: &'ast [Option<Expr>],
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(target)?;
+        for arg in args {
+            if arg.is_some() {
+                self.visit_expr(arg.as_ref().unwrap())?;
+            }
+        }
+        Ok(Default::default())
+    }
+
+    fn visit_anon_function_expr(
+        &mut self,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
+        arrow: &'ast Token,
+        body: &'ast Expr,
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(body)?;
+        Ok(Default::default())
+    }
+
+    fn visit_property_access(
+        &mut self,
+        target: &'ast Expr,
+        property: &'ast Token,
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(target)?;
+        Ok(Default::default())
+    }
+
+    fn visit_property_check(
+        &mut self,
+        target: &'ast Expr,
+        property: &'ast Token,
+    ) -> Result<Type, TypeError> {
+        self.visit_expr(target)?;
+        Ok(Type::Bool)
     }
 }
 
@@ -277,10 +454,7 @@ mod tests {
 
     use crate::{
         compile::{checks::Annotations, typecheck::types::Type},
-        parsing::{
-            ast::{Expr, Stmt},
-            lexer::{Index, Token, TokenKind},
-        },
+        parsing::ast::{Expr, Stmt},
     };
 
     lazy_static! {

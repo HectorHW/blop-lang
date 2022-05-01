@@ -1,14 +1,15 @@
 use crate::compile::checks::tree_visitor::Visitor;
 use crate::compile::checks::{Annotations, VariableType};
-use crate::parsing::ast::{Program, Stmt};
+use crate::parsing::ast::{Program, Stmt, TypeMention, TypedName};
 use crate::parsing::lexer::Token;
 use crate::Expr;
 use std::collections::HashMap;
 
+type ScopeStack = Vec<(ScopeType, Token, HashMap<String, (bool, Token)>)>;
+
 pub struct AnnotationGenerator<'a> {
     annotations: &'a mut Annotations,
-
-    scopes: Vec<(ScopeType, Token, HashMap<String, bool>)>,
+    scopes: ScopeStack,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -34,11 +35,10 @@ impl<'a> AnnotationGenerator<'a> {
     }
 
     fn declare_name(&mut self, variable_name: &Token) {
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .2
-            .insert(variable_name.get_string().unwrap().to_string(), false);
+        self.scopes.last_mut().unwrap().2.insert(
+            variable_name.get_string().unwrap().to_string(),
+            (false, variable_name.clone()),
+        );
 
         self.annotations
             .get_or_create_block_scope(&self.scopes.last_mut().unwrap().1)
@@ -53,17 +53,20 @@ impl<'a> AnnotationGenerator<'a> {
     }
 
     fn define_name(&mut self, variable_name: &Token) {
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .2
-            .insert(variable_name.get_string().unwrap().to_string(), true);
+        self.scopes.last_mut().unwrap().2.insert(
+            variable_name.get_string().unwrap().to_string(),
+            (true, variable_name.clone()),
+        );
     }
 
-    fn lookup_local(&self, variable_name: &str) -> bool {
+    fn lookup_local(&mut self, variable: &Token) -> bool {
         //try to lookup initialized value
+        let variable_name = variable.get_string().unwrap();
         for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().rev() {
-            if let Some(true) = scope_map.get(variable_name) {
+            if let Some((true, definition)) = scope_map.get(variable_name) {
+                self.annotations
+                    .variable_bindings
+                    .insert(variable.clone(), definition.clone());
                 return true;
             }
 
@@ -74,8 +77,9 @@ impl<'a> AnnotationGenerator<'a> {
         false
     }
 
-    fn lookup_outer(&self, variable_name: &str) -> bool {
+    fn lookup_outer(&self, variable: &Token) -> bool {
         let mut passed_function_scope = false;
+        let variable_name = variable.get_string().unwrap();
         for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().skip(1).rev() {
             if passed_function_scope {
                 if scope_map.contains_key(variable_name) {
@@ -88,14 +92,18 @@ impl<'a> AnnotationGenerator<'a> {
         false
     }
 
-    fn lookup_name(&mut self, variable_name: &str) {
-        if self.lookup_local(variable_name) {
+    fn lookup_name(&mut self, variable: &Token) {
+        if self.lookup_local(variable) {
             return;
         }
 
-        if !self.lookup_outer(variable_name) {
+        if !self.lookup_outer(variable) {
             return;
         }
+
+        let variable_name = variable.get_string().unwrap();
+
+        let definition = self.find_closed(variable).clone();
 
         let mut passed_function_scope = false;
         for (scope_type, scope_identifier, scope_map) in self.scopes.iter().rev() {
@@ -103,21 +111,40 @@ impl<'a> AnnotationGenerator<'a> {
                 passed_function_scope = true;
                 self.annotations
                     .get_or_create_closure_scope(scope_identifier)
-                    .insert(variable_name.to_string());
+                    .insert(definition.clone());
             } else {
                 if scope_map.contains_key(variable_name) {
                     self.annotations
                         .get_or_create_block_scope(scope_identifier)
                         .insert(variable_name.to_string(), VariableType::Boxed);
+
+                    self.annotations
+                        .variable_bindings
+                        .insert(variable.clone(), definition);
+
                     return;
                 }
                 if *scope_type == ScopeType::Function {
                     self.annotations
                         .get_or_create_closure_scope(scope_identifier)
-                        .insert(variable_name.to_string());
+                        .insert(definition.clone());
                 }
             }
         }
+    }
+
+    fn find_closed(&self, variable: &Token) -> &Token {
+        let mut passed_function_scope = false;
+        let variable_name = variable.get_string().unwrap();
+        for (scope_type, scope_identifier, scope_map) in self.scopes.iter().rev() {
+            if !passed_function_scope && *scope_type == ScopeType::Function {
+                passed_function_scope = true;
+            } else if scope_map.contains_key(variable_name) {
+                let (_, definition) = scope_map.get(variable_name).unwrap();
+                return definition;
+            }
+        }
+        unreachable!("should've found closed variable");
     }
 
     fn new_scope(&mut self, scope_type: ScopeType, token: &Token) {
@@ -131,12 +158,12 @@ impl<'a> AnnotationGenerator<'a> {
 }
 
 impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
-    fn visit_var_stmt(&mut self, name: &Token, rhs: Option<&Expr>) -> Result<(), String> {
+    fn visit_var_stmt(&mut self, name: &TypedName, rhs: Option<&Expr>) -> Result<(), String> {
         if let Some(value) = rhs {
             self.visit_expr(value)?;
         }
 
-        self.define_name(name);
+        self.define_name(&name.name);
 
         Ok(())
     }
@@ -144,15 +171,16 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
     fn visit_function_declaration_statement(
         &mut self,
         name: &Token,
-        args: &[Token],
-        vararg: Option<&Token>,
+        args: &[TypedName],
+        vararg: Option<&TypedName>,
         body: &Expr,
+        returns: Option<&TypeMention>,
     ) -> Result<(), String> {
         self.new_scope(ScopeType::Function, name);
         self.annotations.get_or_create_closure_scope(name);
         for arg_name in args.iter().chain(vararg.into_iter()) {
-            self.declare_name(arg_name);
-            self.define_name(arg_name);
+            self.declare_name(&arg_name.name);
+            self.define_name(&arg_name.name);
         }
         self.define_name(name);
         self.visit_expr(body)?;
@@ -162,7 +190,17 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
     }
 
     fn visit_variable_expr(&mut self, variable_name: &Token) -> Result<(), String> {
-        self.lookup_name(variable_name.get_string().unwrap());
+        self.lookup_name(variable_name);
+        Ok(())
+    }
+
+    fn visit_assignment_stmt(
+        &mut self,
+        target: &'ast Token,
+        value: &'ast Expr,
+    ) -> Result<(), String> {
+        self.visit_expr(value)?;
+        self.lookup_name(target);
         Ok(())
     }
 
@@ -179,7 +217,7 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         for statement in containing_statements {
             match statement {
                 Stmt::VarDeclaration(name, _) => {
-                    self.declare_name(name);
+                    self.declare_name(&name.name);
                 }
                 Stmt::FunctionDeclaration { name, .. } => {
                     self.declare_name(name);
@@ -212,16 +250,16 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
 
     fn visit_anon_function_expr(
         &mut self,
-        args: &[Token],
-        vararg: Option<&Token>,
+        args: &[TypedName],
+        vararg: Option<&TypedName>,
         arrow: &Token,
         body: &Expr,
     ) -> Result<(), String> {
         self.new_scope(ScopeType::Function, arrow);
         self.annotations.get_or_create_closure_scope(arrow);
         for arg_name in args.iter().chain(vararg.into_iter()) {
-            self.declare_name(arg_name);
-            self.define_name(arg_name);
+            self.declare_name(&arg_name.name);
+            self.define_name(&arg_name.name);
         }
 
         self.visit_expr(body)?;
@@ -230,7 +268,7 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
     }
 
     fn visit_impl_block(&mut self, name: &Token, implementations: &[Stmt]) -> Result<(), String> {
-        self.lookup_name(name.get_string().unwrap());
+        self.lookup_name(name);
 
         for f in implementations {
             self.visit_stmt(f)?;
