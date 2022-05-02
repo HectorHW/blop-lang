@@ -100,9 +100,13 @@ pub fn compile_program(
     #[cfg(feature = "print-annotations")]
     println!("ANNOTATIONS:\n{annotations:?}");
 
-    #[cfg(feature = "typecheck")]
-    let types = crate::compile::typecheck::typecheck(&statements, &annotations)
-        .map_err(|e| format!("{:?}", e))?;
+    let types = if cfg!(feature = "typecheck") {
+        crate::compile::typecheck::typecheck(&statements, &annotations)
+            .map_err(|e| format!("{:?}", e))?
+    } else {
+        use crate::compile::typecheck::typechecker::Typemap;
+        Typemap::new()
+    };
 
     let pointer =
         Compiler::compile_module(&statements, &annotations, &types, module.clone(), vm.gc)?;
