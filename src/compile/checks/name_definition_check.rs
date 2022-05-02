@@ -238,7 +238,7 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
 
     fn visit_method(
         &mut self,
-        definiton_context: &Token,
+        _definiton_context: &Token,
         name: &Token,
         args: &[TypedName],
         vararg: Option<&TypedName>,

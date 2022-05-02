@@ -1,10 +1,10 @@
 use indexmap::IndexMap;
 
 use super::type_builder::TypeBuilder;
-use super::types::{Callable, EnumType, StructDescriptorType, StructInstanceType, Type};
+use super::types::{EnumType, StructDescriptorType, StructInstanceType, Type};
 use crate::compile::checks::tree_visitor::Visitor;
 use crate::compile::checks::Annotations;
-use crate::data::objects::StructDescriptor;
+
 use crate::execution::arity::Arity;
 use crate::parsing::ast::{Expr, Program, Stmt, TypeMention, TypedName};
 use crate::parsing::lexer::{Index, Token, TokenKind};
@@ -25,6 +25,7 @@ pub enum SomewhereTypeError {
     NameError { name: Token },
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct LocalizedError {
     error: SomewhereTypeError,
@@ -433,7 +434,7 @@ impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
                     let t = f
                         .type_name
                         .as_ref()
-                        .map_or(Ok(Type::Unspecified), |f| self.lookup_type(&f))?;
+                        .map_or(Ok(Type::Unspecified), |f| self.lookup_type(f))?;
                     <Result<_, TypeError>>::Ok((f.name.get_string().unwrap().to_string(), t))
                 })
                 .collect::<Result<IndexMap<_, _>, _>>()?,
@@ -510,7 +511,7 @@ impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
             t @ Type::StructDescriptor(_) => Some(t),
             t @ Type::EnumDescriptor(_) => Some(t),
 
-            t @ Type::Unspecified => None,
+            Type::Unspecified => None,
 
             other => Err(SomewhereTypeError::TypeMismatch {
                 expected: Type::build_union(
