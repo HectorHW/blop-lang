@@ -131,7 +131,7 @@ impl<'a, 'ast> Checker<'a, 'ast> {
         }
     }
 
-    fn check_expectation(provided: &Type, expected: &Type) -> Result<(), SomewhereTypeError> {
+    pub fn check_expectation(provided: &Type, expected: &Type) -> Result<(), SomewhereTypeError> {
         if PartialOrd::le(provided, expected) {
             Ok(())
         } else {
@@ -450,8 +450,12 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         target: &'ast Expr,
         value: &'ast Expr,
     ) -> Result<Type, TypeError> {
-        self.visit_expr(target)?;
-        self.visit_expr(value)?;
+        let (target, field) = match target {
+            Expr::PropertyAccess(t, p) => (self.visit_expr(t.as_ref())?, p),
+            _ => unreachable!(),
+        };
+        let v = self.visit_expr(value)?;
+        Type::perform_set(target, field, v, &self.type_map, self.annotations)?;
         Ok(Type::Nothing)
     }
 
@@ -1067,6 +1071,54 @@ struct P:
 var i = P(1)
 i._1
     ",
+        );
+        type_program(
+            r"
+struct P:
+    a:Int
+var i = P(1)
+i.a = 2
+            ",
+        );
+        type_program(
+            r"
+struct P:
+    a:Int
+var i = P(1)
+i._0 = 2
+            ",
+        );
+        error_program(
+            r"
+struct P:
+    a:Int
+var i = P(1)
+i.a = true
+            ",
+        );
+        error_program(
+            r"
+struct P:
+    a:Int
+var i = P(1)
+i._0 = true
+            ",
+        );
+        error_program(
+            r"
+struct P:
+    a:Int
+var i = P(1)
+i.b = 1
+            ",
+        );
+        error_program(
+            r"
+struct P:
+    a:Int
+var i = P(1)
+i._1 = 1
+            ",
         );
     }
 

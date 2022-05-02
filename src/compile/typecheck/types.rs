@@ -8,7 +8,7 @@ use crate::compile::checks::Annotations;
 use crate::execution::arity::Arity;
 use crate::parsing::lexer::Token;
 
-use super::typechecker::{SomewhereTypeError, TypeError, Typemap};
+use super::typechecker::{Checker, SomewhereTypeError, TypeError, Typemap};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
@@ -155,26 +155,6 @@ impl Callable {
 }
 
 impl Type {
-    pub fn can_set_field(&self) -> bool {
-        matches!(self, Type::StructInstance(_) | Type::Unspecified)
-    }
-
-    pub fn get_field(&self, field_name: &str) -> Option<Type> {
-        match self {
-            Type::Int => todo!(),
-            Type::Float => todo!(),
-            Type::Bool => todo!(),
-            Type::Nothing => todo!(),
-            Type::String => todo!(),
-            Type::StructDescriptor(_) => todo!(),
-            Type::StructInstance(_) => todo!(),
-            Type::EnumDescriptor(_) => todo!(),
-            Type::Callable(_) => todo!(),
-            Type::Union(_) => todo!(),
-            Type::Unspecified => Some(Type::Unspecified),
-        }
-    }
-
     pub fn build_union(left: Type, right: Type) -> Type {
         if left == right {
             return left;
@@ -276,7 +256,7 @@ impl Type {
         target: Type,
         property: &Token,
         type_map: &Typemap,
-        annotations: &&Annotations,
+        _annotations: &Annotations,
     ) -> Result<Type, TypeError> {
         match &target {
             Type::StructInstance(i) => {
@@ -336,6 +316,75 @@ impl Type {
                 //TODO: get desc
             }
             Type::Unspecified => Ok(Type::Unspecified),
+            _ => Err(SomewhereTypeError::AttributeError {
+                target_type: target,
+                field: property.get_string().unwrap().to_string(),
+            }
+            .at(property.position))?,
+        }
+    }
+
+    pub fn perform_set(
+        target: Type,
+        property: &Token,
+        set: Type,
+        type_map: &Typemap,
+        _annotations: &Annotations,
+    ) -> Result<(), TypeError> {
+        match &target {
+            Type::StructInstance(i) => {
+                let descriptor = type_map.type_of((&i.descriptor).into());
+
+                match descriptor {
+                    Type::StructDescriptor(s) => {
+                        match crate::compile::compiler::Compiler::try_parse_special_field_access(
+                            property,
+                        ) {
+                            Ok(k) => {
+                                let v = if let Some(prop_idx) = k {
+                                    s.get_field_idx(prop_idx as usize).ok_or_else(|| {
+                                        SomewhereTypeError::OperationUnsupported {
+                                            target,
+                                            message: format!(
+                                                "index too big: no field with index {}",
+                                                prop_idx,
+                                            ),
+                                        }
+                                        .at(property.position)
+                                    })?
+                                } else {
+                                    s.get_field(property.get_string().unwrap()).ok_or_else(
+                                        || {
+                                            SomewhereTypeError::AttributeError {
+                                                target_type: target,
+                                                field: property.get_string().unwrap().to_string(),
+                                            }
+                                            .at(property.position)
+                                        },
+                                    )?
+                                };
+
+                                Checker::check_expectation(&set, &v)
+                                    .map_err(|e| e.at(property.position))?;
+
+                                Ok(())
+                            }
+                            Err(e) => Err(SomewhereTypeError::OperationUnsupported {
+                                target,
+                                message: e,
+                            }
+                            .at(property.position))?,
+                        }
+                    }
+                    Type::Unspecified => Ok(()),
+                    _ => unreachable!(),
+                }
+            }
+            Type::Union(_) => {
+                Ok(())
+                //TODO : union ops
+            }
+            Type::Unspecified => Ok(()),
             _ => Err(SomewhereTypeError::AttributeError {
                 target_type: target,
                 field: property.get_string().unwrap().to_string(),
