@@ -518,7 +518,7 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
         Ok(result)
     }
 
-    fn try_parse_special_field_access(property: &Token) -> Result<Option<u16>, String> {
+    pub fn try_parse_special_field_access(property: &Token) -> Result<Option<u16>, String> {
         if FIELD_INDEX_REGEX.is_match(property.get_string().unwrap()) {
             let idx = (property.get_string().unwrap()[1..])
                 .parse::<u16>()

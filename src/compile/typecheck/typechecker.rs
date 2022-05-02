@@ -1,7 +1,10 @@
+use indexmap::IndexMap;
+
 use super::type_builder::TypeBuilder;
-use super::types::Type;
+use super::types::{EnumType, StructDescriptorType, StructInstanceType, Type};
 use crate::compile::checks::tree_visitor::Visitor;
 use crate::compile::checks::Annotations;
+use crate::data::objects::StructDescriptor;
 use crate::execution::arity::Arity;
 use crate::parsing::ast::{Expr, Program, Stmt, TypeMention, TypedName};
 use crate::parsing::lexer::{Index, Token, TokenKind};
@@ -155,13 +158,12 @@ impl<'a, 'ast> Checker<'a, 'ast> {
         for stmt in statements {
             match stmt {
                 Stmt::VarDeclaration(v, _) => {
-                    let var_type = if let Some(type_name) = &v.type_name {
-                        self.lookup_type(type_name)?
-                    } else {
-                        Type::Unspecified
-                    };
-
-                    self.type_map.add_definition(&v.name, var_type);
+                    if let Some(type_name) = &v.type_name {
+                        let t = self.lookup_type(type_name).ok();
+                        if let Some(t) = t {
+                            self.type_map.add_definition(&v.name, t);
+                        }
+                    }
                 }
                 Stmt::FunctionDeclaration {
                     name,
@@ -169,20 +171,71 @@ impl<'a, 'ast> Checker<'a, 'ast> {
                     vararg,
                     body: _,
                     returns,
-                } => {
-                    let function_signature = self.build_function_type(
-                        args,
-                        vararg.as_ref(),
-                        returns
-                            .as_ref()
-                            .map(|ret| self.lookup_type(ret))
-                            .transpose()?
-                            .unwrap_or(Type::Unspecified),
-                    )?;
-                    self.type_map.add_definition(name, function_signature);
+                } => self.type_map.add_definition(
+                    name,
+                    self.build_function_type_stub(args, vararg.as_ref(), returns.as_ref()),
+                ),
+                Stmt::StructDeclaration { name, fields } => {
+                    self.type_map.add_definition(
+                        name,
+                        Type::StructDescriptor(StructDescriptorType {
+                            name: name.clone(),
+                            fields: {
+                                fields
+                                    .iter()
+                                    .map(|f| {
+                                        (
+                                            f.name.get_string().unwrap().to_string(),
+                                            Type::Unspecified,
+                                        )
+                                    })
+                                    .collect()
+                            },
+                            methods: Default::default(),
+                        }),
+                    );
                 }
-                Stmt::StructDeclaration { name, fields } => {}
-                Stmt::EnumDeclaration { name, variants } => {}
+                Stmt::EnumDeclaration { name, variants } => {
+                    //for possible recursion
+                    self.type_map.add_definition(
+                        name,
+                        Type::EnumDescriptor(EnumType {
+                            variants: Default::default(),
+                            methods: Default::default(),
+                        }),
+                    );
+
+                    self.type_map.add_definition(
+                        name,
+                        Type::EnumDescriptor(EnumType {
+                            variants: variants
+                                .iter()
+                                .map(|v| {
+                                    (
+                                        v.name.get_string().unwrap().to_string(),
+                                        StructDescriptorType {
+                                            name: name.clone(),
+                                            fields: v
+                                                .fields
+                                                .iter()
+                                                .map(|f| {
+                                                    (
+                                                        f.name.get_string().unwrap().to_string(),
+                                                        self.lookup_type_of(f)
+                                                            .ok()
+                                                            .unwrap_or_default(),
+                                                    )
+                                                })
+                                                .collect(),
+                                            methods: Default::default(),
+                                        },
+                                    )
+                                })
+                                .collect(),
+                            methods: Default::default(),
+                        }),
+                    )
+                }
                 Stmt::ImplBlock { .. } => {
                     //TODO impl binding
                 }
@@ -213,6 +266,30 @@ impl<'a, 'ast> Checker<'a, 'ast> {
 
         Ok(Type::build_function(arg_type, vararg, returns))
     }
+
+    /// function type builder that inserts unspecified instead of failing
+    fn build_function_type_stub(
+        &self,
+        args: &'ast [TypedName],
+        vararg: Option<&'ast TypedName>,
+        returns: Option<&'ast TypeMention>,
+    ) -> Type {
+        let arg_type = args
+            .iter()
+            .map(|arg| self.lookup_type_of(arg).unwrap_or(Type::Unspecified))
+            .collect::<Vec<_>>();
+
+        let vararg = vararg
+            .as_ref()
+            .map(|v| self.lookup_type_of(v).unwrap_or(Type::Unspecified));
+
+        let returns = returns
+            .as_ref()
+            .and_then(|t| self.lookup_type(t).ok())
+            .unwrap_or(Type::Unspecified);
+
+        Type::build_function(arg_type, vararg, returns)
+    }
 }
 
 impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
@@ -229,6 +306,16 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         if rhs.is_some() {
             let t = self.visit_expr(rhs.unwrap())?;
             Self::check_expectation(&t, &self.lookup_type_of(variable_name)?)?;
+            //use inferred
+            if variable_name.type_name.is_none() {
+                self.type_map.add_definition(&variable_name.name, t)
+            }
+        } else if variable_name.type_name.is_none() {
+            self.type_map
+                .add_definition(&variable_name.name, Type::Unspecified);
+        } else {
+            self.type_map
+                .add_definition(&variable_name.name, self.lookup_type_of(variable_name)?);
         }
         Ok(Type::Nothing)
     }
@@ -270,12 +357,24 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
 
     fn visit_function_declaration_statement(
         &mut self,
-        _name: &'ast Token,
+        name: &'ast Token,
         args: &'ast [TypedName],
         vararg: Option<&'ast TypedName>,
         body: &'ast Expr,
         returns: Option<&'ast TypeMention>,
     ) -> Result<Type, TypeError> {
+        let mut function_signature = self.build_function_type(
+            args,
+            vararg,
+            returns
+                .as_ref()
+                .map(|ret| self.lookup_type(ret))
+                .transpose()?
+                .unwrap_or(Type::Unspecified),
+        )?;
+        self.type_map
+            .add_definition(name, function_signature.clone());
+
         for arg in args.iter().chain(vararg.into_iter()) {
             self.type_map
                 .add_definition(&arg.name, self.lookup_type_of(arg)?);
@@ -288,6 +387,18 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
                 .transpose()?
                 .unwrap_or_default(),
         )?;
+
+        //use inferred
+        if returns.is_none() {
+            match &mut function_signature {
+                Type::Callable(c) => {
+                    c.return_type = Box::new(provided_return);
+                }
+                _ => unreachable!(),
+            }
+            self.type_map.add_definition(name, function_signature);
+        }
+
         Ok(Type::Nothing)
     }
 
@@ -307,6 +418,22 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         name: &'ast Token,
         fields: &[TypedName],
     ) -> Result<Type, TypeError> {
+        let instance = Type::StructDescriptor(StructDescriptorType {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|f| {
+                    let t = f
+                        .type_name
+                        .as_ref()
+                        .map_or(Ok(Type::Unspecified), |f| self.lookup_type(&f))?;
+                    <Result<_, TypeError>>::Ok((f.name.get_string().unwrap().to_string(), t))
+                })
+                .collect::<Result<IndexMap<_, _>, _>>()?,
+            methods: Default::default(),
+        });
+        self.type_map.add_definition(name, instance);
+
         Ok(Type::Nothing)
     }
 
@@ -346,6 +473,8 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         name: &'ast Token,
         rename: Option<&'ast Token>,
     ) -> Result<Type, TypeError> {
+        self.type_map
+            .add_definition(rename.unwrap_or(name), Type::Unspecified);
         Ok(Type::Nothing)
     }
 
@@ -523,7 +652,12 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
                     .into());
                 } else {
                     match target_t {
-                        Type::StructDescriptor(_) => return Ok(Default::default()),
+                        Type::StructDescriptor(d) => (
+                            d.fields.iter().map(|(k, v)| v.clone()).collect(),
+                            Type::StructInstance(StructInstanceType {
+                                descriptor: d.name.clone(),
+                            }),
+                        ),
                         Type::Callable(c) => {
                             if c.vararg.is_some() {
                                 let pad = args.len() - c.arguments.len();
@@ -586,8 +720,8 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         target: &'ast Expr,
         property: &'ast Token,
     ) -> Result<Type, TypeError> {
-        self.visit_expr(target)?;
-        Ok(Default::default())
+        let target = self.visit_expr(target)?;
+        Type::perform_lookup(target, property, &self.type_map, &self.annotations)
     }
 
     fn visit_property_check(
@@ -895,5 +1029,61 @@ def F(op: Fn()=>Int):Int =
 F((x) => x+1)
 ",
         )
+    }
+
+    #[test]
+    fn properties() {
+        type_program(
+            r"
+struct P:
+    a
+
+var i = P(1)
+i.a
+        ",
+        );
+
+        error_program(
+            r"
+struct P:
+    a
+
+var i = P(1)
+i.b     
+        ",
+        );
+        type_program(
+            r"
+struct P:
+    a
+var i = P(1)
+i._0
+    ",
+        );
+        error_program(
+            r"
+struct P:
+    a
+var i = P(1)
+i._1
+    ",
+        );
+    }
+
+    #[test]
+    fn methods() {
+        type_program(
+            r"
+struct P:
+    a
+impl P:
+    def m1(self) = self
+    def m2(self, x:Int) = x
+
+var i = P(1)
+var x:P = i.m1()
+var x2:Int = i.m2(2)
+        ",
+        );
     }
 }

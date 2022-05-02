@@ -1,10 +1,14 @@
 use indexmap::IndexMap;
 use std::collections::HashSet;
+use std::fmt::format;
 use std::hash::Hash;
 use std::{cmp::Ordering, collections::HashMap};
 
+use crate::compile::checks::Annotations;
 use crate::execution::arity::Arity;
 use crate::parsing::lexer::Token;
+
+use super::typechecker::{SomewhereTypeError, TypeError, Typemap};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
@@ -19,7 +23,7 @@ pub enum Type {
 
     Callable(Callable),
 
-    Union(HashSet<Type>),
+    Union(TypeUnion),
 
     Unspecified,
 }
@@ -41,7 +45,7 @@ impl Hash for Type {
             Type::EnumDescriptor(e) => e.hash(state),
             Type::Callable(c) => c.hash(state),
             Type::Union(u) => {
-                for item in u {
+                for item in &u.0 {
                     item.hash(state);
                 }
             }
@@ -51,8 +55,23 @@ impl Hash for Type {
 
 #[derive(Clone, Debug, Eq)]
 pub struct StructDescriptorType {
-    fields: IndexMap<String, Type>,
-    methods: HashMap<String, Callable>,
+    pub name: Token,
+    pub fields: IndexMap<String, Type>,
+    pub methods: HashMap<String, Callable>,
+}
+
+impl StructDescriptorType {
+    pub fn get_field(&self, name: &str) -> Option<Type> {
+        self.fields.get(name).cloned()
+    }
+
+    pub fn get_method(&self, name: &str) -> Option<Callable> {
+        self.methods.get(name).cloned()
+    }
+
+    pub fn get_field_idx(&self, idx: usize) -> Option<Type> {
+        self.fields.get_index(idx).map(|(k, v)| v.clone())
+    }
 }
 
 impl PartialEq for StructDescriptorType {
@@ -71,12 +90,35 @@ impl Hash for StructDescriptorType {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StructInstanceType {
-    descriptor: Token,
+    pub descriptor: Token,
 }
 
 #[derive(Clone, Debug, Eq)]
 pub struct EnumType {
-    variants: HashMap<String, StructDescriptorType>,
+    pub variants: HashMap<String, StructDescriptorType>,
+    pub methods: HashMap<String, Callable>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypeUnion(HashSet<Type>);
+
+impl TypeUnion {
+    pub fn project<F, T, E>(&self, op: F) -> Result<Type, E>
+    where
+        F: Fn(Type) -> Result<Type, E>,
+    {
+        let items = self
+            .0
+            .iter()
+            .cloned()
+            .map(op)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(items
+            .into_iter()
+            .fold(Type::Union(TypeUnion(Default::default())), |a, i| {
+                Type::build_union(a, i)
+            }))
+    }
 }
 
 impl PartialEq for EnumType {
@@ -99,6 +141,17 @@ pub struct Callable {
     pub arguments: Vec<Type>,
     pub vararg: Option<Box<Type>>,
     pub return_type: Box<Type>,
+}
+
+impl Callable {
+    pub fn as_bound_method(&self) -> Callable {
+        let args = self.arguments.split_first().unwrap().1.to_owned();
+        Callable {
+            arguments: args,
+            vararg: self.vararg.clone(),
+            return_type: self.return_type.clone(),
+        }
+    }
 }
 
 impl Type {
@@ -130,22 +183,22 @@ impl Type {
         match (left, right) {
             (left, right) if left.is_unspecified() || right.is_unspecified() => Default::default(),
             (Type::Union(mut u1), Type::Union(u2)) => {
-                u1.extend(u2.into_iter());
+                u1.0.extend(u2.0.into_iter());
                 Type::Union(u1)
             }
             (Type::Union(mut u1), right) => {
-                u1.insert(right);
+                u1.0.insert(right);
                 Type::Union(u1)
             }
             (left, Type::Union(mut u)) => {
-                u.insert(left);
+                u.0.insert(left);
                 Type::Union(u)
             }
             (other1, other2) => {
                 let mut union = HashSet::new();
                 union.insert(other1);
                 union.insert(other2);
-                Type::Union(union)
+                Type::Union(TypeUnion(union))
             }
         }
     }
@@ -175,6 +228,7 @@ impl Type {
             }),
             Type::Union(items) => {
                 let arities = items
+                    .0
                     .iter()
                     .map(|i| i.get_arity())
                     .collect::<Option<Vec<_>>>()?;
@@ -215,6 +269,78 @@ impl Type {
                     && PartialOrd::le(&c1.return_type, &c2.return_type)
             }
             _ => false,
+        }
+    }
+
+    pub(crate) fn perform_lookup(
+        target: Type,
+        property: &Token,
+        type_map: &Typemap,
+        annotations: &&Annotations,
+    ) -> Result<Type, TypeError> {
+        match &target {
+            Type::StructInstance(i) => {
+                let descriptor = type_map.type_of((&i.descriptor).into());
+
+                match descriptor {
+                    Type::StructDescriptor(s) => {
+                        match crate::compile::compiler::Compiler::try_parse_special_field_access(
+                            property,
+                        ) {
+                            Ok(k) => {
+                                let v = if let Some(prop_idx) = k {
+                                    s.get_field_idx(prop_idx as usize).ok_or_else(|| {
+                                        SomewhereTypeError::OperationUnsupported {
+                                            target,
+                                            message: format!(
+                                                "index too big: no field with index {}",
+                                                prop_idx,
+                                            ),
+                                        }
+                                        .at(property.position)
+                                    })?
+                                } else {
+                                    s.get_method(property.get_string().unwrap())
+                                        .map(|c| {
+                                            //bind method
+                                            Type::Callable(c.as_bound_method())
+                                        })
+                                        .or_else(|| s.get_field(property.get_string().unwrap()))
+                                        .ok_or_else(|| {
+                                            SomewhereTypeError::AttributeError {
+                                                target_type: target,
+                                                field: property.get_string().unwrap().to_string(),
+                                            }
+                                            .at(property.position)
+                                        })?
+                                };
+                                Ok(v)
+                            }
+                            Err(e) => Err(SomewhereTypeError::OperationUnsupported {
+                                target,
+                                message: e,
+                            }
+                            .at(property.position))?,
+                        }
+                    }
+                    Type::Unspecified => Ok(Type::Unspecified),
+                    _ => unreachable!(),
+                }
+            }
+            Type::Union(_) => {
+                Ok(Type::Unspecified)
+                //TODO : union ops
+            }
+            Type::EnumDescriptor(e) => {
+                Ok(Type::Unspecified)
+                //TODO: get desc
+            }
+            Type::Unspecified => Ok(Type::Unspecified),
+            _ => Err(SomewhereTypeError::AttributeError {
+                target_type: target,
+                field: property.get_string().unwrap().to_string(),
+            }
+            .at(property.position))?,
         }
     }
 }
