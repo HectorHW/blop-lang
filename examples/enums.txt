@@ -20,7 +20,7 @@ enum Result:
         err
 
 
-var some = Option.Some(1)
+var some: Any = Option.Some(1)
 var none = Option.None() 
 # parens are mandatory right now as under the hood Option.None is 
 # still a struct descriptor

@@ -6,9 +6,9 @@ mod type_builder;
 pub mod typechecker;
 pub mod types;
 
-pub fn typecheck<'p, 'a>(
+pub fn typecheck<'p>(
     program: &'p Program,
-    annotations: &'a Annotations,
+    annotations: &'p Annotations,
 ) -> Result<typechecker::Typemap<'p>, typechecker::TypeError> {
     typechecker::Checker::typecheck(program, annotations)
 }

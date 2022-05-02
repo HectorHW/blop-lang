@@ -8,7 +8,7 @@ print(int)
 print(true)
 print(false)
 
-var negative_number = 0-5
+var negative_number:Any = 0-5
 
 #calling methods on builtin types
 
@@ -17,9 +17,9 @@ print(negative_number.abs())
 assert negative_number.abs() == 5
 
 #methods may accept arguments
-# (parens so number is never parsed as float)
-assert (12)._mod(5)==2
-print((12)._mod(5))
+var twelve:Any = 12
+assert twelve._mod(5)==2
+print(twelve._mod(5))
 # running this with --features "bench" should show some speedup from using strings for indexing
 
 def loop(n) =

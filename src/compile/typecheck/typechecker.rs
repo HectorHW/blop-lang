@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 
 use super::type_builder::TypeBuilder;
-use super::types::{EnumType, StructDescriptorType, StructInstanceType, Type};
+use super::types::{Callable, EnumType, StructDescriptorType, StructInstanceType, Type};
 use crate::compile::checks::tree_visitor::Visitor;
 use crate::compile::checks::Annotations;
 use crate::data::objects::StructDescriptor;
@@ -22,6 +22,7 @@ pub enum SomewhereTypeError {
     OperationUnsupported { target: Type, message: String },
 
     AttributeError { target_type: Type, field: String },
+    NameError { name: Token },
 }
 
 #[derive(Debug)]
@@ -103,15 +104,15 @@ impl<'a> Typemap<'a> {
     }
 }
 
-pub struct Checker<'an, 'ast> {
-    annotations: &'an Annotations,
+pub struct Checker<'ast> {
+    annotations: &'ast Annotations,
     type_map: Typemap<'ast>,
 }
 
-impl<'a, 'ast> Checker<'a, 'ast> {
+impl<'ast> Checker<'ast> {
     pub fn typecheck(
         program: &'ast Program,
-        annotations: &'a Annotations,
+        annotations: &'ast Annotations,
     ) -> Result<Typemap<'ast>, TypeError> {
         let mut checker = Checker::new(annotations);
 
@@ -124,7 +125,7 @@ impl<'a, 'ast> Checker<'a, 'ast> {
         Ok(checker.type_map)
     }
 
-    pub fn new(annotations: &'a Annotations) -> Checker<'a, 'ast> {
+    pub fn new(annotations: &'ast Annotations) -> Checker<'ast> {
         Self {
             annotations,
             type_map: Default::default(),
@@ -132,7 +133,7 @@ impl<'a, 'ast> Checker<'a, 'ast> {
     }
 
     pub fn check_expectation(provided: &Type, expected: &Type) -> Result<(), SomewhereTypeError> {
-        if PartialOrd::le(provided, expected) {
+        if Type::type_match(provided, expected) {
             Ok(())
         } else {
             Err(SomewhereTypeError::TypeMismatch {
@@ -200,6 +201,7 @@ impl<'a, 'ast> Checker<'a, 'ast> {
                     self.type_map.add_definition(
                         name,
                         Type::EnumDescriptor(EnumType {
+                            name: name.clone(),
                             variants: Default::default(),
                             methods: Default::default(),
                         }),
@@ -208,6 +210,7 @@ impl<'a, 'ast> Checker<'a, 'ast> {
                     self.type_map.add_definition(
                         name,
                         Type::EnumDescriptor(EnumType {
+                            name: name.clone(),
                             variants: variants
                                 .iter()
                                 .map(|v| {
@@ -292,7 +295,7 @@ impl<'a, 'ast> Checker<'a, 'ast> {
     }
 }
 
-impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
+impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
     fn after_stmt(&mut self, stmt: &'ast Stmt, value: Type) -> Result<Type, TypeError> {
         self.type_map.add_stmt(stmt, value.clone());
         Ok(value)
@@ -305,7 +308,8 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
     ) -> Result<Type, TypeError> {
         if rhs.is_some() {
             let t = self.visit_expr(rhs.unwrap())?;
-            Self::check_expectation(&t, &self.lookup_type_of(variable_name)?)?;
+            Self::check_expectation(&t, &self.lookup_type_of(variable_name)?)
+                .map_err(|e| e.at(variable_name.name.position))?;
             //use inferred
             if variable_name.type_name.is_none() {
                 self.type_map.add_definition(&variable_name.name, t)
@@ -332,7 +336,7 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
             .map(|def| self.type_map.type_of(def.into()))
             .unwrap_or(Type::Unspecified);
 
-        Self::check_expectation(&value, &definition_type)?;
+        Self::check_expectation(&value, &definition_type).map_err(|e| e.at(target.position))?;
 
         Ok(Type::Nothing)
     }
@@ -347,7 +351,8 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         expr: &'ast Expr,
     ) -> Result<Type, TypeError> {
         let inner = self.visit_expr(expr)?;
-        Self::check_expectation(&inner, &Type::Bool).map_err(|e| e.at(keyword.position))?;
+        Self::check_expectation(&inner, &Type::build_union(Type::Bool, Type::Nothing))
+            .map_err(|e| e.at(keyword.position))?;
         Ok(Type::Nothing)
     }
 
@@ -386,7 +391,8 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
                 .map(|t| self.lookup_type(t))
                 .transpose()?
                 .unwrap_or_default(),
-        )?;
+        )
+        .map_err(|e| e.at(returns.unwrap().get_pos()))?;
 
         //use inferred
         if returns.is_none() {
@@ -404,6 +410,7 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
 
     fn visit_method(
         &mut self,
+        definiton_context: &'ast Token,
         name: &'ast Token,
         args: &'ast [TypedName],
         vararg: Option<&'ast TypedName>,
@@ -442,6 +449,35 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         name: &'ast Token,
         variants: &'ast [crate::parsing::ast::EnumVariant],
     ) -> Result<Type, TypeError> {
+        self.type_map.add_definition(
+            name,
+            Type::EnumDescriptor(EnumType {
+                name: name.clone(),
+                variants: variants
+                    .iter()
+                    .map(|v| {
+                        Ok((
+                            v.name.get_string().unwrap().to_string(),
+                            StructDescriptorType {
+                                name: name.clone(),
+                                fields: v
+                                    .fields
+                                    .iter()
+                                    .map(|f| {
+                                        Ok((
+                                            f.name.get_string().unwrap().to_string(),
+                                            self.lookup_type_of(f)?,
+                                        ))
+                                    })
+                                    .collect::<Result<_, TypeError>>()?,
+                                methods: Default::default(),
+                            },
+                        ))
+                    })
+                    .collect::<Result<_, TypeError>>()?,
+                methods: Default::default(),
+            }),
+        );
         Ok(Type::Nothing)
     }
 
@@ -464,9 +500,61 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         name: &'ast Token,
         implementations: &'ast [Stmt],
     ) -> Result<Type, TypeError> {
-        implementations
+        let definiton: &'ast Token = self.annotations.get_definiton(name).ok_or_else(|| {
+            SomewhereTypeError::NameError { name: name.clone() }.at(name.position)
+        })?;
+        let definiton_name = definiton.clone();
+        let target_t = self.type_map.type_of((&definiton_name).into());
+
+        let mut target_t = match target_t {
+            t @ Type::StructDescriptor(_) => Some(t),
+            t @ Type::EnumDescriptor(_) => Some(t),
+
+            t @ Type::Unspecified => None,
+
+            other => Err(SomewhereTypeError::TypeMismatch {
+                expected: Type::build_union(
+                    Type::some_struct_descriptor(),
+                    Type::some_enum_descriptor(),
+                ),
+                got: other,
+            }
+            .at(name.position))?,
+        };
+
+        //collect method descriptors
+
+        let methods = implementations
             .iter()
-            .try_for_each(|f| self.visit_stmt(f).map(|_| ()))?;
+            .map(|meth| match meth {
+                Stmt::FunctionDeclaration { name, .. } => Ok(name),
+                _ => unreachable!(),
+            })
+            .collect::<Result<Vec<_>, TypeError>>()?;
+
+        if let Some(target_t) = target_t.as_mut() {
+            for name in methods {
+                target_t
+                    .add_method(name.get_string().unwrap(), name.clone())
+                    .unwrap();
+            }
+            self.type_map.add_definition(definiton, target_t.clone());
+        }
+
+        for stmt in implementations {
+            match stmt {
+                Stmt::FunctionDeclaration {
+                    name,
+                    args,
+                    vararg,
+                    body,
+                    returns,
+                } => {
+                    self.visit_method(name, name, args, vararg.as_ref(), body, returns.as_ref())?;
+                }
+                _ => unreachable!(),
+            }
+        }
 
         Ok(Type::Nothing)
     }
@@ -593,9 +681,16 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         Self::check_expectation(&condition_t, &Type::Bool)
             .map_err(|e| e.at(condition.get_pos()))?;
 
+        let types_bak = self.type_map.clone();
+
         let left = self.visit_expr(then_branch)?;
+
+        self.type_map = types_bak;
         let right = if let Some(else_branch) = else_branch {
-            self.visit_expr(else_branch)?
+            let types_bak = self.type_map.clone();
+            let t = self.visit_expr(else_branch)?;
+            self.type_map = types_bak;
+            t
         } else {
             Type::Nothing
         };
@@ -657,10 +752,8 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
                 } else {
                     match target_t {
                         Type::StructDescriptor(d) => (
-                            d.fields.iter().map(|(k, v)| v.clone()).collect(),
-                            Type::StructInstance(StructInstanceType {
-                                descriptor: d.name.clone(),
-                            }),
+                            d.fields.iter().map(|(_, v)| v.clone()).collect(),
+                            Type::StructInstance(StructInstanceType { descriptor: d.name }),
                         ),
                         Type::Callable(c) => {
                             if c.vararg.is_some() {
@@ -725,7 +818,7 @@ impl<'a, 'ast> Visitor<'ast, Type, TypeError> for Checker<'a, 'ast> {
         property: &'ast Token,
     ) -> Result<Type, TypeError> {
         let target = self.visit_expr(target)?;
-        Type::perform_lookup(target, property, &self.type_map, &self.annotations)
+        Type::perform_lookup(target, property, &self.type_map, self.annotations)
     }
 
     fn visit_property_check(
@@ -916,7 +1009,7 @@ mod tests {
         type_program(
             //it does not limits user too much
             "
-        var a = 2
+        var a:Any = 2
         a = true
         ",
         );

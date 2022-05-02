@@ -28,7 +28,7 @@ assert G(1)==1
 assert G(2)==2
 assert G(3)==Nothing
 
-var res = if 5==4 3 elif 5==5 2 else 1
+var res: Any = if 5==4 3 elif 5==5 2 else 1
 
 assert res == 2
 assert if true true else false

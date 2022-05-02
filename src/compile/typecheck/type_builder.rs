@@ -33,6 +33,7 @@ impl<'a, 'b, 'ast> TypeBuilder<'a, 'b, 'ast> {
                         "Nothing" => Ok(Type::Nothing),
                         "Float" => Ok(Type::Float),
                         "Any" => Ok(Type::Unspecified),
+                        "String" => Ok(Type::String),
                         _ => Err(SomewhereTypeError::UnknownType { value: t.clone() }),
                     }
                 }

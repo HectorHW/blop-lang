@@ -95,6 +95,7 @@ where
 
     fn visit_method(
         &mut self,
+        definiton_context: &'ast Token,
         name: &'ast Token,
         args: &'ast [TypedName],
         vararg: Option<&'ast TypedName>,
@@ -130,9 +131,19 @@ where
         name: &'ast Token,
         implementations: &'ast [Stmt],
     ) -> Result<T, E> {
-        implementations
-            .iter()
-            .try_for_each(|f| self.visit_stmt(f).map(|_| ()))?;
+        implementations.iter().try_for_each(|f| match f {
+            Stmt::FunctionDeclaration {
+                name: f_name,
+                args,
+                vararg,
+                body,
+                returns,
+            } => {
+                self.visit_method(name, f_name, args, vararg.as_ref(), body, returns.as_ref())?;
+                Ok(())
+            }
+            _ => unreachable!(),
+        })?;
 
         Ok(Default::default())
     }

@@ -185,7 +185,11 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
         Ok(())
     }
 
-    fn visit_impl_block(&mut self, _name: &Token, implementations: &[Stmt]) -> Result<(), String> {
+    fn visit_impl_block(
+        &mut self,
+        item_name: &Token,
+        implementations: &[Stmt],
+    ) -> Result<(), String> {
         self.new_scope();
 
         for f in implementations {
@@ -197,7 +201,14 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
                     body,
                     returns,
                 } => {
-                    self.visit_method(name, args, vararg.as_ref(), body, returns.as_ref())?;
+                    self.visit_method(
+                        item_name,
+                        name,
+                        args,
+                        vararg.as_ref(),
+                        body,
+                        returns.as_ref(),
+                    )?;
                 }
                 _ => unreachable!(),
             }
@@ -227,6 +238,7 @@ impl<'ast> Visitor<'ast, (), String> for NameRedefinitionChecker {
 
     fn visit_method(
         &mut self,
+        definiton_context: &Token,
         name: &Token,
         args: &[TypedName],
         vararg: Option<&TypedName>,

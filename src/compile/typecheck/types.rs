@@ -1,8 +1,7 @@
 use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fmt::format;
 use std::hash::Hash;
-use std::{cmp::Ordering, collections::HashMap};
 
 use crate::compile::checks::Annotations;
 use crate::execution::arity::Arity;
@@ -57,7 +56,7 @@ impl Hash for Type {
 pub struct StructDescriptorType {
     pub name: Token,
     pub fields: IndexMap<String, Type>,
-    pub methods: HashMap<String, Callable>,
+    pub methods: HashMap<String, Token>,
 }
 
 impl StructDescriptorType {
@@ -65,12 +64,12 @@ impl StructDescriptorType {
         self.fields.get(name).cloned()
     }
 
-    pub fn get_method(&self, name: &str) -> Option<Callable> {
-        self.methods.get(name).cloned()
+    pub fn get_method(&self, name: &str) -> Option<&Token> {
+        self.methods.get(name)
     }
 
     pub fn get_field_idx(&self, idx: usize) -> Option<Type> {
-        self.fields.get_index(idx).map(|(k, v)| v.clone())
+        self.fields.get_index(idx).map(|(_, v)| v.clone())
     }
 }
 
@@ -95,8 +94,10 @@ pub struct StructInstanceType {
 
 #[derive(Clone, Debug, Eq)]
 pub struct EnumType {
+    pub name: Token,
     pub variants: HashMap<String, StructDescriptorType>,
-    pub methods: HashMap<String, Callable>,
+    //token pointer to each method
+    pub methods: HashMap<String, Token>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -191,12 +192,41 @@ impl Type {
         })
     }
 
+    pub fn add_method(&mut self, method_name: &str, method: Token) -> Result<(), ()> {
+        match self {
+            Type::StructDescriptor(s) => {
+                s.methods.insert(method_name.to_string(), method);
+                Ok(())
+            }
+
+            Type::EnumDescriptor(s) => {
+                s.methods.insert(method_name.to_string(), method);
+                Ok(())
+            }
+            _ => Err(()),
+        }
+    }
+
     pub fn is_unspecified(&self) -> bool {
         matches!(self, Type::Unspecified)
     }
 
     pub fn is_union(&self) -> bool {
         matches!(self, Type::Union(..))
+    }
+
+    pub fn as_union(&self) -> Option<&TypeUnion> {
+        match self {
+            Type::Union(u) => Some(u),
+            _ => None,
+        }
+    }
+
+    pub fn as_callable(&self) -> Option<&Callable> {
+        match self {
+            Type::Callable(c) => Some(c),
+            _ => None,
+        }
     }
 
     pub fn get_arity(&self) -> Option<Arity> {
@@ -237,16 +267,16 @@ impl Type {
                 c1.arguments
                     .iter()
                     .zip(c2.arguments.iter())
-                    .all(|(a1, a2)| PartialOrd::le(a1, a2))
+                    .all(|(a1, a2)| Self::type_match(a1, a2))
                     && c1
                         .vararg
                         .as_ref()
                         .into_iter()
                         .zip(c2.vararg.as_ref().into_iter())
-                        .map(|(v1, v2)| PartialOrd::le(v1, v2))
+                        .map(|(v1, v2)| Self::type_match(v1, v2))
                         .last()
                         .unwrap_or(true)
-                    && PartialOrd::le(&c1.return_type, &c2.return_type)
+                    && Self::type_match(&c1.return_type, &c2.return_type)
             }
             _ => false,
         }
@@ -282,8 +312,13 @@ impl Type {
                                 } else {
                                     s.get_method(property.get_string().unwrap())
                                         .map(|c| {
-                                            //bind method
-                                            Type::Callable(c.as_bound_method())
+                                            Type::Callable(
+                                                type_map
+                                                    .type_of(c.into())
+                                                    .as_callable()
+                                                    .unwrap()
+                                                    .as_bound_method(),
+                                            )
                                         })
                                         .or_else(|| s.get_field(property.get_string().unwrap()))
                                         .ok_or_else(|| {
@@ -303,6 +338,30 @@ impl Type {
                             .at(property.position))?,
                         }
                     }
+
+                    Type::EnumDescriptor(e) => {
+                        e.methods
+                            .get(property.get_string().unwrap())
+                            .map(|c| {
+                                //bind method
+                                Type::Callable(
+                                    type_map
+                                        .type_of(c.into())
+                                        .as_callable()
+                                        .unwrap()
+                                        .as_bound_method(),
+                                )
+                            })
+                            .ok_or_else(|| {
+                                SomewhereTypeError::AttributeError {
+                                    target_type: target,
+                                    field: property.get_string().unwrap().to_string(),
+                                }
+                                .at(property.position)
+                                .into()
+                            })
+                    }
+
                     Type::Unspecified => Ok(Type::Unspecified),
                     _ => unreachable!(),
                 }
@@ -312,7 +371,26 @@ impl Type {
                 //TODO : union ops
             }
             Type::EnumDescriptor(e) => {
-                Ok(Type::Unspecified)
+                let prod = e
+                    .variants
+                    .get(property.get_string().unwrap())
+                    .map(|v| {
+                        Type::build_function(
+                            v.fields.values().cloned().collect(),
+                            None,
+                            Type::StructInstance(StructInstanceType {
+                                descriptor: e.name.clone(),
+                            }),
+                        )
+                    })
+                    .ok_or_else(|| {
+                        SomewhereTypeError::AttributeError {
+                            target_type: target,
+                            field: property.get_string().unwrap().to_string(),
+                        }
+                        .at(property.position)
+                    })?;
+                Ok(prod)
                 //TODO: get desc
             }
             Type::Unspecified => Ok(Type::Unspecified),
@@ -392,36 +470,59 @@ impl Type {
             .at(property.position))?,
         }
     }
+
+    pub fn some_struct_descriptor() -> Type {
+        Type::StructDescriptor(StructDescriptorType {
+            name: Token {
+                position: crate::parsing::lexer::Index(0, 0),
+                kind: crate::parsing::lexer::TokenKind::Name("some_struct".to_string()),
+            },
+            fields: Default::default(),
+            methods: Default::default(),
+        })
+    }
+
+    pub fn some_enum_descriptor() -> Type {
+        Type::EnumDescriptor(EnumType {
+            name: Token {
+                position: crate::parsing::lexer::Index(0, 0),
+                kind: crate::parsing::lexer::TokenKind::Name("some_enum".to_string()),
+            },
+            variants: Default::default(),
+            methods: Default::default(),
+        })
+    }
+
+    pub fn type_match(provided: &Type, expected: &Type) -> bool {
+        if provided == expected {
+            return true;
+        }
+
+        if provided.is_unspecified() {
+            return true;
+        }
+        if expected.is_unspecified() {
+            return true;
+        }
+
+        if expected.is_union() {
+            return expected
+                .as_union()
+                .unwrap()
+                .0
+                .iter()
+                .any(|item| Type::type_match(provided, item));
+        }
+
+        match (provided, expected) {
+            (Type::Callable(_), Type::Callable(_)) => Self::check_fn_less(provided, expected),
+            _ => false,
+        }
+    }
 }
 
 impl Default for Type {
     fn default() -> Self {
         Type::Unspecified
-    }
-}
-///partialcmp that is only used through le and threated like type match
-impl PartialOrd for Type {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self == other {
-            return Some(Ordering::Equal);
-        }
-
-        if self.is_unspecified() {
-            return Some(Ordering::Equal);
-        }
-        if other.is_unspecified() {
-            return Some(Ordering::Equal);
-        }
-
-        match (self, other) {
-            (Type::Callable(_), Type::Callable(_)) => {
-                if Self::check_fn_less(self, other) || Self::check_fn_less(other, self) {
-                    Some(Ordering::Equal)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
     }
 }
