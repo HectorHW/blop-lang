@@ -10,6 +10,8 @@ use crate::parsing::lexer::{Index, Token, TokenKind};
 use regex::Regex;
 use std::collections::HashMap;
 
+use crate::compile::typecheck::typechecker::Typemap;
+
 enum ValueRequirement {
     Nothing,
     Value,
@@ -24,14 +26,15 @@ lazy_static! {
     static ref FIELD_INDEX_REGEX: Regex = Regex::new(r"^_\d+$").unwrap();
 }
 
-pub struct Compiler<'gc, 'annotations, 'chunk> {
+pub struct Compiler<'gc, 'ast, 't, 'chunk> {
     names: Vec<HashMap<String, (VariableType, bool, usize)>>,
     value_requirements: Vec<ValueRequirement>,
     total_closed_variables: usize,
     stack_height: usize,
     function_context: FunctionCompilationContext,
     current_chunk: &'chunk mut Chunk,
-    annotations: &'annotations Annotations,
+    annotations: &'ast Annotations,
+    type_map: &'t Typemap<'ast>,
     gc: &'gc mut GC,
 }
 
@@ -40,14 +43,15 @@ struct FunctionCompilationContext {
     name: Token,
 }
 
-impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
+impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
     fn new(
-        annotations: &'annotations Annotations,
+        annotations: &'ast Annotations,
+        type_map: &'t Typemap<'ast>,
         gc: &'gc mut GC,
         function_name: Token,
         function_arity: Arity,
         chunk: &'chunk mut Chunk,
-    ) -> Compiler<'gc, 'annotations, 'chunk> {
+    ) -> Self {
         Compiler {
             names: vec![],
             value_requirements: vec![],
@@ -59,20 +63,23 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
             },
             current_chunk: chunk,
             annotations,
+            type_map,
             gc,
         }
     }
 
-    pub fn compile_module(
-        program: &Program,
-        annotations: Annotations,
+    pub fn compile_module<'a, 'b>(
+        program: &'a Program,
+        annotations: &'a Annotations,
+        typemap: &'b Typemap<'a>,
         module: Module,
         gc: &'gc mut GC,
     ) -> Result<StackObject, String> {
         let mut program_chunk = Chunk::new(SCRIPT_TOKEN.clone(), module, Arity::Exact(0));
 
         let mut compiler = Compiler::new(
-            &annotations,
+            annotations,
+            typemap,
             gc,
             SCRIPT_TOKEN.clone(),
             Arity::Exact(0),
@@ -309,8 +316,14 @@ impl<'gc, 'annotations, 'chunk> Compiler<'gc, 'annotations, 'chunk> {
 
         let mut chunk = Chunk::new(name.clone(), self.current_chunk.module.clone(), arity);
 
-        let mut inner_compiler =
-            Compiler::new(self.annotations, self.gc, name.clone(), arity, &mut chunk);
+        let mut inner_compiler = Compiler::new(
+            self.annotations,
+            self.type_map,
+            self.gc,
+            name.clone(),
+            arity,
+            &mut chunk,
+        );
 
         //compile body
 
@@ -1381,7 +1394,7 @@ mod complex_operators_stack_tests {
 
     use super::Compiler;
     use crate::{
-        compile::compiler::SCRIPT_TOKEN,
+        compile::{compiler::SCRIPT_TOKEN, typecheck::typechecker::Typemap},
         data::gc::GC,
         execution::{arity::Arity, chunk::Chunk, module::Module},
         parsing::{
@@ -1404,8 +1417,10 @@ mod complex_operators_stack_tests {
         let module = Module::from_dot_notation("`TEST`");
         let mut chunk = Chunk::new(SCRIPT_TOKEN.clone(), module, Arity::Exact(0));
         let annotations = Default::default();
+        let typemap = Typemap::new();
         let mut compiler = Compiler::new(
             &annotations,
+            &typemap,
             &mut gc,
             SCRIPT_TOKEN.clone(),
             Arity::Exact(0),

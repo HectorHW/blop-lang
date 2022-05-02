@@ -88,6 +88,10 @@ impl<'a> From<&'a Token> for Typable<'a> {
 pub struct Typemap<'a>(HashMap<Typable<'a>, Type>);
 
 impl<'a> Typemap<'a> {
+    pub fn new() -> Self {
+        Typemap(Default::default())
+    }
+
     pub fn type_of(&self, obj: Typable) -> Type {
         self.0.get(&obj).cloned().unwrap_or_default()
     }
