@@ -2,7 +2,7 @@ use crate::{compile::checks::Annotations, parsing::ast::TypeMention};
 
 use super::{
     typechecker::{SomewhereTypeError, Typemap},
-    types::Type,
+    types::{StructInstanceType, Type},
 };
 
 pub struct TypeBuilder<'a, 'b, 'ast> {
@@ -25,7 +25,14 @@ impl<'a, 'b, 'ast> TypeBuilder<'a, 'b, 'ast> {
         match t {
             TypeMention::Simple(s) => {
                 if let Some(definition) = self.annotations.get_definiton(s) {
-                    Ok(self.types.type_of(definition.into()))
+                    match self.types.type_of(definition.into()) {
+                        Type::StructDescriptor(_) | Type::EnumDescriptor(_) => {
+                            Ok(Type::StructInstance(StructInstanceType {
+                                descriptor: definition.clone(),
+                            }))
+                        }
+                        _ => Ok(self.types.type_of(definition.into())),
+                    }
                 } else {
                     match s.get_string().unwrap() {
                         "Int" => Ok(Type::Int),

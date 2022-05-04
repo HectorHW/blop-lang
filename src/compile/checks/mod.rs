@@ -76,5 +76,10 @@ pub fn check_optimize(tree: Program) -> Result<(Program, Annotations), String> {
     AnnotationGenerator::generate_annotations(&tree, &mut annotations)?;
     let tree = Folder::fold_constants(tree)?;
 
+    #[cfg(feature = "print-bindings")]
+    for (a, b) in &annotations.variable_bindings {
+        println!("{a:?} --> {b:?}")
+    }
+
     Ok((tree, annotations))
 }

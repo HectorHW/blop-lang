@@ -96,27 +96,33 @@ impl<'a> AnnotationGenerator<'a> {
         None
     }
 
-    fn lookup_name(&mut self, variable: &Token) {
+    ///simply set mapping 'mention --> definition'
+    fn bind_name(&mut self, variable: &Token) -> Option<(VariableType, Token)> {
         if self.lookup_local(variable) {
-            return;
+            return None;
         }
 
-        let outer_type = self.lookup_outer(variable);
-
-        if outer_type.is_none() {
-            //global undeclared
-            return;
-        }
-
-        let outer_type = outer_type.unwrap();
-
-        let variable_name = variable.get_string().unwrap();
+        let outer_type = self.lookup_outer(variable)?;
 
         let definition = self.find_closed(variable).clone();
 
         self.annotations
             .variable_bindings
             .insert(variable.clone(), definition.clone());
+
+        Some((outer_type, definition))
+    }
+
+    fn lookup_name(&mut self, variable: &Token) {
+        let outer_type = self.bind_name(variable);
+
+        let variable_name = variable.get_string().unwrap();
+
+        if outer_type.is_none() {
+            return; // global undeclared
+        }
+
+        let (outer_type, definition) = outer_type.unwrap();
 
         if outer_type == VariableType::Global {
             return;
@@ -177,7 +183,7 @@ impl<'a> AnnotationGenerator<'a> {
     fn lookup_type(&mut self, type_def: &TypeMention) {
         match type_def {
             TypeMention::Simple(t) => {
-                self.lookup_local(t);
+                let _ = self.bind_name(t);
             }
             TypeMention::Function {
                 kw: _,
