@@ -758,10 +758,12 @@ impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
 
             Stmt::PropertyAssignment(target, value) => match target {
                 Expr::PropertyAccess(target, property) => {
+                    //load ptr
                     self.require_value();
                     let target = self.visit_expr(target)?;
                     self.pop_requirement();
 
+                    //load value
                     self.require_value();
                     let value = self.visit_expr(value)?;
                     self.pop_requirement();
@@ -781,6 +783,9 @@ impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
                         },
                         property.position.0,
                     );
+                    //setting field pops 2 values from stack - pointer and value
+                    self.dec_stack_height();
+                    self.dec_stack_height();
 
                     if self.needs_value() {
                         result.push(Opcode::LoadNothing, property.position.0);
@@ -949,6 +954,8 @@ impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
                     },
                     op.position.0,
                 );
+
+                self.dec_stack_height(); //value is used, height is increased in outer code
 
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), op.position.0);
@@ -1229,6 +1236,8 @@ impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
                 );
 
                 self.sub_stack_height(args.len());
+                self.dec_stack_height(); // function pointer is removed
+                                         //result is (maybe) added in outer code
 
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), result.last_index().unwrap());
@@ -1273,6 +1282,7 @@ impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
                     },
                     prop.position.0,
                 );
+                self.dec_stack_height(); //pointer is pop'ed, height is increased in outer code
 
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), prop.position.0);
