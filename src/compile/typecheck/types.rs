@@ -104,7 +104,7 @@ pub struct EnumType {
 pub struct TypeUnion(HashSet<Type>);
 
 impl TypeUnion {
-    pub fn project<F, T, E>(&self, op: F) -> Result<Type, E>
+    pub fn project<F, E>(&self, op: F) -> Result<Type, E>
     where
         F: Fn(Type) -> Result<Type, E>,
     {

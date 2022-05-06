@@ -731,61 +731,106 @@ impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
     ) -> Result<Type, TypeError> {
         let target_t = self.visit_expr(target)?;
 
+        fn try_match_for_signature(
+            provided: &[Type],
+            expected: &[Type],
+            return_t: Type,
+        ) -> Result<Type, SomewhereTypeError> {
+            provided
+                .iter()
+                .zip(expected.iter())
+                .try_for_each(|(expected, provided)| {
+                    Checker::check_expectation(provided, expected)
+                })?;
+            Ok(return_t)
+        }
+
+        fn into_call_signature(
+            t: &Type,
+            args: usize,
+        ) -> Result<(Vec<Type>, Type), SomewhereTypeError> {
+            let arity = t
+                .get_arity()
+                .ok_or_else(|| SomewhereTypeError::OperationUnsupported {
+                    target: t.clone(),
+                    message: "cannot perform call".to_string(),
+                })?;
+            if !arity.accepts(args) {
+                Err(SomewhereTypeError::ArityMismatch {
+                    expected: arity,
+                    got: args,
+                })
+            } else {
+                match t {
+                    Type::StructDescriptor(d) => {
+                        let (sig, ret) = (
+                            d.fields.iter().map(|(_, v)| v.clone()).collect(),
+                            Type::StructInstance(StructInstanceType {
+                                descriptor: d.name.clone(),
+                            }),
+                        );
+                        Ok((sig, ret))
+                    }
+                    Type::Callable(c) => {
+                        let (sig, ret) = if c.vararg.is_some() {
+                            let pad = args - c.arguments.len();
+                            (
+                                c.arguments
+                                    .iter()
+                                    .cloned()
+                                    .chain(
+                                        std::iter::repeat(
+                                            c.vararg.as_ref().map(|t| t.as_ref().clone()).unwrap(),
+                                        )
+                                        .take(pad),
+                                    )
+                                    .collect::<Vec<_>>(),
+                                c.return_type.as_ref().clone(),
+                            )
+                        } else {
+                            (c.arguments.clone(), c.return_type.as_ref().clone())
+                        };
+                        Ok((sig, ret))
+                    }
+                    Type::Union(_) => {
+                        unimplemented!()
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
         let args = args
             .iter()
             .map(|arg| self.visit_expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        let (req_args, ret): (Vec<Type>, Type) = match () {
-            _ if target_t.is_unspecified() => return Ok(Default::default()),
-            _ if target_t.get_arity().is_none() => {
-                return Err(SomewhereTypeError::OperationUnsupported {
-                    target: target_t.clone(),
-                    message: "cannot call".to_string(),
-                }
-                .at(target.get_pos())
-                .into())
+        match () {
+            _ if target_t.is_unspecified() => Ok(Default::default()),
+            _ if target_t.get_arity().is_none() => Err(SomewhereTypeError::OperationUnsupported {
+                target: target_t,
+                message: "cannot call".to_string(),
             }
-            _ => {
-                let arity = target_t.get_arity().unwrap();
-                if !arity.accepts(args.len()) {
-                    return Err(SomewhereTypeError::ArityMismatch {
-                        expected: arity,
-                        got: args.len(),
-                    }
-                    .at(target.get_pos())
-                    .into());
-                } else {
-                    match target_t {
-                        Type::StructDescriptor(d) => (
-                            d.fields.iter().map(|(_, v)| v.clone()).collect(),
-                            Type::StructInstance(StructInstanceType { descriptor: d.name }),
-                        ),
-                        Type::Callable(c) => {
-                            if c.vararg.is_some() {
-                                let pad = args.len() - c.arguments.len();
-                                (
-                                    c.arguments
-                                        .into_iter()
-                                        .chain(std::iter::repeat(*c.vararg.unwrap()).take(pad))
-                                        .collect::<Vec<_>>(),
-                                    *c.return_type,
-                                )
-                            } else {
-                                (c.arguments, *c.return_type)
-                            }
-                        }
-                        Type::Union(_) => return Ok(Default::default()),
-                        _ => unreachable!(),
-                    }
-                }
-            }
-        };
+            .at(target.get_pos())
+            .into()),
 
-        req_args
-            .iter()
-            .zip(args.iter())
-            .try_for_each(|(expected, provided)| Self::check_expectation(provided, expected))?;
-        Ok(ret)
+            _ => match &target_t {
+                Type::StructDescriptor(_) | Type::Callable(_) => {
+                    let (signature, ret) = into_call_signature(&target_t, args.len())
+                        .map_err(|e| e.at(target.get_pos()))?;
+                    Ok(try_match_for_signature(&args, &signature, ret)
+                        .map_err(|e| e.at(target.get_pos()))?)
+                }
+
+                Type::Union(u) => Ok(u
+                    .project(|t| {
+                        let (expectation, ret) = into_call_signature(&t, args.len())?;
+                        try_match_for_signature(&args, &expectation, ret)
+                    })
+                    .map_err(|e| e.at(target.get_pos()))?),
+
+                _ => unreachable!(),
+            },
+        }
     }
 
     fn visit_partial_call_expr(
