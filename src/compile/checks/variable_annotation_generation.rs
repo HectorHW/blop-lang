@@ -5,7 +5,14 @@ use crate::parsing::lexer::Token;
 use crate::Expr;
 use std::collections::HashMap;
 
-type ScopeStack = Vec<(ScopeType, Token, HashMap<String, (bool, Token)>)>;
+struct Scope {
+    scope_type: ScopeType,
+    indentifying_token: Token,
+    ///mapping of variables defined in scope
+    variables: HashMap<String, (bool, Token)>,
+}
+
+type ScopeStack = Vec<Scope>;
 
 pub struct AnnotationGenerator<'a> {
     annotations: &'a mut Annotations,
@@ -30,21 +37,57 @@ impl<'a> AnnotationGenerator<'a> {
         };
 
         annotator.new_scope(ScopeType::TopLevel, &crate::compile::compiler::SCRIPT_TOKEN);
+        annotator.process_toplevel(ast);
 
         ast.iter().try_for_each(|s| annotator.visit_stmt(s))
     }
 
+    ///perform predefinitions necessary for closure boxing and recursive types
+    /// expects scope to be already constructed
+    fn predefine_block(&mut self, statements: &[Stmt]) {
+        //declare variables
+        for statement in statements {
+            match statement {
+                Stmt::VarDeclaration(name, _) => {
+                    self.declare_name(&name.name);
+                }
+                Stmt::FunctionDeclaration { name, .. } => {
+                    self.declare_name(name);
+                }
+
+                Stmt::StructDeclaration { name, .. } => {
+                    self.declare_name(name);
+                }
+
+                Stmt::EnumDeclaration { name, .. } => {
+                    self.declare_name(name);
+                }
+
+                Stmt::Import { name, rename, .. } => {
+                    let import_name = rename.as_ref().unwrap_or(name);
+                    self.declare_name(import_name);
+                }
+
+                _ => {}
+            }
+        }
+    }
+
+    fn process_toplevel(&mut self, statements: &[Stmt]) {
+        self.predefine_block(statements);
+    }
+
     fn declare_name(&mut self, variable_name: &Token) {
-        self.scopes.last_mut().unwrap().2.insert(
+        self.scopes.last_mut().unwrap().variables.insert(
             variable_name.get_string().unwrap().to_string(),
             (false, variable_name.clone()),
         );
 
         self.annotations
-            .get_or_create_block_scope(&self.scopes.last_mut().unwrap().1)
+            .get_or_create_block_scope(&self.scopes.last_mut().unwrap().indentifying_token)
             .insert(
                 variable_name.get_string().unwrap().to_string(),
-                if self.scopes.last().unwrap().0 == ScopeType::TopLevel {
+                if self.scopes.last().unwrap().scope_type == ScopeType::TopLevel {
                     VariableType::Global
                 } else {
                     VariableType::Normal
@@ -53,7 +96,7 @@ impl<'a> AnnotationGenerator<'a> {
     }
 
     fn define_name(&mut self, variable_name: &Token) {
-        self.scopes.last_mut().unwrap().2.insert(
+        self.scopes.last_mut().unwrap().variables.insert(
             variable_name.get_string().unwrap().to_string(),
             (true, variable_name.clone()),
         );
@@ -62,15 +105,15 @@ impl<'a> AnnotationGenerator<'a> {
     fn lookup_local(&mut self, variable: &Token) -> bool {
         //try to lookup initialized value
         let variable_name = variable.get_string().unwrap();
-        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().rev() {
-            if let Some((true, definition)) = scope_map.get(variable_name) {
+        for scope in self.scopes.iter().rev() {
+            if let Some((true, definition)) = scope.variables.get(variable_name) {
                 self.annotations
                     .variable_bindings
                     .insert(variable.clone(), definition.clone());
                 return true;
             }
 
-            if *scope_type == ScopeType::Function {
+            if scope.scope_type == ScopeType::Function {
                 break;
             }
         }
@@ -80,16 +123,16 @@ impl<'a> AnnotationGenerator<'a> {
     fn lookup_outer(&self, variable: &Token) -> Option<VariableType> {
         let mut passed_function_scope = false;
         let variable_name = variable.get_string().unwrap();
-        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().rev() {
+        for scope in self.scopes.iter().rev() {
             if passed_function_scope {
-                if scope_map.contains_key(variable_name) {
-                    if *scope_type == ScopeType::TopLevel {
+                if scope.variables.contains_key(variable_name) {
+                    if scope.scope_type == ScopeType::TopLevel {
                         return Some(VariableType::Global);
                     } else {
                         return Some(VariableType::Closed);
                     }
                 }
-            } else if *scope_type == ScopeType::Function {
+            } else if scope.scope_type == ScopeType::Function {
                 passed_function_scope = true;
             }
         }
@@ -129,22 +172,22 @@ impl<'a> AnnotationGenerator<'a> {
         }
 
         let mut passed_function_scope = false;
-        for (scope_type, scope_identifier, scope_map) in self.scopes.iter().rev() {
-            if !passed_function_scope && *scope_type == ScopeType::Function {
+        for scope in self.scopes.iter().rev() {
+            if !passed_function_scope && scope.scope_type == ScopeType::Function {
                 passed_function_scope = true;
                 self.annotations
-                    .get_or_create_closure_scope(scope_identifier)
+                    .get_or_create_closure_scope(&scope.indentifying_token)
                     .insert(definition.clone());
             } else {
-                if scope_map.contains_key(variable_name) {
+                if scope.variables.contains_key(variable_name) {
                     self.annotations
-                        .get_or_create_block_scope(scope_identifier)
+                        .get_or_create_block_scope(&scope.indentifying_token)
                         .insert(variable_name.to_string(), VariableType::Boxed);
                     return;
                 }
-                if *scope_type == ScopeType::Function {
+                if scope.scope_type == ScopeType::Function {
                     self.annotations
-                        .get_or_create_closure_scope(scope_identifier)
+                        .get_or_create_closure_scope(&scope.indentifying_token)
                         .insert(definition.clone());
                 }
             }
@@ -154,11 +197,11 @@ impl<'a> AnnotationGenerator<'a> {
     fn find_closed(&self, variable: &Token) -> &Token {
         let mut passed_function_scope = false;
         let variable_name = variable.get_string().unwrap();
-        for (scope_type, _scope_identifier, scope_map) in self.scopes.iter().rev() {
-            if !passed_function_scope && *scope_type == ScopeType::Function {
+        for scope in self.scopes.iter().rev() {
+            if !passed_function_scope && scope.scope_type == ScopeType::Function {
                 passed_function_scope = true;
-            } else if scope_map.contains_key(variable_name) {
-                let (_, definition) = scope_map.get(variable_name).unwrap();
+            } else if scope.variables.contains_key(variable_name) {
+                let (_, definition) = scope.variables.get(variable_name).unwrap();
                 return definition;
             }
         }
@@ -166,8 +209,11 @@ impl<'a> AnnotationGenerator<'a> {
     }
 
     fn new_scope(&mut self, scope_type: ScopeType, token: &Token) {
-        self.scopes
-            .push((scope_type, token.clone(), Default::default()));
+        self.scopes.push(Scope {
+            scope_type,
+            indentifying_token: token.clone(),
+            variables: Default::default(),
+        });
     }
 
     fn pop_scope(&mut self) {
@@ -292,32 +338,7 @@ impl<'a, 'ast> Visitor<'ast, (), String> for AnnotationGenerator<'a> {
         self.new_scope(ScopeType::Block, start_token);
         self.annotations.get_or_create_block_scope(start_token);
 
-        //declare variables
-        for statement in containing_statements {
-            match statement {
-                Stmt::VarDeclaration(name, _) => {
-                    self.declare_name(&name.name);
-                }
-                Stmt::FunctionDeclaration { name, .. } => {
-                    self.declare_name(name);
-                }
-
-                Stmt::StructDeclaration { name, .. } => {
-                    self.declare_name(name);
-                }
-
-                Stmt::EnumDeclaration { name, .. } => {
-                    self.declare_name(name);
-                }
-
-                Stmt::Import { name, rename, .. } => {
-                    let import_name = rename.as_ref().unwrap_or(name);
-                    self.declare_name(import_name);
-                }
-
-                _ => {}
-            }
-        }
+        self.predefine_block(containing_statements);
 
         for item in containing_statements {
             self.visit_stmt(item)?;
