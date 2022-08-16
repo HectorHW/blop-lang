@@ -121,7 +121,7 @@ impl<'ast> Checker<'ast> {
     ) -> Result<Typemap<'ast>, TypeError> {
         let mut checker = Checker::new(annotations);
 
-        checker.perform_block_predef(program)?;
+        checker.perform_block_definitions(program)?;
 
         for stmt in program {
             checker.visit_stmt(stmt)?;
@@ -160,7 +160,67 @@ impl<'ast> Checker<'ast> {
             .unwrap_or(Ok(Type::Unspecified))
     }
 
-    fn perform_block_predef(&mut self, statements: &'ast [Stmt]) -> Result<(), TypeError> {
+    fn perform_block_definitions(&mut self, statements: &'ast [Stmt]) -> Result<(), TypeError> {
+        /*
+        firstly, predeclare items with stubs so that we could perform recursive checking
+        eg. in
+        enum List:
+            Node:
+                item: Any
+                next: List
+            Nil
+        define List and immediately use it
+        */
+        for stmt in statements {
+            match stmt {
+                Stmt::StructDeclaration { name, fields } => {
+                    self.type_map.add_definition(
+                        name,
+                        Type::StructDescriptor(StructDescriptorType {
+                            name: name.clone(),
+                            fields: {
+                                fields
+                                    .iter()
+                                    .map(|f| {
+                                        (
+                                            f.name.get_string().unwrap().to_string(),
+                                            Type::Unspecified,
+                                        )
+                                    })
+                                    .collect()
+                            },
+                            methods: Default::default(),
+                        }),
+                    );
+                }
+
+                Stmt::EnumDeclaration { name, .. } => {
+                    self.type_map.add_definition(
+                        name,
+                        Type::EnumDescriptor(EnumType {
+                            name: name.clone(),
+                            variants: Default::default(),
+                            methods: Default::default(),
+                        }),
+                    );
+                }
+
+                _other => { /*nothing */ }
+            }
+        }
+        /*
+        this approach leads to side-effect of being able to define structs with field
+        of same struct like
+        ```
+        struct A:
+            field: A
+        ```
+        but in practice this will fail at typecheck because this struct will be impossible
+        to construct in presence strict typing
+        */
+
+        //then, bind types of fields and perform other things
+
         for stmt in statements {
             match stmt {
                 Stmt::VarDeclaration(v, _) => {
@@ -201,49 +261,35 @@ impl<'ast> Checker<'ast> {
                         }),
                     );
                 }
-                Stmt::EnumDeclaration { name, variants } => {
-                    //for possible recursion
-                    self.type_map.add_definition(
-                        name,
-                        Type::EnumDescriptor(EnumType {
-                            name: name.clone(),
-                            variants: Default::default(),
-                            methods: Default::default(),
-                        }),
-                    );
-
-                    self.type_map.add_definition(
-                        name,
-                        Type::EnumDescriptor(EnumType {
-                            name: name.clone(),
-                            variants: variants
-                                .iter()
-                                .map(|v| {
-                                    (
-                                        v.name.get_string().unwrap().to_string(),
-                                        StructDescriptorType {
-                                            name: name.clone(),
-                                            fields: v
-                                                .fields
-                                                .iter()
-                                                .map(|f| {
-                                                    (
-                                                        f.name.get_string().unwrap().to_string(),
-                                                        self.lookup_type_of(f)
-                                                            .ok()
-                                                            .unwrap_or_default(),
-                                                    )
-                                                })
-                                                .collect(),
-                                            methods: Default::default(),
-                                        },
-                                    )
-                                })
-                                .collect(),
-                            methods: Default::default(),
-                        }),
-                    )
-                }
+                Stmt::EnumDeclaration { name, variants } => self.type_map.add_definition(
+                    name,
+                    Type::EnumDescriptor(EnumType {
+                        name: name.clone(),
+                        variants: variants
+                            .iter()
+                            .map(|v| {
+                                (
+                                    v.name.get_string().unwrap().to_string(),
+                                    StructDescriptorType {
+                                        name: name.clone(),
+                                        fields: v
+                                            .fields
+                                            .iter()
+                                            .map(|f| {
+                                                (
+                                                    f.name.get_string().unwrap().to_string(),
+                                                    self.lookup_type_of(f).ok().unwrap_or_default(),
+                                                )
+                                            })
+                                            .collect(),
+                                        methods: Default::default(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                        methods: Default::default(),
+                    }),
+                ),
                 Stmt::ImplBlock { .. } => {
                     //TODO impl binding
                 }
@@ -709,7 +755,7 @@ impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
         _end_token: &Token,
         containing_statements: &'ast [Stmt],
     ) -> Result<Type, TypeError> {
-        self.perform_block_predef(containing_statements)?;
+        self.perform_block_definitions(containing_statements)?;
 
         let (last, rest) = containing_statements.split_last().unwrap();
 

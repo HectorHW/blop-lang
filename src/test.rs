@@ -106,3 +106,5 @@ test_file! {inline_blocks}
 test_file! {imports}
 
 test_file! {types}
+
+test_file! {rectypes}

@@ -1,0 +1,50 @@
+# this should typecheck just fine
+
+enum List:
+    Node:
+        item: Any
+        next: List
+    Nil
+
+impl List:
+    def prepend(self, item: Any): List =
+        List.Node(item, self)
+
+    def print_list(self) =
+        if self?item
+            print(self.item)
+            print_list(self.next)
+    
+    def get_nth(self, idx: Int) =
+        if not self?item or idx<0
+                panic("index out of bounds in List.get_nth")
+        else
+            if idx==0
+                self.item
+            else
+                get_nth(self.next, idx-1)
+
+var Empty: List = List.Nil()
+
+var list_with_items = Empty.prepend(10).prepend(2).prepend(1)
+
+list_with_items.print_list()
+print(list_with_items.get_nth(0))
+print(list_with_items.get_nth(1))
+print(list_with_items.get_nth(2))
+
+assert list_with_items.get_nth(0) == 1
+assert list_with_items.get_nth(1) == 2
+assert list_with_items.get_nth(2) == 10
+
+
+#mutually recursive types should also work
+enum A:
+    v1:
+        field: B
+    v2
+
+enum B:
+    v1:
+        field: A
+    v2

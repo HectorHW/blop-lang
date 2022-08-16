@@ -28,7 +28,7 @@ pub struct Annotations {
     block_symbol_table: HashMap<Token, IndexMap<String, VariableType>>,
     closed_names_table: HashMap<Token, IndexSet<Token>>,
 
-    ///mapping of variable mention to place where it was declared
+    ///mapping of variable and type mention to place where it was declared
     variable_bindings: HashMap<Token, Token>,
 }
 

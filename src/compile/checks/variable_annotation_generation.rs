@@ -139,7 +139,7 @@ impl<'a> AnnotationGenerator<'a> {
         None
     }
 
-    ///simply set mapping 'mention --> definition'
+    ///simply set mapping 'mention --> definition' for variables
     fn bind_name(&mut self, variable: &Token) -> Option<(VariableType, Token)> {
         if self.lookup_local(variable) {
             return None;
@@ -154,6 +154,22 @@ impl<'a> AnnotationGenerator<'a> {
             .insert(variable.clone(), definition.clone());
 
         Some((outer_type, definition))
+    }
+
+    ///set mapping 'mention --> definition' for types
+    /// lookup for types is different from variables as it
+    /// allows to bind onto items declared in the same block
+    fn bind_type(&mut self, type_name: &Token) -> Result<Token, String> {
+        for scope in self.scopes.iter().rev() {
+            if let Some((_, definition)) = scope.variables.get(type_name.get_string().unwrap()) {
+                let def = definition.clone();
+                self.annotations
+                    .variable_bindings
+                    .insert(type_name.clone(), def.clone());
+                return Ok(def);
+            }
+        }
+        Err(format!("unknown type {type_name:?}"))
     }
 
     fn lookup_name(&mut self, variable: &Token) {
@@ -229,7 +245,7 @@ impl<'a> AnnotationGenerator<'a> {
     fn lookup_type(&mut self, type_def: &TypeMention) {
         match type_def {
             TypeMention::Simple(t) => {
-                let _ = self.bind_name(t);
+                let _ = self.bind_type(t);
             }
             TypeMention::Function {
                 kw: _,
