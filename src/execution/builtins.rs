@@ -20,6 +20,7 @@ pub struct BuiltinMap {
 
 pub enum BuiltinError {
     ArityMismatch { provided: usize, expected: Arity },
+    Panic { attachment: Value },
     Other(String),
 }
 
@@ -31,6 +32,8 @@ impl Display for BuiltinError {
             match self {
                 BuiltinError::ArityMismatch { provided, expected } =>
                     format!("expected {} args but got {}", expected, provided),
+                BuiltinError::Panic { attachment } =>
+                    format!("program panicked. attachment: {attachment}"),
                 BuiltinError::Other(e) => e.clone(),
             }
         )
@@ -285,6 +288,12 @@ pub fn builtin_factory() -> BuiltinMap {
         println!("{}", s);
 
         Ok(Default::default())
+    });
+
+    builtin!("panic", Exact(1), |mut args, _vm| {
+        Err(BuiltinError::Panic {
+            attachment: args.remove(0),
+        })
     });
 
     builtin!("ptr_eq", Exact(2), |mut args, _vm| {
