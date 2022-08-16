@@ -39,7 +39,7 @@ pub struct InterpretError {
     pub kind: InterpretErrorKind,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum InterpretErrorKind {
     StackUnderflow,
@@ -196,12 +196,13 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 //TODO include last stack frame?
             }
             if self.gc.needs_collection() {
+                println!("gc said it needs collection");
                 unsafe {
                     self.gc.mark_and_sweep(
                         self.stack
                             .iter()
                             .chain(self.loaded_modules.values().flat_map(|v| v.values())),
-                        &*self.call_stack,
+                        &self.call_stack,
                     );
                 }
             }

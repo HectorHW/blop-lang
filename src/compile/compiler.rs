@@ -1084,10 +1084,10 @@ impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
                         let mut blob = AnnotatedCodeBlob::new();
                         if self.needs_value() {
                             {
-                                blob += (Opcode::LoadNothing, *condition.indices.get(0).unwrap());
+                                blob += (Opcode::LoadNothing, *condition.indices.first().unwrap());
                             }
                         } else {
-                            blob += (Opcode::Nop, *condition.indices.get(0).unwrap());
+                            blob += (Opcode::Nop, *condition.indices.first().unwrap());
                         }
                         Ok(blob)
                     })?;

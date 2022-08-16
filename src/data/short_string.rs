@@ -36,8 +36,8 @@ impl<const N: usize> ShortString<N> {
 
         array[0] = size as u8;
 
-        (&mut array[1..(1 + first.len())]).clone_from_slice(first.as_bytes());
-        (&mut array[(1 + first.len())..(1 + first.len() + second.len())])
+        array[1..(1 + first.len())].clone_from_slice(first.as_bytes());
+        array[(1 + first.len())..(1 + first.len() + second.len())]
             .clone_from_slice(second.as_bytes());
 
         Some(res)
