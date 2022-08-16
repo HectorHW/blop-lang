@@ -1300,6 +1300,8 @@ impl<'gc, 'ast, 't, 'chunk> Compiler<'gc, 'ast, 't, 'chunk> {
 
                 result.push(Opcode::TestProperty(idx as u16), prop.position.0);
 
+                self.dec_stack_height(); //pointer is removed from stack
+
                 if !self.needs_value() {
                     result.push(Opcode::Pop(1), prop.position.0);
                 }
