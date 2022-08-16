@@ -196,7 +196,6 @@ impl<'gc, 'builtins> VM<'gc, 'builtins> {
                 //TODO include last stack frame?
             }
             if self.gc.needs_collection() {
-                println!("gc said it needs collection");
                 unsafe {
                     self.gc.mark_and_sweep(
                         self.stack
