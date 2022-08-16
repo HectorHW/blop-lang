@@ -239,6 +239,10 @@ pub fn builtin_factory() -> BuiltinMap {
         ))
     });
 
+    builtin!("str", Exact(1), |args, vm| {
+        Ok(vm.gc.new_string(&args[0].to_string()))
+    });
+
     builtin!("list", AtLeast(0), |mut args, _vm| {
         Ok(args.pop().unwrap())
     });
