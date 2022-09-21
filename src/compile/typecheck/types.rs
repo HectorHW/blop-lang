@@ -153,6 +153,14 @@ impl Callable {
             return_type: self.return_type.clone(),
         }
     }
+
+    pub fn get_arity(&self) -> Arity {
+        if self.vararg.is_some() {
+            Arity::AtLeast(self.arguments.len())
+        } else {
+            Arity::Exact(self.arguments.len())
+        }
+    }
 }
 
 impl Type {

@@ -2,7 +2,10 @@ use std::{collections::HashMap, fmt::Display};
 
 ///
 /// contract: all builtin functions may change vm state, but they should never touch VM's buitin_map as it may be aliased
-use crate::data::objects::{StackObject, VVec, Value};
+use crate::{
+    compile::typecheck::types::{Callable, Type},
+    data::objects::{StackObject, VVec, Value},
+};
 use indexmap::IndexMap;
 
 use super::{arity::Arity, vm::VM};
@@ -13,8 +16,8 @@ type BuiltinMethod = fn(Value, Vec<Value>, &mut VM) -> Result;
 
 #[derive(Default)]
 pub struct BuiltinMap {
-    functions: IndexMap<String, (Arity, BuiltinFuction)>,
-    methods: IndexMap<String, IndexMap<String, (Arity, BuiltinMethod)>>,
+    functions: IndexMap<String, (Callable, BuiltinFuction)>,
+    methods: IndexMap<String, IndexMap<String, (Callable, BuiltinMethod)>>,
     builtin_values: HashMap<String, Value>,
 }
 
@@ -53,27 +56,32 @@ impl BuiltinMap {
         Default::default()
     }
 
-    pub(self) fn add_builtin(&mut self, name: &'static str, arity: Arity, f: BuiltinFuction) {
-        self.functions.insert(name.to_owned(), (arity, f));
+    pub(self) fn add_builtin(
+        &mut self,
+        name: &'static str,
+        signature: Callable,
+        f: BuiltinFuction,
+    ) {
+        self.functions.insert(name.to_owned(), (signature, f));
     }
 
     pub(self) fn add_method(
         &mut self,
         classname: &str,
         method_name: &str,
-        arity: Arity,
+        signature: Callable,
         f: BuiltinMethod,
     ) {
         self.methods
             .entry(classname.to_string())
             .or_default()
-            .insert(method_name.to_string(), (arity, f));
+            .insert(method_name.to_string(), (signature, f));
     }
 
     pub fn apply_builtin(&self, idx: usize, args: VVec, vm: &mut VM) -> Result {
         match self.functions.get_index(idx) {
-            Some((_, (arity, builtin))) => {
-                check_arity(*arity, args.len())?;
+            Some((_, (signature, builtin))) => {
+                check_arity(signature.get_arity(), args.len())?;
                 builtin(args, vm)
             }
 
@@ -85,7 +93,7 @@ impl BuiltinMap {
         &self,
         class_idx: u32,
         method_idx: u32,
-    ) -> Option<(&'_ str, &'_ str, Arity, &'_ BuiltinMethod)> {
+    ) -> Option<(&'_ str, &'_ str, &'_ Callable, &'_ BuiltinMethod)> {
         self.methods
             .get_index(class_idx as usize)
             .and_then(|(class_name, method_map)| {
@@ -95,7 +103,7 @@ impl BuiltinMap {
                         (
                             class_name.as_str(),
                             method_name.as_str(),
-                            method.0,
+                            &method.0,
                             &method.1,
                         )
                     })
@@ -111,8 +119,8 @@ impl BuiltinMap {
         vm: &mut VM,
     ) -> Result {
         match self.get_method_full(class_idx, method_idx) {
-            Some((_, _, arity, method)) => {
-                check_arity(arity - 1, args.len())?;
+            Some((_, _, signature, method)) => {
+                check_arity(signature.get_arity() - 1, args.len())?;
                 method(self_ref, args, vm)
             }
 
@@ -154,12 +162,12 @@ impl BuiltinMap {
     }
 
     pub fn get_builtin_arity(&self, idx: usize) -> Option<Arity> {
-        self.functions.get_index(idx).map(|(_k, v)| v.0)
+        self.functions.get_index(idx).map(|(_k, v)| v.0.get_arity())
     }
 
     pub fn get_method_arity(&self, class_idx: u32, method_idx: u32) -> Option<Arity> {
         self.get_method_full(class_idx, method_idx)
-            .map(|(_, _, arity, _)| arity)
+            .map(|(_, _, arity, _)| arity.get_arity())
     }
 }
 
@@ -175,8 +183,6 @@ fn check_arity(arity: Arity, provided: usize) -> std::result::Result<(), Builtin
 }
 
 pub fn builtin_factory() -> BuiltinMap {
-    use Arity::*;
-
     let mut map: BuiltinMap = BuiltinMap::new();
 
     macro_rules! value {
@@ -186,50 +192,78 @@ pub fn builtin_factory() -> BuiltinMap {
     }
 
     macro_rules! builtin {
-        ($name:expr, $arity:expr, $function: expr) => {
+        ($name:tt : $arity:expr , $function: expr) => {
             map.add_builtin($name, $arity, $function)
         };
     }
 
     macro_rules! methods {
-        ($classname:expr, $($method_name:expr => $arity:expr => $function: expr);* $(;)? ) => {
+        ($classname:expr, $($method_name:tt : $arity:expr => $function: expr);* $(;)? ) => {
             {
                 $(
-                    map.add_method($classname, $method_name, $arity + 1, $function);
+                    map.add_method($classname, $method_name, $arity, $function);
                 )*
             }
         }
     }
 
+    macro_rules! t {
+        ($($args:expr),* => $ret:expr) => {
+            Callable {
+                arguments: vec![$($args, )*],
+                vararg: None,
+                return_type: Box::new($ret)
+            }
+        };
+        ($($args:expr),* , vararg $vararg:expr  => $ret:expr) => {
+            Callable {
+                arguments: vec![$($args, )*],
+                vararg: Some(Box::new(vararg)),
+                return_type: Box::new($ret)
+            }
+        };
+
+        ( vararg $vararg:expr  => $ret:expr) => {
+            Callable {
+                arguments: vec![],
+                vararg: Some(Box::new($vararg)),
+                return_type: Box::new($ret)
+            }
+        };
+    }
+
     value!("Nothing", Default::default());
 
-    builtin!("sum", AtLeast(0), |args, _vm| {
-        if let Some((idx, obj)) = args[0]
-            .unwrap_vector()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .find(|(_idx, v)| v.unwrap_int().is_none())
-        {
-            return Err(format!(
-                "expected all args of type int, got {} arg of {}",
-                idx,
-                obj.type_string()
-            )
-            .into());
-        }
-
-        Ok(Value::Int(
-            args[0]
+    builtin!(
+        "sum": t!(vararg Type::Unspecified => Type::Int),
+        |args, _vm| {
+            if let Some((idx, obj)) = args[0]
                 .unwrap_vector()
                 .unwrap()
                 .iter()
-                .map(|v| v.unwrap_int().unwrap())
-                .sum(),
-        ))
-    });
+                .enumerate()
+                .find(|(_idx, v)| v.unwrap_int().is_none())
+            {
+                return Err(format!(
+                    "expected all args of type int, got {} arg of {}",
+                    idx,
+                    obj.type_string()
+                )
+                .into());
+            }
 
-    builtin!("int", Exact(1), |args, _vm| {
+            Ok(Value::Int(
+                args[0]
+                    .unwrap_vector()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.unwrap_int().unwrap())
+                    .sum(),
+            ))
+        }
+    );
+
+    builtin!("int": t!(Type::Unspecified => Type::Int), |args, _vm| {
         if args[0].unwrap_any_str().is_none() {
             return Err("expected string-like in int".to_string().into());
         }
@@ -242,15 +276,16 @@ pub fn builtin_factory() -> BuiltinMap {
         ))
     });
 
-    builtin!("str", Exact(1), |args, vm| {
+    builtin!("str": t!(Type::Unspecified => Type::String), |args, vm| {
         Ok(vm.gc.new_string(&args[0].to_string()))
     });
 
-    builtin!("list", AtLeast(0), |mut args, _vm| {
-        Ok(args.pop().unwrap())
-    });
+    builtin!(
+        "list": t!(vararg Type::Unspecified => Type::Unspecified),
+        |mut args, _vm| { Ok(args.pop().unwrap()) }
+    );
 
-    builtin!("arity", Exact(1), |args, vm| {
+    builtin!("arity": t!(Type::Unspecified => Type::Int), |args, vm| {
         args[0]
             .get_arity(vm)
             .map(|arity| StackObject::Int(usize::from(arity) as i64))
@@ -260,57 +295,72 @@ pub fn builtin_factory() -> BuiltinMap {
     });
 
     #[cfg(test)]
-    builtin!("set_stack_limit", Exact(1), |args, vm| {
-        vm.override_stack_limit(args[0].unwrap_int().unwrap() as usize);
-        Ok(Default::default())
-    });
-
-    builtin!("is_vararg", Exact(1), |args, vm| {
-        let v = args
-            .get(0)
-            .unwrap()
-            .get_arity(vm)
-            .unwrap_or(Arity::Exact(0))
-            .is_vararg();
-
-        Ok(v.into())
-    });
-
-    builtin!("print", AtLeast(0), |args, vm| {
-        let values: &mut VVec = args[0].unwrap_vector().unwrap();
-
-        let s = values
-            .iter()
-            .map(|value| crate::data::objects::pretty_format(value, vm))
-            .collect::<Vec<String>>()
-            .join(" ");
-
-        println!("{}", s);
-
-        Ok(Default::default())
-    });
-
-    builtin!("panic", Exact(1), |mut args, _vm| {
-        Err(BuiltinError::Panic {
-            attachment: args.remove(0),
-        })
-    });
-
-    builtin!("ptr_eq", Exact(2), |mut args, _vm| {
-        let arg2 = args.pop().unwrap();
-        let arg1 = args.pop().unwrap();
-        match (arg1.as_heap_object(), arg2.as_heap_object()) {
-            (Some(p1), Some(p2)) => Ok(std::ptr::eq(p1, p2).into()),
-
-            _ => Ok(false.into()),
+    builtin!(
+        "set_stack_limit": t!(Type::Int => Type::Nothing),
+        |args, vm| {
+            vm.override_stack_limit(args[0].unwrap_int().unwrap() as usize);
+            Ok(Default::default())
         }
-    });
+    );
+
+    builtin!(
+        "is_vararg": t!(Type::Unspecified => Type::Bool),
+        |args, vm| {
+            let v = args
+                .get(0)
+                .unwrap()
+                .get_arity(vm)
+                .unwrap_or(Arity::Exact(0))
+                .is_vararg();
+
+            Ok(v.into())
+        }
+    );
+
+    builtin!(
+        "print": t!(vararg Type::Unspecified => Type::Nothing),
+        |args, vm| {
+            let values: &mut VVec = args[0].unwrap_vector().unwrap();
+
+            let s = values
+                .iter()
+                .map(|value| crate::data::objects::pretty_format(value, vm))
+                .collect::<Vec<String>>()
+                .join(" ");
+
+            println!("{}", s);
+
+            Ok(Default::default())
+        }
+    );
+
+    builtin!(
+        "panic": t!(Type::Unspecified => Type::Nothing),
+        |mut args, _vm| {
+            Err(BuiltinError::Panic {
+                attachment: args.remove(0),
+            })
+        }
+    );
+
+    builtin!(
+        "ptr_eq": t!(Type::Unspecified, Type::Unspecified => Type::Bool),
+        |mut args, _vm| {
+            let arg2 = args.pop().unwrap();
+            let arg1 = args.pop().unwrap();
+            match (arg1.as_heap_object(), arg2.as_heap_object()) {
+                (Some(p1), Some(p2)) => Ok(std::ptr::eq(p1, p2).into()),
+
+                _ => Ok(false.into()),
+            }
+        }
+    );
 
     methods!("Int",
-        "abs" => Exact(0) => |obj, _args, _context| {
+        "abs" : t!(Type::Int => Type::Int) => |obj, _args, _context| {
             Ok(Value::Int(obj.unwrap_int().unwrap().abs()))
         };
-        "_mod" => Exact(1) => |obj, args, _context| {
+        "_mod" : t!(Type::Int, Type::Int => Type::Int) => |obj, args, _context| {
             match args[0] {
                 Value::Int(b) => {
                     Ok(Value::Int(obj.unwrap_int().unwrap() % b ))
