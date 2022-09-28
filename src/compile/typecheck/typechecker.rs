@@ -781,12 +781,13 @@ impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
             provided: &[Type],
             expected: &[Type],
             return_t: Type,
-        ) -> Result<Type, SomewhereTypeError> {
+        ) -> Result<Type, (SomewhereTypeError, usize)> {
             provided
                 .iter()
                 .zip(expected.iter())
-                .try_for_each(|(expected, provided)| {
-                    Checker::check_expectation(provided, expected)
+                .enumerate()
+                .try_for_each(|(idx, (provided, expected))| {
+                    Checker::check_expectation(provided, expected).map_err(|err| (err, idx))
                 })?;
             Ok(return_t)
         }
@@ -846,7 +847,7 @@ impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
             }
         }
 
-        let args = args
+        let args_t = args
             .iter()
             .map(|arg| self.visit_expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
@@ -861,18 +862,18 @@ impl<'ast> Visitor<'ast, Type, TypeError> for Checker<'ast> {
 
             _ => match &target_t {
                 Type::StructDescriptor(_) | Type::Callable(_) => {
-                    let (signature, ret) = into_call_signature(&target_t, args.len())
+                    let (signature, ret) = into_call_signature(&target_t, args_t.len())
                         .map_err(|e| e.at(target.get_pos()))?;
-                    Ok(try_match_for_signature(&args, &signature, ret)
-                        .map_err(|e| e.at(target.get_pos()))?)
+                    Ok(try_match_for_signature(&args_t, &signature, ret)
+                        .map_err(|(e, idx)| e.at(args[idx].get_pos()))?)
                 }
 
-                Type::Union(u) => Ok(u
-                    .project(|t| {
-                        let (expectation, ret) = into_call_signature(&t, args.len())?;
-                        try_match_for_signature(&args, &expectation, ret)
-                    })
-                    .map_err(|e| e.at(target.get_pos()))?),
+                Type::Union(u) => Ok(u.project(|t| {
+                    let (expectation, ret) = into_call_signature(&t, args_t.len())
+                        .map_err(|e| e.at(target.get_pos()))?;
+                    try_match_for_signature(&args_t, &expectation, ret)
+                        .map_err(|(e, idx)| e.at(args[idx].get_pos()))
+                })?),
 
                 _ => unreachable!(),
             },
